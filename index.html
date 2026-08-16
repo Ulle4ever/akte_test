@@ -127,7 +127,6 @@ const STATUS_STYLES = {
     verletzt: { dot: "bg-red-500", badge: "bg-red-50 text-red-700 border-red-200" },
     reha: { dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700 border-amber-200" },
 };
-const TEST_PRESETS = ["Sprint 20m", "Vertikalsprung (CMJ)", "Lane Agility", "Beep-Test", "Bankdrücken 1RM", "Sonstiges"];
 const VIDEO_TYPES = ["Spielszene", "Trainingsdrill", "Analyse"];
 const NOTE_CATEGORIES = [
     { value: "technisch", label: "Technisch" },
@@ -141,17 +140,43 @@ const CATEGORY_STYLES = {
     athletisch: "bg-orange-50 text-orange-700 border-orange-200",
     mental: "bg-pink-50 text-pink-700 border-pink-200",
 };
-const DEFAULT_STAT_FIELDS = [
-    { id: "assists", label: "Assists" },
-    { id: "steals", label: "Steals" },
-    { id: "blocks", label: "Blocks" },
-    { id: "turnovers", label: "Turnovers" },
-    { id: "fouls", label: "Fouls" },
-    { id: "deflections", label: "Deflections" },
-    { id: "charges", label: "Charges" },
-    { id: "looseBalls", label: "Loose Balls" },
-    { id: "contestedShots", label: "Kontestierte Würfe" },
-    { id: "screenAssists", label: "Screen Assists" },
+const DEFAULT_STAT_CATEGORIES = [
+    {
+        id: "normal", label: "Normale Statistiken",
+        fields: [
+            { id: "punkte", label: "Punkte", kind: "number" },
+            { id: "rebounds", label: "Rebounds", kind: "number" },
+            { id: "assists", label: "Assists", kind: "number" },
+            { id: "blocks", label: "Blocks", kind: "number" },
+            { id: "steals", label: "Steals", kind: "number" },
+            { id: "turnovers", label: "Turnovers", kind: "number" },
+        ],
+    },
+    {
+        id: "shooting", label: "Wurfquoten",
+        fields: [
+            { id: "fg", label: "Feldwürfe", kind: "shooting" },
+            { id: "tp", label: "Dreier", kind: "shooting" },
+            { id: "ft", label: "Freiwürfe", kind: "shooting" },
+        ],
+    },
+    {
+        id: "hustle", label: "Hustle-Stats",
+        fields: [
+            { id: "deflections", label: "Deflections", kind: "number" },
+            { id: "charges", label: "Charges", kind: "number" },
+            { id: "looseBalls", label: "Loose Balls", kind: "number" },
+            { id: "contestedShots", label: "Kontestierte Würfe", kind: "number" },
+            { id: "screenAssists", label: "Screen Assists", kind: "number" },
+        ],
+    },
+];
+const DEFAULT_TEST_TYPES = [
+    { id: "sprint20", label: "Sprint 20m" },
+    { id: "cmj", label: "Vertikalsprung (CMJ)" },
+    { id: "laneAgility", label: "Lane Agility" },
+    { id: "beepTest", label: "Beep-Test" },
+    { id: "bench1rm", label: "Bankdrücken 1RM" },
 ];
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const today = () => new Date().toISOString().slice(0, 10);
@@ -281,7 +306,7 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
 function SectionLabel({ children }) {
     return React.createElement("p", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider pt-1" }, children);
 }
-function StatFieldsManager({ fields, onAdd, onRename, onDelete, onMove, onClose }) {
+function SimpleListManager({ title, description, items, onAdd, onRename, onDelete, onMove, onClose, addPlaceholder }) {
     const [newLabel, setNewLabel] = useState("");
     const [editingId, setEditingId] = useState(null);
     const [editValue, setEditValue] = useState("");
@@ -302,14 +327,14 @@ function StatFieldsManager({ fields, onAdd, onRename, onDelete, onMove, onClose 
         setEditingId(null);
     }
     return (React.createElement("div", { className: "space-y-4" },
-        React.createElement("p", { className: "text-xs text-slate-500" }, "Diese Felder erscheinen zus\u00E4tzlich zu den festen Basketball-Grunddaten (Punkte, Feldw\u00FCrfe, Dreier, Freiw\u00FCrfe, Rebounds) im Statistik-Formular und in der Tabelle. \u00C4ndern wirkt sich nur auf Anzeige/neue Eintr\u00E4ge aus, alte Daten bleiben erhalten."),
+        description && React.createElement("p", { className: "text-xs text-slate-500" }, description),
         React.createElement("div", { className: "space-y-1.5" },
-            fields.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Keine zus\u00E4tzlichen Felder."),
-            fields.map((f, i) => (React.createElement("div", { key: f.id, className: "flex items-center gap-2 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2" },
+            items.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Eintr\u00E4ge."),
+            items.map((f, i) => (React.createElement("div", { key: f.id, className: "flex items-center gap-2 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2" },
                 React.createElement("div", { className: "flex flex-col -my-1 shrink-0" },
                     React.createElement("button", { onClick: () => onMove(f.id, -1), disabled: i === 0, className: "text-slate-400 hover:text-slate-700 disabled:opacity-20", "aria-label": "Nach oben" },
                         React.createElement(IconArrowUp, { size: 13 })),
-                    React.createElement("button", { onClick: () => onMove(f.id, 1), disabled: i === fields.length - 1, className: "text-slate-400 hover:text-slate-700 disabled:opacity-20", "aria-label": "Nach unten" },
+                    React.createElement("button", { onClick: () => onMove(f.id, 1), disabled: i === items.length - 1, className: "text-slate-400 hover:text-slate-700 disabled:opacity-20", "aria-label": "Nach unten" },
                         React.createElement(IconArrowDown, { size: 13 }))),
                 editingId === f.id ? (React.createElement("input", { className: "flex-1 rounded border border-orange-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500", value: editValue, onChange: (e) => setEditValue(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
                         saveEdit(f.id); if (e.key === "Escape")
@@ -319,18 +344,106 @@ function StatFieldsManager({ fields, onAdd, onRename, onDelete, onMove, onClose 
                 React.createElement("button", { onClick: () => onDelete(f.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "L\u00F6schen" },
                     React.createElement(IconTrash, { size: 14 })))))),
         React.createElement("form", { onSubmit: submitNew, className: "flex gap-2 pt-2 border-t border-stone-200" },
-            React.createElement("input", { className: inputClass, placeholder: "Neues Feld, z. B. Technische Fouls", value: newLabel, onChange: (e) => setNewLabel(e.target.value) }),
+            React.createElement("input", { className: inputClass, placeholder: addPlaceholder || "Neuer Eintrag", value: newLabel, onChange: (e) => setNewLabel(e.target.value) }),
             React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 text-white rounded-lg px-4 text-sm font-semibold hover:bg-slate-800" }, "Hinzuf\u00FCgen")),
+        onClose && React.createElement("button", { onClick: onClose, className: "w-full bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Fertig")));
+}
+function CategoryBlock({ category, catIndex, catCount, onRenameCat, onDeleteCat, onMoveCat, onAddField, onRenameField, onDeleteField, onMoveField }) {
+    const [editingCat, setEditingCat] = useState(false);
+    const [catValue, setCatValue] = useState(category.label);
+    const [newFieldLabel, setNewFieldLabel] = useState("");
+    const [newFieldKind, setNewFieldKind] = useState(category.id === "shooting" ? "shooting" : "number");
+    const [editingFieldId, setEditingFieldId] = useState(null);
+    const [editFieldValue, setEditFieldValue] = useState("");
+    function saveCat() {
+        if (catValue.trim())
+            onRenameCat(category.id, catValue.trim());
+        setEditingCat(false);
+    }
+    function submitField(e) {
+        e.preventDefault();
+        if (!newFieldLabel.trim())
+            return;
+        onAddField(category.id, newFieldLabel.trim(), newFieldKind);
+        setNewFieldLabel("");
+    }
+    function startEditField(f) {
+        setEditingFieldId(f.id);
+        setEditFieldValue(f.label);
+    }
+    function saveEditField(id) {
+        if (editFieldValue.trim())
+            onRenameField(category.id, id, editFieldValue.trim());
+        setEditingFieldId(null);
+    }
+    return (React.createElement("div", { className: "border border-stone-200 rounded-lg overflow-hidden" },
+        React.createElement("div", { className: "flex items-center gap-2 bg-stone-100 px-3 py-2" },
+            React.createElement("div", { className: "flex flex-col -my-1 shrink-0" },
+                React.createElement("button", { onClick: () => onMoveCat(category.id, -1), disabled: catIndex === 0, className: "text-slate-400 hover:text-slate-700 disabled:opacity-20", "aria-label": "Kategorie nach oben" },
+                    React.createElement(IconArrowUp, { size: 12 })),
+                React.createElement("button", { onClick: () => onMoveCat(category.id, 1), disabled: catIndex === catCount - 1, className: "text-slate-400 hover:text-slate-700 disabled:opacity-20", "aria-label": "Kategorie nach unten" },
+                    React.createElement(IconArrowDown, { size: 12 }))),
+            editingCat ? (React.createElement("input", { className: "flex-1 rounded border border-orange-300 px-2 py-1 text-sm font-bold focus:outline-none focus:ring-1 focus:ring-orange-500", value: catValue, onChange: (e) => setCatValue(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
+                    saveCat(); if (e.key === "Escape")
+                    setEditingCat(false); }, autoFocus: true, onBlur: saveCat })) : (React.createElement("button", { className: "flex-1 text-left text-sm font-bold text-slate-800 hover:text-orange-600", onClick: () => setEditingCat(true) }, category.label)),
+            React.createElement("button", { onClick: () => setEditingCat(true), className: "text-slate-400 hover:text-slate-700 shrink-0", "aria-label": "Kategorie umbenennen" },
+                React.createElement(IconEdit, { size: 14 })),
+            React.createElement("button", { onClick: () => onDeleteCat(category.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Kategorie l\u00F6schen" },
+                React.createElement(IconTrash, { size: 14 }))),
+        React.createElement("div", { className: "p-3 space-y-1.5" },
+            category.fields.length === 0 && React.createElement("p", { className: "text-xs text-slate-400 text-center py-2" }, "Keine Felder in dieser Kategorie."),
+            category.fields.map((f, i) => (React.createElement("div", { key: f.id, className: "flex items-center gap-2 bg-white border border-stone-200 rounded-lg px-2.5 py-1.5" },
+                React.createElement("div", { className: "flex flex-col -my-1 shrink-0" },
+                    React.createElement("button", { onClick: () => onMoveField(category.id, f.id, -1), disabled: i === 0, className: "text-slate-300 hover:text-slate-700 disabled:opacity-20", "aria-label": "Feld nach oben" },
+                        React.createElement(IconArrowUp, { size: 11 })),
+                    React.createElement("button", { onClick: () => onMoveField(category.id, f.id, 1), disabled: i === category.fields.length - 1, className: "text-slate-300 hover:text-slate-700 disabled:opacity-20", "aria-label": "Feld nach unten" },
+                        React.createElement(IconArrowDown, { size: 11 }))),
+                editingFieldId === f.id ? (React.createElement("input", { className: "flex-1 rounded border border-orange-300 px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-orange-500", value: editFieldValue, onChange: (e) => setEditFieldValue(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
+                        saveEditField(f.id); if (e.key === "Escape")
+                        setEditingFieldId(null); }, autoFocus: true, onBlur: () => saveEditField(f.id) })) : (React.createElement("button", { className: "flex-1 text-left text-xs text-slate-700 hover:text-orange-600", onClick: () => startEditField(f) }, f.label)),
+                React.createElement("span", { className: "text-[10px] text-slate-400 shrink-0" }, f.kind === "shooting" ? "Treffer/Versuche" : "Zahl"),
+                React.createElement("button", { onClick: () => startEditField(f), className: "text-slate-400 hover:text-slate-700 shrink-0", "aria-label": "Feld umbenennen" },
+                    React.createElement(IconEdit, { size: 12 })),
+                React.createElement("button", { onClick: () => onDeleteField(category.id, f.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Feld l\u00F6schen" },
+                    React.createElement(IconTrash, { size: 12 }))))),
+            React.createElement("form", { onSubmit: submitField, className: "flex gap-1.5 pt-1.5" },
+                React.createElement("input", { className: inputClass + " text-xs py-1.5", placeholder: "Neues Feld", value: newFieldLabel, onChange: (e) => setNewFieldLabel(e.target.value) }),
+                React.createElement("select", { className: inputClass + " text-xs py-1.5 w-auto shrink-0", value: newFieldKind, onChange: (e) => setNewFieldKind(e.target.value) },
+                    React.createElement("option", { value: "number" }, "Zahl"),
+                    React.createElement("option", { value: "shooting" }, "Treffer/Versuche")),
+                React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 text-white rounded-lg px-3 text-xs font-semibold hover:bg-slate-800" }, "+")))));
+}
+function StatCategoriesManager({ categories, onAddCat, onRenameCat, onDeleteCat, onMoveCat, onAddField, onRenameField, onDeleteField, onMoveField, onClose }) {
+    const [newCatLabel, setNewCatLabel] = useState("");
+    function submitCat(e) {
+        e.preventDefault();
+        if (!newCatLabel.trim())
+            return;
+        onAddCat(newCatLabel.trim());
+        setNewCatLabel("");
+    }
+    return (React.createElement("div", { className: "space-y-4" },
+        React.createElement("p", { className: "text-xs text-slate-500" }, "Komplett frei einstellbar: Kategorien und Felder hinzuf\u00FCgen, umbenennen, l\u00F6schen, umsortieren. \"Treffer/Versuche\" rechnet automatisch eine Quote aus, \"Zahl\" ist ein einfaches Eingabefeld. \u00C4nderungen wirken nur auf Anzeige/neue Eintr\u00E4ge, bestehende Daten bleiben erhalten."),
+        React.createElement("div", { className: "space-y-3" }, categories.map((cat, i) => (React.createElement(CategoryBlock, { key: cat.id, category: cat, catIndex: i, catCount: categories.length, onRenameCat: onRenameCat, onDeleteCat: onDeleteCat, onMoveCat: onMoveCat, onAddField: onAddField, onRenameField: onRenameField, onDeleteField: onDeleteField, onMoveField: onMoveField })))),
+        React.createElement("form", { onSubmit: submitCat, className: "flex gap-2 pt-2 border-t border-stone-200" },
+            React.createElement("input", { className: inputClass, placeholder: "Neue Kategorie, z. B. Verteidigung", value: newCatLabel, onChange: (e) => setNewCatLabel(e.target.value) }),
+            React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 text-white rounded-lg px-4 text-sm font-semibold hover:bg-slate-800" }, "Kategorie")),
         React.createElement("button", { onClick: onClose, className: "w-full bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Fertig")));
 }
-function StatForm({ onSubmit, onClose, statFields }) {
+function StatForm({ onSubmit, onClose, statCategories }) {
     const [form, setForm] = useState(() => {
-        const base = {
-            date: today(), gegner: "", minuten: "", punkte: "",
-            fgm: "", fga: "", tpm: "", tpa: "", ftm: "", fta: "",
-            rebOff: "", rebDef: "",
-        };
-        statFields.forEach((f) => { base[f.id] = ""; });
+        const base = { date: today(), gegner: "", minuten: "" };
+        statCategories.forEach((cat) => {
+            cat.fields.forEach((f) => {
+                if (f.kind === "shooting") {
+                    base[`${f.id}_m`] = "";
+                    base[`${f.id}_a`] = "";
+                }
+                else {
+                    base[f.id] = "";
+                }
+            });
+        });
         return base;
     });
     const [error, setError] = useState("");
@@ -342,17 +455,18 @@ function StatForm({ onSubmit, onClose, statFields }) {
             setError("Bitte ein Datum angeben.");
             return;
         }
-        const entry = {
-            date: form.date,
-            gegner: form.gegner.trim(),
-            minuten: n("minuten"),
-            punkte: n("punkte"),
-            fgm: n("fgm"), fga: n("fga"),
-            tpm: n("tpm"), tpa: n("tpa"),
-            ftm: n("ftm"), fta: n("fta"),
-            rebOff: n("rebOff"), rebDef: n("rebDef"),
-        };
-        statFields.forEach((f) => { entry[f.id] = n(f.id); });
+        const entry = { date: form.date, gegner: form.gegner.trim(), minuten: n("minuten") };
+        statCategories.forEach((cat) => {
+            cat.fields.forEach((f) => {
+                if (f.kind === "shooting") {
+                    entry[`${f.id}_m`] = n(`${f.id}_m`);
+                    entry[`${f.id}_a`] = n(`${f.id}_a`);
+                }
+                else {
+                    entry[f.id] = n(f.id);
+                }
+            });
+        });
         onSubmit(entry);
         onClose();
     }
@@ -364,50 +478,29 @@ function StatForm({ onSubmit, onClose, statFields }) {
                 React.createElement("input", { className: inputClass, value: form.gegner, onChange: set("gegner"), placeholder: "z. B. TSV Nord" })),
             React.createElement(Field, { label: "Minuten" },
                 React.createElement("input", { type: "number", className: inputClass, value: form.minuten, onChange: set("minuten") }))),
-        React.createElement(SectionLabel, null, "Wurfstatistiken"),
-        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
-            React.createElement(Field, { label: "Punkte" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.punkte, onChange: set("punkte") })),
-            React.createElement(Field, { label: "Reb. Offensiv" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.rebOff, onChange: set("rebOff") })),
-            React.createElement(Field, { label: "Reb. Defensiv" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.rebDef, onChange: set("rebDef") }))),
-        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
-            React.createElement(Field, { label: "Feldw\u00FCrfe Treffer" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.fgm, onChange: set("fgm") })),
-            React.createElement(Field, { label: "Feldw\u00FCrfe Versuche" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.fga, onChange: set("fga") })),
-            React.createElement("div", { className: "flex items-end pb-2 text-xs text-slate-400" }, pct(form.fgm, form.fga) !== null ? `${pct(form.fgm, form.fga)}%` : "")),
-        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
-            React.createElement(Field, { label: "Dreier Treffer" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.tpm, onChange: set("tpm") })),
-            React.createElement(Field, { label: "Dreier Versuche" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.tpa, onChange: set("tpa") })),
-            React.createElement("div", { className: "flex items-end pb-2 text-xs text-slate-400" }, pct(form.tpm, form.tpa) !== null ? `${pct(form.tpm, form.tpa)}%` : "")),
-        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
-            React.createElement(Field, { label: "Freiw\u00FCrfe Treffer" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.ftm, onChange: set("ftm") })),
-            React.createElement(Field, { label: "Freiw\u00FCrfe Versuche" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.fta, onChange: set("fta") })),
-            React.createElement("div", { className: "flex items-end pb-2 text-xs text-slate-400" }, pct(form.ftm, form.fta) !== null ? `${pct(form.ftm, form.fta)}%` : "")),
-        statFields.length > 0 && (React.createElement(React.Fragment, null,
-            React.createElement(SectionLabel, null, "Weitere Statistiken (selbst verwaltet)"),
-            React.createElement("div", { className: "grid grid-cols-3 gap-3" }, statFields.map((f) => (React.createElement(Field, { key: f.id, label: f.label },
-                React.createElement("input", { type: "number", className: inputClass, value: form[f.id] ?? "", onChange: set(f.id) }))))))),
+        statCategories.map((cat) => (cat.fields.length > 0 && (React.createElement("div", { key: cat.id },
+            React.createElement(SectionLabel, null, cat.label),
+            React.createElement("div", { className: "space-y-2 mt-1" },
+                cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement("div", { key: f.id, className: "grid grid-cols-3 gap-3" },
+                    React.createElement(Field, { label: `${f.label} Treffer` },
+                        React.createElement("input", { type: "number", className: inputClass, value: form[`${f.id}_m`], onChange: set(`${f.id}_m`) })),
+                    React.createElement(Field, { label: `${f.label} Versuche` },
+                        React.createElement("input", { type: "number", className: inputClass, value: form[`${f.id}_a`], onChange: set(`${f.id}_a`) })),
+                    React.createElement("div", { className: "flex items-end pb-2 text-xs text-slate-400" }, pct(form[`${f.id}_m`], form[`${f.id}_a`]) !== null ? `${pct(form[`${f.id}_m`], form[`${f.id}_a`])}%` : ""))) : null)),
+                React.createElement("div", { className: "grid grid-cols-3 gap-3" }, cat.fields.filter((f) => f.kind !== "shooting").map((f) => (React.createElement(Field, { key: f.id, label: f.label },
+                    React.createElement("input", { type: "number", className: inputClass, value: form[f.id] ?? "", onChange: set(f.id) })))))))))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Eintrag speichern")));
 }
-function TestForm({ onSubmit, onClose }) {
-    const [testType, setTestType] = useState(TEST_PRESETS[0]);
-    const [customType, setCustomType] = useState("");
+function TestForm({ onSubmit, onClose, testTypes }) {
+    const [testType, setTestType] = useState(testTypes[0]?.label || "");
     const [date, setDate] = useState(today());
     const [result, setResult] = useState("");
     const [unit, setUnit] = useState("");
     const [error, setError] = useState("");
     function handleSubmit(e) {
         e.preventDefault();
-        const finalType = testType === "Sonstiges" ? customType.trim() : testType;
-        if (!finalType) {
+        if (!testType.trim()) {
             setError("Bitte eine Testart angeben.");
             return;
         }
@@ -415,14 +508,11 @@ function TestForm({ onSubmit, onClose }) {
             setError("Bitte ein Ergebnis eingeben.");
             return;
         }
-        onSubmit({ date, testType: finalType, result: Number(result), unit: unit.trim() });
+        onSubmit({ date, testType: testType.trim(), result: Number(result), unit: unit.trim() });
         onClose();
     }
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
-        React.createElement(Field, { label: "Testart" },
-            React.createElement("select", { className: inputClass, value: testType, onChange: (e) => setTestType(e.target.value) }, TEST_PRESETS.map((t) => React.createElement("option", { key: t, value: t }, t)))),
-        testType === "Sonstiges" && (React.createElement(Field, { label: "Eigene Testart" },
-            React.createElement("input", { className: inputClass, value: customType, onChange: (e) => setCustomType(e.target.value), placeholder: "z. B. T-Test" }))),
+        React.createElement(Field, { label: "Testart" }, testTypes.length > 0 ? (React.createElement("select", { className: inputClass, value: testType, onChange: (e) => setTestType(e.target.value) }, testTypes.map((t) => React.createElement("option", { key: t.id, value: t.label }, t.label)))) : (React.createElement("input", { className: inputClass, value: testType, onChange: (e) => setTestType(e.target.value), placeholder: "z. B. Sprint 20m" }))),
         React.createElement("div", { className: "grid grid-cols-3 gap-3" },
             React.createElement(Field, { label: "Datum" },
                 React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
@@ -536,7 +626,7 @@ function SpielerAkte() {
                 await auth.signInAnonymously();
                 const docRef = db.collection("club").doc("data");
                 const snap = await docRef.get();
-                const defaults = { accessCode: null, teams: [], players: [], stats: [], tests: [], videos: [], notes: [], statFields: DEFAULT_STAT_FIELDS };
+                const defaults = { accessCode: null, teams: [], players: [], stats: [], tests: [], videos: [], notes: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES };
                 if (snap.exists) {
                     if (!cancelled)
                         setData({ ...defaults, ...snap.data() });
@@ -640,9 +730,6 @@ function SpielerAkte() {
     const playerVideos = selectedPlayer ? sortByDateDesc(data.videos.filter((v) => v.playerId === selectedPlayer.id)) : [];
     const playerNotes = selectedPlayer ? sortByDateDesc(data.notes.filter((n) => n.playerId === selectedPlayer.id)) : [];
     const avg = (key) => (playerStats.length ? (playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length).toFixed(1) : "–");
-    const avgReb = playerStats.length
-        ? (playerStats.reduce((sum, s) => sum + ((Number(s.rebOff) || 0) + (Number(s.rebDef) || 0) || Number(s.rebounds) || 0), 0) / playerStats.length).toFixed(1)
-        : "–";
     const totalPct = (madeKey, attKey) => {
         const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
         const att = playerStats.reduce((sum, s) => sum + (Number(s[attKey]) || 0), 0);
@@ -693,26 +780,77 @@ function SpielerAkte() {
     function deleteItem(collection, id) {
         persist({ ...data, [collection]: data[collection].filter((item) => item.id !== id) });
     }
-    function addStatField(label) {
-        const fields = data.statFields || DEFAULT_STAT_FIELDS;
-        persist({ ...data, statFields: [...fields, { id: uid(), label }] });
+    const statCategories = data.statCategories || DEFAULT_STAT_CATEGORIES;
+    function addStatCategory(label) {
+        persist({ ...data, statCategories: [...statCategories, { id: uid(), label, fields: [] }] });
     }
-    function renameStatField(id, label) {
-        const fields = data.statFields || DEFAULT_STAT_FIELDS;
-        persist({ ...data, statFields: fields.map((f) => (f.id === id ? { ...f, label } : f)) });
+    function renameStatCategory(catId, label) {
+        persist({ ...data, statCategories: statCategories.map((c) => (c.id === catId ? { ...c, label } : c)) });
     }
-    function deleteStatField(id) {
-        const fields = data.statFields || DEFAULT_STAT_FIELDS;
-        persist({ ...data, statFields: fields.filter((f) => f.id !== id) });
+    function deleteStatCategory(catId) {
+        persist({ ...data, statCategories: statCategories.filter((c) => c.id !== catId) });
     }
-    function moveStatField(id, dir) {
-        const fields = [...(data.statFields || DEFAULT_STAT_FIELDS)];
-        const i = fields.findIndex((f) => f.id === id);
+    function moveStatCategory(catId, dir) {
+        const cats = [...statCategories];
+        const i = cats.findIndex((c) => c.id === catId);
         const j = i + dir;
-        if (i < 0 || j < 0 || j >= fields.length)
+        if (i < 0 || j < 0 || j >= cats.length)
             return;
-        [fields[i], fields[j]] = [fields[j], fields[i]];
-        persist({ ...data, statFields: fields });
+        [cats[i], cats[j]] = [cats[j], cats[i]];
+        persist({ ...data, statCategories: cats });
+    }
+    function addStatFieldToCategory(catId, label, kind) {
+        persist({
+            ...data,
+            statCategories: statCategories.map((c) => (c.id === catId ? { ...c, fields: [...c.fields, { id: uid(), label, kind }] } : c)),
+        });
+    }
+    function renameStatFieldInCategory(catId, fieldId, label) {
+        persist({
+            ...data,
+            statCategories: statCategories.map((c) => c.id === catId ? { ...c, fields: c.fields.map((f) => (f.id === fieldId ? { ...f, label } : f)) } : c),
+        });
+    }
+    function deleteStatFieldFromCategory(catId, fieldId) {
+        persist({
+            ...data,
+            statCategories: statCategories.map((c) => (c.id === catId ? { ...c, fields: c.fields.filter((f) => f.id !== fieldId) } : c)),
+        });
+    }
+    function moveStatFieldInCategory(catId, fieldId, dir) {
+        persist({
+            ...data,
+            statCategories: statCategories.map((c) => {
+                if (c.id !== catId)
+                    return c;
+                const fields = [...c.fields];
+                const i = fields.findIndex((f) => f.id === fieldId);
+                const j = i + dir;
+                if (i < 0 || j < 0 || j >= fields.length)
+                    return c;
+                [fields[i], fields[j]] = [fields[j], fields[i]];
+                return { ...c, fields };
+            }),
+        });
+    }
+    const testTypes = data.testTypes || DEFAULT_TEST_TYPES;
+    function addTestType(label) {
+        persist({ ...data, testTypes: [...testTypes, { id: uid(), label }] });
+    }
+    function renameTestType(id, label) {
+        persist({ ...data, testTypes: testTypes.map((t) => (t.id === id ? { ...t, label } : t)) });
+    }
+    function deleteTestType(id) {
+        persist({ ...data, testTypes: testTypes.filter((t) => t.id !== id) });
+    }
+    function moveTestType(id, dir) {
+        const types = [...testTypes];
+        const i = types.findIndex((t) => t.id === id);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= types.length)
+            return;
+        [types[i], types[j]] = [types[j], types[i]];
+        persist({ ...data, testTypes: types });
     }
     return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex flex-col" },
         React.createElement("header", { className: "bg-slate-900 text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3" },
@@ -727,7 +865,10 @@ function SpielerAkte() {
                     " Speichern fehlgeschlagen")),
                 React.createElement("button", { onClick: () => setModal("statFields"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
                     React.createElement(IconSettings, { size: 12 }),
-                    " Statistik-Felder"),
+                    " Statistiken"),
+                React.createElement("button", { onClick: () => setModal("testTypes"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
+                    React.createElement(IconSettings, { size: 12 }),
+                    " Test-Arten"),
                 React.createElement("button", { onClick: () => setModal("changeCode"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
                     React.createElement(IconLock, { size: 12 }),
                     " Code \u00E4ndern"))),
@@ -794,26 +935,14 @@ function SpielerAkte() {
                     })),
                     React.createElement("div", { className: "mt-5" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
-                            React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-4" }, [
-                                ["Spiele erfasst", playerStats.length],
-                                ["Ø Punkte", avg("punkte")],
-                                ["Ø Rebounds", avgReb],
-                                ["Ø Assists", avg("assists")],
-                            ].map(([label, value]) => (React.createElement("div", { key: label, className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm" },
-                                React.createElement("p", { className: "text-2xl font-black text-orange-600" }, value),
-                                React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, label))))),
-                            React.createElement("div", { className: "grid grid-cols-3 gap-4" }, [
-                                ["FG%", totalPct("fgm", "fga")],
-                                ["3P%", totalPct("tpm", "tpa")],
-                                ["FT%", totalPct("ftm", "fta")],
-                            ].map(([label, value]) => (React.createElement("div", { key: label, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
-                                React.createElement("p", { className: "text-lg font-bold text-slate-700" }, value),
-                                React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, label))))),
-                            (data.statFields || DEFAULT_STAT_FIELDS).length > 0 && (React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3" }, (data.statFields || DEFAULT_STAT_FIELDS).map((f) => (React.createElement("div", { key: f.id, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
-                                React.createElement("p", { className: "text-base font-bold text-slate-700" }, avg(f.id)),
-                                React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5 truncate", title: f.label },
-                                    "\u00D8 ",
-                                    f.label)))))),
+                            React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm w-full md:w-48" },
+                                React.createElement("p", { className: "text-2xl font-black text-orange-600" }, playerStats.length),
+                                React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Spiele erfasst")),
+                            statCategories.map((cat) => (cat.fields.length > 0 && (React.createElement("div", { key: cat.id },
+                                React.createElement(SectionLabel, null, cat.label),
+                                React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-4 gap-3 mt-1.5" }, cat.fields.map((f) => (React.createElement("div", { key: f.id, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
+                                    React.createElement("p", { className: "text-lg font-bold text-slate-700" }, f.kind === "shooting" ? totalPct(`${f.id}_m`, `${f.id}_a`) : avg(f.id)),
+                                    React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5 truncate", title: f.label }, f.kind === "shooting" ? f.label : `Ø ${f.label}`))))))))),
                             React.createElement("div", { className: "grid md:grid-cols-2 gap-4" },
                                 React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 shadow-sm" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzter Athletik-Test"),
@@ -842,48 +971,25 @@ function SpielerAkte() {
                                             React.createElement("th", { className: "text-left px-3 py-2" }, "Datum"),
                                             React.createElement("th", { className: "text-left px-3 py-2" }, "Gegner"),
                                             React.createElement("th", { className: "text-right px-3 py-2" }, "Min"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Pkt"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "FG"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "FG%"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "3P"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "3P%"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "FT"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "FT%"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "OREB"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "DREB"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "REB"),
-                                            (data.statFields || DEFAULT_STAT_FIELDS).map((f) => (React.createElement("th", { key: f.id, className: "text-right px-3 py-2", title: f.label }, f.label))),
+                                            statCategories.map((cat) => cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement(React.Fragment, { key: f.id },
+                                                React.createElement("th", { className: "text-right px-3 py-2", title: f.label }, f.label),
+                                                React.createElement("th", { className: "text-right px-3 py-2", title: `${f.label} Quote` },
+                                                    f.label,
+                                                    "%"))) : (React.createElement("th", { key: f.id, className: "text-right px-3 py-2", title: f.label }, f.label))))),
                                             React.createElement("th", { className: "px-3 py-2" }))),
-                                    React.createElement("tbody", null, playerStats.map((s) => {
-                                        const totalReb = (Number(s.rebOff) || 0) + (Number(s.rebDef) || 0) || s.rebounds || 0;
-                                        return (React.createElement("tr", { key: s.id, className: "border-b border-stone-100 last:border-0 hover:bg-stone-50" },
-                                            React.createElement("td", { className: "px-3 py-2 whitespace-nowrap" }, fmtDate(s.date)),
-                                            React.createElement("td", { className: "px-3 py-2" }, s.gegner || "–"),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.minuten || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right font-semibold" }, s.punkte || 0),
+                                    React.createElement("tbody", null, playerStats.map((s) => (React.createElement("tr", { key: s.id, className: "border-b border-stone-100 last:border-0 hover:bg-stone-50" },
+                                        React.createElement("td", { className: "px-3 py-2 whitespace-nowrap" }, fmtDate(s.date)),
+                                        React.createElement("td", { className: "px-3 py-2" }, s.gegner || "–"),
+                                        React.createElement("td", { className: "px-3 py-2 text-right" }, s.minuten || 0),
+                                        statCategories.map((cat) => cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement(React.Fragment, { key: f.id },
                                             React.createElement("td", { className: "px-3 py-2 text-right whitespace-nowrap" },
-                                                s.fgm || 0,
+                                                s[`${f.id}_m`] || 0,
                                                 "/",
-                                                s.fga || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s.fgm, s.fga) !== null ? `${pct(s.fgm, s.fga)}%` : "–"),
-                                            React.createElement("td", { className: "px-3 py-2 text-right whitespace-nowrap" },
-                                                s.tpm || 0,
-                                                "/",
-                                                s.tpa || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s.tpm, s.tpa) !== null ? `${pct(s.tpm, s.tpa)}%` : "–"),
-                                            React.createElement("td", { className: "px-3 py-2 text-right whitespace-nowrap" },
-                                                s.ftm || 0,
-                                                "/",
-                                                s.fta || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s.ftm, s.fta) !== null ? `${pct(s.ftm, s.fta)}%` : "–"),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.rebOff || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.rebDef || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right font-medium" }, totalReb),
-                                            (data.statFields || DEFAULT_STAT_FIELDS).map((f) => (React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, s[f.id] || 0))),
-                                            React.createElement("td", { className: "px-2 py-2 text-right" },
-                                                React.createElement("button", { onClick: () => deleteItem("stats", s.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
-                                                    React.createElement(IconTrash, { size: 14 })))));
-                                    }))))))),
+                                                s[`${f.id}_a`] || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s[`${f.id}_m`], s[`${f.id}_a`]) !== null ? `${pct(s[`${f.id}_m`], s[`${f.id}_a`])}%` : "–"))) : (React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, s[f.id] || 0))))),
+                                        React.createElement("td", { className: "px-2 py-2 text-right" },
+                                            React.createElement("button", { onClick: () => deleteItem("stats", s.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
+                                                React.createElement(IconTrash, { size: 14 })))))))))))),
                         activeTab === "test" && (React.createElement("div", null,
                             React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("test"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
@@ -955,11 +1061,13 @@ function SpielerAkte() {
         modal === "editPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Spieler bearbeiten", onClose: () => setModal(null) },
             React.createElement(PlayerForm, { teams: teams, initial: selectedPlayer, onSubmit: handleEditPlayer, onClose: () => setModal(null) }))),
         modal === "stat" && (React.createElement(Modal, { title: "Spielstatistik hinzuf\u00FCgen", onClose: () => setModal(null), wide: true },
-            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statFields: data.statFields || DEFAULT_STAT_FIELDS }))),
-        modal === "statFields" && (React.createElement(Modal, { title: "Statistik-Felder verwalten", onClose: () => setModal(null) },
-            React.createElement(StatFieldsManager, { fields: data.statFields || DEFAULT_STAT_FIELDS, onAdd: addStatField, onRename: renameStatField, onDelete: deleteStatField, onMove: moveStatField, onClose: () => setModal(null) }))),
+            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statCategories: statCategories }))),
+        modal === "statFields" && (React.createElement(Modal, { title: "Statistik-Kategorien verwalten", onClose: () => setModal(null), wide: true },
+            React.createElement(StatCategoriesManager, { categories: statCategories, onAddCat: addStatCategory, onRenameCat: renameStatCategory, onDeleteCat: deleteStatCategory, onMoveCat: moveStatCategory, onAddField: addStatFieldToCategory, onRenameField: renameStatFieldInCategory, onDeleteField: deleteStatFieldFromCategory, onMoveField: moveStatFieldInCategory, onClose: () => setModal(null) }))),
+        modal === "testTypes" && (React.createElement(Modal, { title: "Test-Arten verwalten", onClose: () => setModal(null) },
+            React.createElement(SimpleListManager, { items: testTypes, onAdd: addTestType, onRename: renameTestType, onDelete: deleteTestType, onMove: moveTestType, onClose: () => setModal(null), addPlaceholder: "Neue Testart, z. B. T-Test", description: "Diese Liste erscheint als Auswahl im Athletik-Test-Formular. \u00C4nderungen wirken nur auf Anzeige/neue Eintr\u00E4ge." }))),
         modal === "test" && (React.createElement(Modal, { title: "Athletik-Test hinzuf\u00FCgen", onClose: () => setModal(null) },
-            React.createElement(TestForm, { onSubmit: handleAddTest, onClose: () => setModal(null) }))),
+            React.createElement(TestForm, { onSubmit: handleAddTest, onClose: () => setModal(null), testTypes: testTypes }))),
         modal === "video" && (React.createElement(Modal, { title: "Video verkn\u00FCpfen", onClose: () => setModal(null) },
             React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null) }))),
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
