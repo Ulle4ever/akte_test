@@ -107,6 +107,15 @@ const IconTrendDown = (p) => React.createElement(Icon, { ...p },
     React.createElement("polyline", { points: "21 12 21 18 15 18" }));
 const IconLoader = (p) => React.createElement(Icon, { ...p, className: "animate-spin " + (p.className || "") },
     React.createElement("path", { d: "M12 3a9 9 0 1 0 9 9" }));
+const IconSettings = (p) => React.createElement(Icon, { ...p },
+    React.createElement("circle", { cx: "12", cy: "12", r: "3" }),
+    React.createElement("path", { d: "M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09a1.65 1.65 0 0 0-1.08-1.51 1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09a1.65 1.65 0 0 0 1.51-1.08 1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z" }));
+const IconArrowUp = (p) => React.createElement(Icon, { ...p },
+    React.createElement("line", { x1: "12", y1: "19", x2: "12", y2: "5" }),
+    React.createElement("polyline", { points: "5 12 12 5 19 12" }));
+const IconArrowDown = (p) => React.createElement(Icon, { ...p },
+    React.createElement("line", { x1: "12", y1: "5", x2: "12", y2: "19" }),
+    React.createElement("polyline", { points: "19 12 12 19 5 12" }));
 const POSITIONS = ["Point Guard", "Shooting Guard", "Small Forward", "Power Forward", "Center"];
 const STATUS_OPTIONS = [
     { value: "aktiv", label: "Aktiv" },
@@ -132,6 +141,18 @@ const CATEGORY_STYLES = {
     athletisch: "bg-orange-50 text-orange-700 border-orange-200",
     mental: "bg-pink-50 text-pink-700 border-pink-200",
 };
+const DEFAULT_STAT_FIELDS = [
+    { id: "assists", label: "Assists" },
+    { id: "steals", label: "Steals" },
+    { id: "blocks", label: "Blocks" },
+    { id: "turnovers", label: "Turnovers" },
+    { id: "fouls", label: "Fouls" },
+    { id: "deflections", label: "Deflections" },
+    { id: "charges", label: "Charges" },
+    { id: "looseBalls", label: "Loose Balls" },
+    { id: "contestedShots", label: "Kontestierte Würfe" },
+    { id: "screenAssists", label: "Screen Assists" },
+];
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const today = () => new Date().toISOString().slice(0, 10);
 const sortByDateDesc = (arr) => [...arr].sort((a, b) => new Date(b.date) - new Date(a.date));
@@ -260,12 +281,57 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
 function SectionLabel({ children }) {
     return React.createElement("p", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider pt-1" }, children);
 }
-function StatForm({ onSubmit, onClose }) {
-    const [form, setForm] = useState({
-        date: today(), gegner: "", minuten: "", punkte: "",
-        fgm: "", fga: "", tpm: "", tpa: "", ftm: "", fta: "",
-        rebOff: "", rebDef: "", assists: "", steals: "", blocks: "", turnovers: "", fouls: "",
-        deflections: "", charges: "", looseBalls: "", contestedShots: "", screenAssists: "",
+function StatFieldsManager({ fields, onAdd, onRename, onDelete, onMove, onClose }) {
+    const [newLabel, setNewLabel] = useState("");
+    const [editingId, setEditingId] = useState(null);
+    const [editValue, setEditValue] = useState("");
+    function submitNew(e) {
+        e.preventDefault();
+        if (!newLabel.trim())
+            return;
+        onAdd(newLabel.trim());
+        setNewLabel("");
+    }
+    function startEdit(f) {
+        setEditingId(f.id);
+        setEditValue(f.label);
+    }
+    function saveEdit(id) {
+        if (editValue.trim())
+            onRename(id, editValue.trim());
+        setEditingId(null);
+    }
+    return (React.createElement("div", { className: "space-y-4" },
+        React.createElement("p", { className: "text-xs text-slate-500" }, "Diese Felder erscheinen zus\u00E4tzlich zu den festen Basketball-Grunddaten (Punkte, Feldw\u00FCrfe, Dreier, Freiw\u00FCrfe, Rebounds) im Statistik-Formular und in der Tabelle. \u00C4ndern wirkt sich nur auf Anzeige/neue Eintr\u00E4ge aus, alte Daten bleiben erhalten."),
+        React.createElement("div", { className: "space-y-1.5" },
+            fields.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Keine zus\u00E4tzlichen Felder."),
+            fields.map((f, i) => (React.createElement("div", { key: f.id, className: "flex items-center gap-2 bg-stone-50 border border-stone-200 rounded-lg px-3 py-2" },
+                React.createElement("div", { className: "flex flex-col -my-1 shrink-0" },
+                    React.createElement("button", { onClick: () => onMove(f.id, -1), disabled: i === 0, className: "text-slate-400 hover:text-slate-700 disabled:opacity-20", "aria-label": "Nach oben" },
+                        React.createElement(IconArrowUp, { size: 13 })),
+                    React.createElement("button", { onClick: () => onMove(f.id, 1), disabled: i === fields.length - 1, className: "text-slate-400 hover:text-slate-700 disabled:opacity-20", "aria-label": "Nach unten" },
+                        React.createElement(IconArrowDown, { size: 13 }))),
+                editingId === f.id ? (React.createElement("input", { className: "flex-1 rounded border border-orange-300 px-2 py-1 text-sm focus:outline-none focus:ring-1 focus:ring-orange-500", value: editValue, onChange: (e) => setEditValue(e.target.value), onKeyDown: (e) => { if (e.key === "Enter")
+                        saveEdit(f.id); if (e.key === "Escape")
+                        setEditingId(null); }, autoFocus: true, onBlur: () => saveEdit(f.id) })) : (React.createElement("button", { className: "flex-1 text-left text-sm text-slate-800 hover:text-orange-600", onClick: () => startEdit(f) }, f.label)),
+                React.createElement("button", { onClick: () => startEdit(f), className: "text-slate-400 hover:text-slate-700 shrink-0", "aria-label": "Umbenennen" },
+                    React.createElement(IconEdit, { size: 14 })),
+                React.createElement("button", { onClick: () => onDelete(f.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "L\u00F6schen" },
+                    React.createElement(IconTrash, { size: 14 })))))),
+        React.createElement("form", { onSubmit: submitNew, className: "flex gap-2 pt-2 border-t border-stone-200" },
+            React.createElement("input", { className: inputClass, placeholder: "Neues Feld, z. B. Technische Fouls", value: newLabel, onChange: (e) => setNewLabel(e.target.value) }),
+            React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 text-white rounded-lg px-4 text-sm font-semibold hover:bg-slate-800" }, "Hinzuf\u00FCgen")),
+        React.createElement("button", { onClick: onClose, className: "w-full bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Fertig")));
+}
+function StatForm({ onSubmit, onClose, statFields }) {
+    const [form, setForm] = useState(() => {
+        const base = {
+            date: today(), gegner: "", minuten: "", punkte: "",
+            fgm: "", fga: "", tpm: "", tpa: "", ftm: "", fta: "",
+            rebOff: "", rebDef: "",
+        };
+        statFields.forEach((f) => { base[f.id] = ""; });
+        return base;
     });
     const [error, setError] = useState("");
     const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
@@ -276,7 +342,7 @@ function StatForm({ onSubmit, onClose }) {
             setError("Bitte ein Datum angeben.");
             return;
         }
-        onSubmit({
+        const entry = {
             date: form.date,
             gegner: form.gegner.trim(),
             minuten: n("minuten"),
@@ -285,10 +351,9 @@ function StatForm({ onSubmit, onClose }) {
             tpm: n("tpm"), tpa: n("tpa"),
             ftm: n("ftm"), fta: n("fta"),
             rebOff: n("rebOff"), rebDef: n("rebDef"),
-            assists: n("assists"), steals: n("steals"), blocks: n("blocks"), turnovers: n("turnovers"), fouls: n("fouls"),
-            deflections: n("deflections"), charges: n("charges"), looseBalls: n("looseBalls"),
-            contestedShots: n("contestedShots"), screenAssists: n("screenAssists"),
-        });
+        };
+        statFields.forEach((f) => { entry[f.id] = n(f.id); });
+        onSubmit(entry);
         onClose();
     }
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-3" },
@@ -303,10 +368,10 @@ function StatForm({ onSubmit, onClose }) {
         React.createElement("div", { className: "grid grid-cols-3 gap-3" },
             React.createElement(Field, { label: "Punkte" },
                 React.createElement("input", { type: "number", className: inputClass, value: form.punkte, onChange: set("punkte") })),
-            React.createElement(Field, { label: "Fouls" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.fouls, onChange: set("fouls") })),
-            React.createElement(Field, { label: "Turnovers" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.turnovers, onChange: set("turnovers") }))),
+            React.createElement(Field, { label: "Reb. Offensiv" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.rebOff, onChange: set("rebOff") })),
+            React.createElement(Field, { label: "Reb. Defensiv" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.rebDef, onChange: set("rebDef") }))),
         React.createElement("div", { className: "grid grid-cols-3 gap-3" },
             React.createElement(Field, { label: "Feldw\u00FCrfe Treffer" },
                 React.createElement("input", { type: "number", className: inputClass, value: form.fgm, onChange: set("fgm") })),
@@ -325,32 +390,10 @@ function StatForm({ onSubmit, onClose }) {
             React.createElement(Field, { label: "Freiw\u00FCrfe Versuche" },
                 React.createElement("input", { type: "number", className: inputClass, value: form.fta, onChange: set("fta") })),
             React.createElement("div", { className: "flex items-end pb-2 text-xs text-slate-400" }, pct(form.ftm, form.fta) !== null ? `${pct(form.ftm, form.fta)}%` : "")),
-        React.createElement(SectionLabel, null, "Weitere Statistiken"),
-        React.createElement("div", { className: "grid grid-cols-4 gap-3" },
-            React.createElement(Field, { label: "Reb. Off." },
-                React.createElement("input", { type: "number", className: inputClass, value: form.rebOff, onChange: set("rebOff") })),
-            React.createElement(Field, { label: "Reb. Def." },
-                React.createElement("input", { type: "number", className: inputClass, value: form.rebDef, onChange: set("rebDef") })),
-            React.createElement(Field, { label: "Assists" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.assists, onChange: set("assists") })),
-            React.createElement(Field, { label: "Steals" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.steals, onChange: set("steals") }))),
-        React.createElement("div", { className: "grid grid-cols-4 gap-3" },
-            React.createElement(Field, { label: "Blocks" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.blocks, onChange: set("blocks") }))),
-        React.createElement(SectionLabel, null, "Hustle-Stats"),
-        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
-            React.createElement(Field, { label: "Deflections" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.deflections, onChange: set("deflections") })),
-            React.createElement(Field, { label: "Charges" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.charges, onChange: set("charges") })),
-            React.createElement(Field, { label: "Loose Balls" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.looseBalls, onChange: set("looseBalls") }))),
-        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
-            React.createElement(Field, { label: "Kontest. W\u00FCrfe" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.contestedShots, onChange: set("contestedShots") })),
-            React.createElement(Field, { label: "Screen Assists" },
-                React.createElement("input", { type: "number", className: inputClass, value: form.screenAssists, onChange: set("screenAssists") }))),
+        statFields.length > 0 && (React.createElement(React.Fragment, null,
+            React.createElement(SectionLabel, null, "Weitere Statistiken (selbst verwaltet)"),
+            React.createElement("div", { className: "grid grid-cols-3 gap-3" }, statFields.map((f) => (React.createElement(Field, { key: f.id, label: f.label },
+                React.createElement("input", { type: "number", className: inputClass, value: form[f.id] ?? "", onChange: set(f.id) }))))))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Eintrag speichern")));
 }
@@ -493,7 +536,7 @@ function SpielerAkte() {
                 await auth.signInAnonymously();
                 const docRef = db.collection("club").doc("data");
                 const snap = await docRef.get();
-                const defaults = { accessCode: null, teams: [], players: [], stats: [], tests: [], videos: [], notes: [] };
+                const defaults = { accessCode: null, teams: [], players: [], stats: [], tests: [], videos: [], notes: [], statFields: DEFAULT_STAT_FIELDS };
                 if (snap.exists) {
                     if (!cancelled)
                         setData({ ...defaults, ...snap.data() });
@@ -650,6 +693,27 @@ function SpielerAkte() {
     function deleteItem(collection, id) {
         persist({ ...data, [collection]: data[collection].filter((item) => item.id !== id) });
     }
+    function addStatField(label) {
+        const fields = data.statFields || DEFAULT_STAT_FIELDS;
+        persist({ ...data, statFields: [...fields, { id: uid(), label }] });
+    }
+    function renameStatField(id, label) {
+        const fields = data.statFields || DEFAULT_STAT_FIELDS;
+        persist({ ...data, statFields: fields.map((f) => (f.id === id ? { ...f, label } : f)) });
+    }
+    function deleteStatField(id) {
+        const fields = data.statFields || DEFAULT_STAT_FIELDS;
+        persist({ ...data, statFields: fields.filter((f) => f.id !== id) });
+    }
+    function moveStatField(id, dir) {
+        const fields = [...(data.statFields || DEFAULT_STAT_FIELDS)];
+        const i = fields.findIndex((f) => f.id === id);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= fields.length)
+            return;
+        [fields[i], fields[j]] = [fields[j], fields[i]];
+        persist({ ...data, statFields: fields });
+    }
     return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex flex-col" },
         React.createElement("header", { className: "bg-slate-900 text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3" },
             React.createElement("div", { className: "flex items-center gap-2" },
@@ -661,6 +725,9 @@ function SpielerAkte() {
                 saveError && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs bg-red-500/20 text-red-200 px-3 py-1.5 rounded-full" },
                     React.createElement(IconAlert, { size: 14 }),
                     " Speichern fehlgeschlagen")),
+                React.createElement("button", { onClick: () => setModal("statFields"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
+                    React.createElement(IconSettings, { size: 12 }),
+                    " Statistik-Felder"),
                 React.createElement("button", { onClick: () => setModal("changeCode"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
                     React.createElement(IconLock, { size: 12 }),
                     " Code \u00E4ndern"))),
@@ -735,14 +802,18 @@ function SpielerAkte() {
                             ].map(([label, value]) => (React.createElement("div", { key: label, className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm" },
                                 React.createElement("p", { className: "text-2xl font-black text-orange-600" }, value),
                                 React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, label))))),
-                            React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-4 gap-4" }, [
+                            React.createElement("div", { className: "grid grid-cols-3 gap-4" }, [
                                 ["FG%", totalPct("fgm", "fga")],
                                 ["3P%", totalPct("tpm", "tpa")],
                                 ["FT%", totalPct("ftm", "fta")],
-                                ["Ø Fouls", avg("fouls")],
                             ].map(([label, value]) => (React.createElement("div", { key: label, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
                                 React.createElement("p", { className: "text-lg font-bold text-slate-700" }, value),
                                 React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, label))))),
+                            (data.statFields || DEFAULT_STAT_FIELDS).length > 0 && (React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3" }, (data.statFields || DEFAULT_STAT_FIELDS).map((f) => (React.createElement("div", { key: f.id, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
+                                React.createElement("p", { className: "text-base font-bold text-slate-700" }, avg(f.id)),
+                                React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5 truncate", title: f.label },
+                                    "\u00D8 ",
+                                    f.label)))))),
                             React.createElement("div", { className: "grid md:grid-cols-2 gap-4" },
                                 React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 shadow-sm" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzter Athletik-Test"),
@@ -781,16 +852,7 @@ function SpielerAkte() {
                                             React.createElement("th", { className: "text-right px-3 py-2" }, "OREB"),
                                             React.createElement("th", { className: "text-right px-3 py-2" }, "DREB"),
                                             React.createElement("th", { className: "text-right px-3 py-2" }, "REB"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Ast"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Stl"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Blk"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "TO"),
-                                            React.createElement("th", { className: "text-right px-3 py-2" }, "PF"),
-                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Deflections" }, "Defl"),
-                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Charges Taken" }, "Chg"),
-                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Loose Balls" }, "LB"),
-                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Kontestierte W\u00FCrfe" }, "CS"),
-                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Screen Assists" }, "SA"),
+                                            (data.statFields || DEFAULT_STAT_FIELDS).map((f) => (React.createElement("th", { key: f.id, className: "text-right px-3 py-2", title: f.label }, f.label))),
                                             React.createElement("th", { className: "px-3 py-2" }))),
                                     React.createElement("tbody", null, playerStats.map((s) => {
                                         const totalReb = (Number(s.rebOff) || 0) + (Number(s.rebDef) || 0) || s.rebounds || 0;
@@ -817,16 +879,7 @@ function SpielerAkte() {
                                             React.createElement("td", { className: "px-3 py-2 text-right" }, s.rebOff || 0),
                                             React.createElement("td", { className: "px-3 py-2 text-right" }, s.rebDef || 0),
                                             React.createElement("td", { className: "px-3 py-2 text-right font-medium" }, totalReb),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.assists || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.steals || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.blocks || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.turnovers || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.fouls || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.deflections || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.charges || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.looseBalls || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.contestedShots || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.screenAssists || 0),
+                                            (data.statFields || DEFAULT_STAT_FIELDS).map((f) => (React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, s[f.id] || 0))),
                                             React.createElement("td", { className: "px-2 py-2 text-right" },
                                                 React.createElement("button", { onClick: () => deleteItem("stats", s.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                                     React.createElement(IconTrash, { size: 14 })))));
@@ -902,7 +955,9 @@ function SpielerAkte() {
         modal === "editPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Spieler bearbeiten", onClose: () => setModal(null) },
             React.createElement(PlayerForm, { teams: teams, initial: selectedPlayer, onSubmit: handleEditPlayer, onClose: () => setModal(null) }))),
         modal === "stat" && (React.createElement(Modal, { title: "Spielstatistik hinzuf\u00FCgen", onClose: () => setModal(null), wide: true },
-            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null) }))),
+            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statFields: data.statFields || DEFAULT_STAT_FIELDS }))),
+        modal === "statFields" && (React.createElement(Modal, { title: "Statistik-Felder verwalten", onClose: () => setModal(null) },
+            React.createElement(StatFieldsManager, { fields: data.statFields || DEFAULT_STAT_FIELDS, onAdd: addStatField, onRename: renameStatField, onDelete: deleteStatField, onMove: moveStatField, onClose: () => setModal(null) }))),
         modal === "test" && (React.createElement(Modal, { title: "Athletik-Test hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(TestForm, { onSubmit: handleAddTest, onClose: () => setModal(null) }))),
         modal === "video" && (React.createElement(Modal, { title: "Video verkn\u00FCpfen", onClose: () => setModal(null) },
