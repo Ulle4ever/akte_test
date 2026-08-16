@@ -1,0 +1,918 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Spieler-Akte</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+</head>
+<body>
+<div id="root"></div>
+<script>
+"use strict";
+/* ============================================================
+   FIREBASE-KONFIGURATION
+   Diese Werte bekommt ihr in der Firebase-Konsole unter
+   Projekteinstellungen -> Meine Apps -> Web-App (Symbol </>).
+   Einfach die Platzhalter unten ersetzen, Datei speichern, fertig.
+   ============================================================ */
+const firebaseConfig = {
+    apiKey: "AIzaSyCLzy9rU4DYqwO-C6uXQqZxLbAQY_g5b3g",
+    authDomain: "rsk-test-dev.firebaseapp.com",
+    projectId: "rsk-test-dev",
+    storageBucket: "rsk-test-dev.firebasestorage.app",
+    messagingSenderId: "1096936057835",
+    appId: "1:1096936057835:web:67f5459fbd83acfb0f87ae",
+};
+firebase.initializeApp(firebaseConfig);
+const db = firebase.firestore();
+const auth = firebase.auth();
+const { useState, useEffect } = React;
+function Icon({ children, size = 16, className = "" }) {
+    return (React.createElement("svg", { width: size, height: size, viewBox: "0 0 24 24", fill: "none", stroke: "currentColor", strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", className: className }, children));
+}
+const IconPlus = (p) => React.createElement(Icon, { ...p },
+    React.createElement("line", { x1: "12", y1: "5", x2: "12", y2: "19" }),
+    React.createElement("line", { x1: "5", y1: "12", x2: "19", y2: "12" }));
+const IconSearch = (p) => React.createElement(Icon, { ...p },
+    React.createElement("circle", { cx: "11", cy: "11", r: "7" }),
+    React.createElement("line", { x1: "21", y1: "21", x2: "16.65", y2: "16.65" }));
+const IconTrash = (p) => React.createElement(Icon, { ...p },
+    React.createElement("polyline", { points: "3 6 5 6 21 6" }),
+    React.createElement("path", { d: "M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6" }),
+    React.createElement("path", { d: "M10 11v6" }),
+    React.createElement("path", { d: "M14 11v6" }),
+    React.createElement("path", { d: "M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2" }));
+const IconEdit = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M12 20h9" }),
+    React.createElement("path", { d: "M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4Z" }));
+const IconX = (p) => React.createElement(Icon, { ...p },
+    React.createElement("line", { x1: "18", y1: "6", x2: "6", y2: "18" }),
+    React.createElement("line", { x1: "6", y1: "6", x2: "18", y2: "18" }));
+const IconLock = (p) => React.createElement(Icon, { ...p },
+    React.createElement("rect", { x: "5", y: "11", width: "14", height: "10", rx: "2" }),
+    React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4" }));
+const IconKey = (p) => React.createElement(Icon, { ...p },
+    React.createElement("circle", { cx: "8", cy: "15", r: "4" }),
+    React.createElement("path", { d: "M10.5 12.5 20 3" }),
+    React.createElement("path", { d: "M17 6l2 2" }),
+    React.createElement("path", { d: "M14 9l2 2" }));
+const IconInfo = (p) => React.createElement(Icon, { ...p },
+    React.createElement("circle", { cx: "12", cy: "12", r: "9" }),
+    React.createElement("line", { x1: "12", y1: "11", x2: "12", y2: "16" }),
+    React.createElement("line", { x1: "12", y1: "8", x2: "12.01", y2: "8" }));
+const IconAlert = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M12 3 2 20h20L12 3Z" }),
+    React.createElement("line", { x1: "12", y1: "9", x2: "12", y2: "14" }),
+    React.createElement("line", { x1: "12", y1: "17", x2: "12.01", y2: "17" }));
+const IconTrophy = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M8 21h8" }),
+    React.createElement("path", { d: "M12 17v4" }),
+    React.createElement("path", { d: "M7 4h10v5a5 5 0 0 1-10 0V4Z" }),
+    React.createElement("path", { d: "M7 5H4a3 3 0 0 0 3 6" }),
+    React.createElement("path", { d: "M17 5h3a3 3 0 0 1-3 6" }));
+const IconUsers = (p) => React.createElement(Icon, { ...p },
+    React.createElement("circle", { cx: "9", cy: "8", r: "3.5" }),
+    React.createElement("path", { d: "M3.5 20a5.5 5.5 0 0 1 11 0" }),
+    React.createElement("circle", { cx: "17", cy: "9", r: "3" }),
+    React.createElement("path", { d: "M15 20a4.5 4.5 0 0 1 6-4.2" }));
+const IconActivity = (p) => React.createElement(Icon, { ...p },
+    React.createElement("polyline", { points: "3 12 8 12 10 6 14 18 16 12 21 12" }));
+const IconClipboard = (p) => React.createElement(Icon, { ...p },
+    React.createElement("rect", { x: "6", y: "4", width: "12", height: "17", rx: "2" }),
+    React.createElement("path", { d: "M9 4V3a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v1" }),
+    React.createElement("line", { x1: "9", y1: "10", x2: "15", y2: "10" }),
+    React.createElement("line", { x1: "9", y1: "14", x2: "15", y2: "14" }),
+    React.createElement("line", { x1: "9", y1: "18", x2: "13", y2: "18" }));
+const IconVideo = (p) => React.createElement(Icon, { ...p },
+    React.createElement("rect", { x: "3", y: "6", width: "12", height: "12", rx: "2" }),
+    React.createElement("path", { d: "M15 10l6-3v10l-6-3" }));
+const IconNote = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M5 4h11l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" }),
+    React.createElement("path", { d: "M16 4v4h4" }));
+const IconExternal = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M14 4h6v6" }),
+    React.createElement("path", { d: "M20 4 10 14" }),
+    React.createElement("path", { d: "M18 13v6a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h6" }));
+const IconTrendUp = (p) => React.createElement(Icon, { ...p },
+    React.createElement("polyline", { points: "3 17 9 11 13 15 21 6" }),
+    React.createElement("polyline", { points: "15 6 21 6 21 12" }));
+const IconTrendDown = (p) => React.createElement(Icon, { ...p },
+    React.createElement("polyline", { points: "3 7 9 13 13 9 21 18" }),
+    React.createElement("polyline", { points: "21 12 21 18 15 18" }));
+const IconLoader = (p) => React.createElement(Icon, { ...p, className: "animate-spin " + (p.className || "") },
+    React.createElement("path", { d: "M12 3a9 9 0 1 0 9 9" }));
+const POSITIONS = ["Point Guard", "Shooting Guard", "Small Forward", "Power Forward", "Center"];
+const STATUS_OPTIONS = [
+    { value: "aktiv", label: "Aktiv" },
+    { value: "verletzt", label: "Verletzt" },
+    { value: "reha", label: "Reha" },
+];
+const STATUS_STYLES = {
+    aktiv: { dot: "bg-emerald-500", badge: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    verletzt: { dot: "bg-red-500", badge: "bg-red-50 text-red-700 border-red-200" },
+    reha: { dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700 border-amber-200" },
+};
+const TEST_PRESETS = ["Sprint 20m", "Vertikalsprung (CMJ)", "Lane Agility", "Beep-Test", "Bankdrücken 1RM", "Sonstiges"];
+const VIDEO_TYPES = ["Spielszene", "Trainingsdrill", "Analyse"];
+const NOTE_CATEGORIES = [
+    { value: "technisch", label: "Technisch" },
+    { value: "taktisch", label: "Taktisch" },
+    { value: "athletisch", label: "Athletisch" },
+    { value: "mental", label: "Mental" },
+];
+const CATEGORY_STYLES = {
+    technisch: "bg-blue-50 text-blue-700 border-blue-200",
+    taktisch: "bg-purple-50 text-purple-700 border-purple-200",
+    athletisch: "bg-orange-50 text-orange-700 border-orange-200",
+    mental: "bg-pink-50 text-pink-700 border-pink-200",
+};
+const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
+const today = () => new Date().toISOString().slice(0, 10);
+const sortByDateDesc = (arr) => [...arr].sort((a, b) => new Date(b.date) - new Date(a.date));
+const fmtDate = (d) => {
+    if (!d)
+        return "–";
+    const dt = new Date(d);
+    if (isNaN(dt))
+        return d;
+    return dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
+};
+const pct = (made, att) => (att ? Math.round((Number(made) / Number(att)) * 1000) / 10 : null);
+const getEmbedUrl = (url) => {
+    try {
+        const u = new URL(url);
+        if (u.hostname.includes("youtube.com")) {
+            const id = u.searchParams.get("v");
+            if (id)
+                return `https://www.youtube.com/embed/${id}`;
+            const shorts = u.pathname.match(/\/shorts\/([^/?]+)/);
+            if (shorts)
+                return `https://www.youtube.com/embed/${shorts[1]}`;
+        }
+        if (u.hostname === "youtu.be") {
+            const id = u.pathname.slice(1);
+            if (id)
+                return `https://www.youtube.com/embed/${id}`;
+        }
+        if (u.hostname.includes("drive.google.com")) {
+            const m = u.pathname.match(/\/file\/d\/([^/]+)/);
+            if (m)
+                return `https://drive.google.com/file/d/${m[1]}/preview`;
+        }
+    }
+    catch (e) { /* invalid URL, no embed */ }
+    return null;
+};
+const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-orange-500 focus:border-orange-500";
+const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
+function Modal({ title, onClose, children, wide }) {
+    return (React.createElement("div", { className: "fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4", onClick: onClose },
+        React.createElement("div", { className: `bg-white rounded-xl shadow-xl w-full ${wide ? "max-w-xl" : "max-w-md"} max-h-[90vh] overflow-y-auto`, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "flex items-center justify-between px-5 py-4 border-b border-stone-200" },
+                React.createElement("h3", { className: "text-base font-bold text-slate-900" }, title),
+                React.createElement("button", { onClick: onClose, className: "text-slate-400 hover:text-slate-600", "aria-label": "Schlie\u00DFen" },
+                    React.createElement(IconX, { size: 18 }))),
+            React.createElement("div", { className: "p-5" }, children))));
+}
+function Field({ label, children }) {
+    return (React.createElement("div", null,
+        React.createElement("label", { className: labelClass }, label),
+        children));
+}
+function TeamForm({ onSubmit, onClose }) {
+    const [name, setName] = useState("");
+    const [altersklasse, setAltersklasse] = useState("");
+    const [trainer, setTrainer] = useState("");
+    const [error, setError] = useState("");
+    function handleSubmit(e) {
+        e.preventDefault();
+        if (!name.trim()) {
+            setError("Bitte einen Teamnamen eingeben.");
+            return;
+        }
+        onSubmit({ name: name.trim(), altersklasse: altersklasse.trim(), trainer: trainer.trim() });
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement(Field, { label: "Teamname" },
+            React.createElement("input", { className: inputClass, value: name, onChange: (e) => { setName(e.target.value); setError(""); }, placeholder: "z. B. U16 Herren", autoFocus: true }),
+            error && React.createElement("p", { className: "text-xs text-red-600 mt-1" }, error)),
+        React.createElement(Field, { label: "Altersklasse" },
+            React.createElement("input", { className: inputClass, value: altersklasse, onChange: (e) => setAltersklasse(e.target.value), placeholder: "z. B. U16" })),
+        React.createElement(Field, { label: "Cheftrainer" },
+            React.createElement("input", { className: inputClass, value: trainer, onChange: (e) => setTrainer(e.target.value), placeholder: "Name" })),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Team anlegen")));
+}
+function PlayerForm({ teams, initial, onSubmit, onClose }) {
+    const [name, setName] = useState(initial?.name || "");
+    const [teamId, setTeamId] = useState(initial?.teamId || teams[0]?.id || "");
+    const [position, setPosition] = useState(initial?.position || POSITIONS[0]);
+    const [number, setNumber] = useState(initial?.number ?? "");
+    const [birthdate, setBirthdate] = useState(initial?.birthdate || "");
+    const [status, setStatus] = useState(initial?.status || "aktiv");
+    const [error, setError] = useState("");
+    function handleSubmit(e) {
+        e.preventDefault();
+        if (!name.trim()) {
+            setError("Bitte einen Namen eingeben.");
+            return;
+        }
+        if (!teamId) {
+            setError("Bitte ein Team auswählen.");
+            return;
+        }
+        onSubmit({
+            name: name.trim(),
+            teamId,
+            position,
+            number: number === "" ? "" : Number(number),
+            birthdate,
+            status,
+        });
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement(Field, { label: "Name" },
+            React.createElement("input", { className: inputClass, value: name, onChange: (e) => { setName(e.target.value); setError(""); }, placeholder: "Vor- und Nachname", autoFocus: true })),
+        React.createElement(Field, { label: "Team" },
+            React.createElement("select", { className: inputClass, value: teamId, onChange: (e) => setTeamId(e.target.value) },
+                teams.length === 0 && React.createElement("option", { value: "" }, "Kein Team vorhanden"),
+                teams.map((t) => (React.createElement("option", { key: t.id, value: t.id }, t.name))))),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Position" },
+                React.createElement("select", { className: inputClass, value: position, onChange: (e) => setPosition(e.target.value) }, POSITIONS.map((p) => React.createElement("option", { key: p, value: p }, p)))),
+            React.createElement(Field, { label: "R\u00FCckennummer" },
+                React.createElement("input", { type: "number", className: inputClass, value: number, onChange: (e) => setNumber(e.target.value), min: "0", max: "99" }))),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Geburtsdatum" },
+                React.createElement("input", { type: "date", className: inputClass, value: birthdate, onChange: (e) => setBirthdate(e.target.value) })),
+            React.createElement(Field, { label: "Status" },
+                React.createElement("select", { className: inputClass, value: status, onChange: (e) => setStatus(e.target.value) }, STATUS_OPTIONS.map((s) => React.createElement("option", { key: s.value, value: s.value }, s.label))))),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Änderungen speichern" : "Spieler anlegen")));
+}
+function SectionLabel({ children }) {
+    return React.createElement("p", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider pt-1" }, children);
+}
+function StatForm({ onSubmit, onClose }) {
+    const [form, setForm] = useState({
+        date: today(), gegner: "", minuten: "", punkte: "",
+        fgm: "", fga: "", tpm: "", tpa: "", ftm: "", fta: "",
+        rebOff: "", rebDef: "", assists: "", steals: "", blocks: "", turnovers: "", fouls: "",
+        deflections: "", charges: "", looseBalls: "", contestedShots: "", screenAssists: "",
+    });
+    const [error, setError] = useState("");
+    const set = (k) => (e) => setForm({ ...form, [k]: e.target.value });
+    const n = (k) => Number(form[k]) || 0;
+    function handleSubmit(e) {
+        e.preventDefault();
+        if (!form.date) {
+            setError("Bitte ein Datum angeben.");
+            return;
+        }
+        onSubmit({
+            date: form.date,
+            gegner: form.gegner.trim(),
+            minuten: n("minuten"),
+            punkte: n("punkte"),
+            fgm: n("fgm"), fga: n("fga"),
+            tpm: n("tpm"), tpa: n("tpa"),
+            ftm: n("ftm"), fta: n("fta"),
+            rebOff: n("rebOff"), rebDef: n("rebDef"),
+            assists: n("assists"), steals: n("steals"), blocks: n("blocks"), turnovers: n("turnovers"), fouls: n("fouls"),
+            deflections: n("deflections"), charges: n("charges"), looseBalls: n("looseBalls"),
+            contestedShots: n("contestedShots"), screenAssists: n("screenAssists"),
+        });
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-3" },
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Datum" },
+                React.createElement("input", { type: "date", className: inputClass, value: form.date, onChange: set("date") })),
+            React.createElement(Field, { label: "Gegner" },
+                React.createElement("input", { className: inputClass, value: form.gegner, onChange: set("gegner"), placeholder: "z. B. TSV Nord" })),
+            React.createElement(Field, { label: "Minuten" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.minuten, onChange: set("minuten") }))),
+        React.createElement(SectionLabel, null, "Wurfstatistiken"),
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Punkte" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.punkte, onChange: set("punkte") })),
+            React.createElement(Field, { label: "Fouls" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.fouls, onChange: set("fouls") })),
+            React.createElement(Field, { label: "Turnovers" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.turnovers, onChange: set("turnovers") }))),
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Feldw\u00FCrfe Treffer" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.fgm, onChange: set("fgm") })),
+            React.createElement(Field, { label: "Feldw\u00FCrfe Versuche" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.fga, onChange: set("fga") })),
+            React.createElement("div", { className: "flex items-end pb-2 text-xs text-slate-400" }, pct(form.fgm, form.fga) !== null ? `${pct(form.fgm, form.fga)}%` : "")),
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Dreier Treffer" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.tpm, onChange: set("tpm") })),
+            React.createElement(Field, { label: "Dreier Versuche" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.tpa, onChange: set("tpa") })),
+            React.createElement("div", { className: "flex items-end pb-2 text-xs text-slate-400" }, pct(form.tpm, form.tpa) !== null ? `${pct(form.tpm, form.tpa)}%` : "")),
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Freiw\u00FCrfe Treffer" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.ftm, onChange: set("ftm") })),
+            React.createElement(Field, { label: "Freiw\u00FCrfe Versuche" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.fta, onChange: set("fta") })),
+            React.createElement("div", { className: "flex items-end pb-2 text-xs text-slate-400" }, pct(form.ftm, form.fta) !== null ? `${pct(form.ftm, form.fta)}%` : "")),
+        React.createElement(SectionLabel, null, "Weitere Statistiken"),
+        React.createElement("div", { className: "grid grid-cols-4 gap-3" },
+            React.createElement(Field, { label: "Reb. Off." },
+                React.createElement("input", { type: "number", className: inputClass, value: form.rebOff, onChange: set("rebOff") })),
+            React.createElement(Field, { label: "Reb. Def." },
+                React.createElement("input", { type: "number", className: inputClass, value: form.rebDef, onChange: set("rebDef") })),
+            React.createElement(Field, { label: "Assists" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.assists, onChange: set("assists") })),
+            React.createElement(Field, { label: "Steals" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.steals, onChange: set("steals") }))),
+        React.createElement("div", { className: "grid grid-cols-4 gap-3" },
+            React.createElement(Field, { label: "Blocks" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.blocks, onChange: set("blocks") }))),
+        React.createElement(SectionLabel, null, "Hustle-Stats"),
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Deflections" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.deflections, onChange: set("deflections") })),
+            React.createElement(Field, { label: "Charges" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.charges, onChange: set("charges") })),
+            React.createElement(Field, { label: "Loose Balls" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.looseBalls, onChange: set("looseBalls") }))),
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Kontest. W\u00FCrfe" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.contestedShots, onChange: set("contestedShots") })),
+            React.createElement(Field, { label: "Screen Assists" },
+                React.createElement("input", { type: "number", className: inputClass, value: form.screenAssists, onChange: set("screenAssists") }))),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Eintrag speichern")));
+}
+function TestForm({ onSubmit, onClose }) {
+    const [testType, setTestType] = useState(TEST_PRESETS[0]);
+    const [customType, setCustomType] = useState("");
+    const [date, setDate] = useState(today());
+    const [result, setResult] = useState("");
+    const [unit, setUnit] = useState("");
+    const [error, setError] = useState("");
+    function handleSubmit(e) {
+        e.preventDefault();
+        const finalType = testType === "Sonstiges" ? customType.trim() : testType;
+        if (!finalType) {
+            setError("Bitte eine Testart angeben.");
+            return;
+        }
+        if (result === "") {
+            setError("Bitte ein Ergebnis eingeben.");
+            return;
+        }
+        onSubmit({ date, testType: finalType, result: Number(result), unit: unit.trim() });
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement(Field, { label: "Testart" },
+            React.createElement("select", { className: inputClass, value: testType, onChange: (e) => setTestType(e.target.value) }, TEST_PRESETS.map((t) => React.createElement("option", { key: t, value: t }, t)))),
+        testType === "Sonstiges" && (React.createElement(Field, { label: "Eigene Testart" },
+            React.createElement("input", { className: inputClass, value: customType, onChange: (e) => setCustomType(e.target.value), placeholder: "z. B. T-Test" }))),
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Datum" },
+                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
+            React.createElement(Field, { label: "Ergebnis" },
+                React.createElement("input", { type: "number", step: "0.01", className: inputClass, value: result, onChange: (e) => { setResult(e.target.value); setError(""); } })),
+            React.createElement(Field, { label: "Einheit" },
+                React.createElement("input", { className: inputClass, value: unit, onChange: (e) => setUnit(e.target.value), placeholder: "sek, cm, kg" }))),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Testergebnis speichern")));
+}
+function VideoForm({ onSubmit, onClose }) {
+    const [date, setDate] = useState(today());
+    const [type, setType] = useState(VIDEO_TYPES[0]);
+    const [url, setUrl] = useState("");
+    const [description, setDescription] = useState("");
+    const [error, setError] = useState("");
+    function handleSubmit(e) {
+        e.preventDefault();
+        if (!url.trim() || !/^https?:\/\//i.test(url.trim())) {
+            setError("Bitte einen gültigen Link (mit http:// oder https://) eingeben.");
+            return;
+        }
+        onSubmit({ date, type, url: url.trim(), description: description.trim() });
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Datum" },
+                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
+            React.createElement(Field, { label: "Typ" },
+                React.createElement("select", { className: inputClass, value: type, onChange: (e) => setType(e.target.value) }, VIDEO_TYPES.map((t) => React.createElement("option", { key: t, value: t }, t))))),
+        React.createElement(Field, { label: "Link (z. B. nicht gelisteter YouTube-Link)" },
+            React.createElement("input", { className: inputClass, value: url, onChange: (e) => { setUrl(e.target.value); setError(""); }, placeholder: "https://..." })),
+        React.createElement(Field, { label: "Beschreibung" },
+            React.createElement("textarea", { className: inputClass, rows: 2, value: description, onChange: (e) => setDescription(e.target.value), placeholder: "Was ist zu sehen?" })),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Video verkn\u00FCpfen")));
+}
+function NoteForm({ onSubmit, onClose }) {
+    const [date, setDate] = useState(today());
+    const [category, setCategory] = useState(NOTE_CATEGORIES[0].value);
+    const [author, setAuthor] = useState("Trainer");
+    const [text, setText] = useState("");
+    const [error, setError] = useState("");
+    function handleSubmit(e) {
+        e.preventDefault();
+        if (!text.trim()) {
+            setError("Bitte einen Text eingeben.");
+            return;
+        }
+        onSubmit({ date, category, author: author.trim() || "Trainer", text: text.trim() });
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement("div", { className: "grid grid-cols-3 gap-3" },
+            React.createElement(Field, { label: "Datum" },
+                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
+            React.createElement(Field, { label: "Kategorie" },
+                React.createElement("select", { className: inputClass, value: category, onChange: (e) => setCategory(e.target.value) }, NOTE_CATEGORIES.map((c) => React.createElement("option", { key: c.value, value: c.value }, c.label)))),
+            React.createElement(Field, { label: "Von" },
+                React.createElement("input", { className: inputClass, value: author, onChange: (e) => setAuthor(e.target.value) }))),
+        React.createElement(Field, { label: "Notiz" },
+            React.createElement("textarea", { className: inputClass, rows: 3, value: text, onChange: (e) => { setText(e.target.value); setError(""); }, placeholder: "z. B. Schw\u00E4che linke Hand beim Layup" })),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Notiz speichern")));
+}
+function ChangeCodeForm({ onSubmit, onClose }) {
+    const [code, setCode] = useState("");
+    const [error, setError] = useState("");
+    function handleSubmit(e) {
+        e.preventDefault();
+        if (code.trim().length < 4) {
+            setError("Mindestens 4 Zeichen.");
+            return;
+        }
+        onSubmit(code.trim());
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement(Field, { label: "Neuer Zugriffscode" },
+            React.createElement("input", { className: inputClass, type: "text", value: code, onChange: (e) => { setCode(e.target.value); setError(""); }, autoFocus: true }),
+            error && React.createElement("p", { className: "text-xs text-red-600 mt-1" }, error)),
+        React.createElement("p", { className: "text-xs text-slate-500" }, "Gebt den neuen Code an alle Trainer weiter \u2013 der alte Code funktioniert danach nicht mehr."),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Code speichern")));
+}
+const TABS = [
+    { key: "uebersicht", label: "Übersicht", icon: IconUsers },
+    { key: "statistik", label: "Statistiken", icon: IconActivity },
+    { key: "test", label: "Athletik-Tests", icon: IconClipboard },
+    { key: "video", label: "Videos", icon: IconVideo },
+    { key: "notiz", label: "Notizen", icon: IconNote },
+];
+function SpielerAkte() {
+    const [data, setData] = useState(null);
+    const [loading, setLoading] = useState(true);
+    const [saveError, setSaveError] = useState(false);
+    const [selectedTeamId, setSelectedTeamId] = useState("all");
+    const [selectedPlayerId, setSelectedPlayerId] = useState(null);
+    const [activeTab, setActiveTab] = useState("uebersicht");
+    const [search, setSearch] = useState("");
+    const [modal, setModal] = useState(null);
+    const [confirmDeletePlayer, setConfirmDeletePlayer] = useState(false);
+    const [unlocked, setUnlocked] = useState(false);
+    const [codeInput, setCodeInput] = useState("");
+    const [codeError, setCodeError] = useState("");
+    const [loadError, setLoadError] = useState(null);
+    useEffect(() => {
+        let cancelled = false;
+        async function load() {
+            try {
+                await auth.signInAnonymously();
+                const docRef = db.collection("club").doc("data");
+                const snap = await docRef.get();
+                const defaults = { accessCode: null, teams: [], players: [], stats: [], tests: [], videos: [], notes: [] };
+                if (snap.exists) {
+                    if (!cancelled)
+                        setData({ ...defaults, ...snap.data() });
+                }
+                else {
+                    await docRef.set(defaults);
+                    if (!cancelled)
+                        setData(defaults);
+                }
+            }
+            catch (e) {
+                if (!cancelled)
+                    setLoadError(e.message || "Verbindung zur Datenbank fehlgeschlagen.");
+            }
+            finally {
+                if (!cancelled)
+                    setLoading(false);
+            }
+        }
+        load();
+        return () => { cancelled = true; };
+    }, []);
+    async function persist(newData) {
+        setData(newData);
+        try {
+            await db.collection("club").doc("data").set(newData);
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+    }
+    if (loading) {
+        return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50" },
+            React.createElement(IconLoader, { className: "animate-spin text-slate-400", size: 28 })));
+    }
+    if (loadError) {
+        return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50 p-6" },
+            React.createElement("div", { className: "max-w-md text-center" },
+                React.createElement(IconAlert, { size: 26, className: "mx-auto text-red-500 mb-2" }),
+                React.createElement("p", { className: "text-sm font-semibold text-slate-900 mb-1" }, "Verbindung zur Datenbank fehlgeschlagen"),
+                React.createElement("p", { className: "text-xs text-slate-500" }, loadError),
+                React.createElement("p", { className: "text-xs text-slate-400 mt-3" }, "Pr\u00FCft, ob firebaseConfig oben im Code eingetragen ist. Falls ihr das gerade nur in der Chat-Vorschau testet: das kann an der Sandbox liegen \u2013 \u00F6ffnet stattdessen die echte, gehostete Adresse."))));
+    }
+    if (!data) {
+        return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50 text-slate-500 text-sm" }, "Daten konnten nicht geladen werden."));
+    }
+    function setupAccessCode(code) {
+        persist({ ...data, accessCode: code });
+        setUnlocked(true);
+    }
+    function tryUnlock(e) {
+        e.preventDefault();
+        if (codeInput === data.accessCode) {
+            setUnlocked(true);
+            setCodeError("");
+        }
+        else {
+            setCodeError("Falscher Code.");
+        }
+    }
+    function changeAccessCode(newCode) {
+        persist({ ...data, accessCode: newCode });
+    }
+    if (!data.accessCode) {
+        return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex items-center justify-center p-6" },
+            React.createElement("div", { className: "w-full max-w-sm bg-white rounded-xl border border-stone-200 p-6" },
+                React.createElement("div", { className: "flex items-center gap-2 mb-1" },
+                    React.createElement(IconKey, { size: 18, className: "text-orange-600" }),
+                    React.createElement("h2", { className: "text-base font-bold text-slate-900" }, "Zugriffscode einrichten")),
+                React.createElement("p", { className: "text-sm text-slate-500 mb-4" }, "Legt einmalig einen gemeinsamen Code fest und gebt ihn nur an eure Trainer weiter. Ohne den Code kommt niemand an die Spielerdaten."),
+                React.createElement("form", { onSubmit: (e) => { e.preventDefault(); if (codeInput.trim().length < 4) {
+                        setCodeError("Mindestens 4 Zeichen.");
+                        return;
+                    } setupAccessCode(codeInput.trim()); }, className: "space-y-3" },
+                    React.createElement("input", { className: inputClass, type: "text", placeholder: "Neuer Code (mind. 4 Zeichen)", value: codeInput, onChange: (e) => { setCodeInput(e.target.value); setCodeError(""); }, autoFocus: true }),
+                    codeError && React.createElement("p", { className: "text-xs text-red-600" }, codeError),
+                    React.createElement("button", { type: "submit", className: "w-full bg-orange-600 hover:bg-orange-700 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, "Code festlegen und starten")))));
+    }
+    if (!unlocked) {
+        return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex items-center justify-center p-6" },
+            React.createElement("div", { className: "w-full max-w-sm bg-white rounded-xl border border-stone-200 p-6" },
+                React.createElement("div", { className: "flex items-center gap-2 mb-1" },
+                    React.createElement(IconLock, { size: 18, className: "text-slate-700" }),
+                    React.createElement("h2", { className: "text-base font-bold text-slate-900" }, "Zugriffscode eingeben")),
+                React.createElement("p", { className: "text-sm text-slate-500 mb-4" }, "Nur f\u00FCr Trainer des Vereins. Fragt den Code bei einem Kollegen nach."),
+                React.createElement("form", { onSubmit: tryUnlock, className: "space-y-3" },
+                    React.createElement("input", { className: inputClass, type: "password", placeholder: "Code", value: codeInput, onChange: (e) => { setCodeInput(e.target.value); setCodeError(""); }, autoFocus: true }),
+                    codeError && React.createElement("p", { className: "text-xs text-red-600" }, codeError),
+                    React.createElement("button", { type: "submit", className: "w-full bg-slate-900 hover:bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, "Entsperren")))));
+    }
+    const teams = data.teams;
+    const players = data.players
+        .filter((p) => selectedTeamId === "all" || p.teamId === selectedTeamId)
+        .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name));
+    const selectedPlayer = data.players.find((p) => p.id === selectedPlayerId) || null;
+    const selectedTeam = selectedPlayer ? teams.find((t) => t.id === selectedPlayer.teamId) : null;
+    const playerStats = selectedPlayer ? sortByDateDesc(data.stats.filter((s) => s.playerId === selectedPlayer.id)) : [];
+    const playerTests = selectedPlayer ? sortByDateDesc(data.tests.filter((t) => t.playerId === selectedPlayer.id)) : [];
+    const playerVideos = selectedPlayer ? sortByDateDesc(data.videos.filter((v) => v.playerId === selectedPlayer.id)) : [];
+    const playerNotes = selectedPlayer ? sortByDateDesc(data.notes.filter((n) => n.playerId === selectedPlayer.id)) : [];
+    const avg = (key) => (playerStats.length ? (playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length).toFixed(1) : "–");
+    const avgReb = playerStats.length
+        ? (playerStats.reduce((sum, s) => sum + ((Number(s.rebOff) || 0) + (Number(s.rebDef) || 0) || Number(s.rebounds) || 0), 0) / playerStats.length).toFixed(1)
+        : "–";
+    const totalPct = (madeKey, attKey) => {
+        const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
+        const att = playerStats.reduce((sum, s) => sum + (Number(s[attKey]) || 0), 0);
+        return att ? `${Math.round((made / att) * 1000) / 10}%` : "–";
+    };
+    function selectPlayer(id) {
+        setSelectedPlayerId(id);
+        setActiveTab("uebersicht");
+        setConfirmDeletePlayer(false);
+    }
+    function handleAddTeam(team) {
+        const newTeam = { id: uid(), ...team };
+        persist({ ...data, teams: [...data.teams, newTeam] });
+    }
+    function handleAddPlayer(player) {
+        const newPlayer = { id: uid(), ...player };
+        persist({ ...data, players: [...data.players, newPlayer] });
+        selectPlayer(newPlayer.id);
+    }
+    function handleEditPlayer(changes) {
+        persist({ ...data, players: data.players.map((p) => (p.id === selectedPlayer.id ? { ...p, ...changes } : p)) });
+    }
+    function handleDeletePlayer() {
+        const id = selectedPlayer.id;
+        persist({
+            ...data,
+            players: data.players.filter((p) => p.id !== id),
+            stats: data.stats.filter((s) => s.playerId !== id),
+            tests: data.tests.filter((t) => t.playerId !== id),
+            videos: data.videos.filter((v) => v.playerId !== id),
+            notes: data.notes.filter((n) => n.playerId !== id),
+        });
+        setSelectedPlayerId(null);
+        setConfirmDeletePlayer(false);
+    }
+    function handleAddStat(entry) {
+        persist({ ...data, stats: [...data.stats, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+    }
+    function handleAddTest(entry) {
+        persist({ ...data, tests: [...data.tests, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+    }
+    function handleAddVideo(entry) {
+        persist({ ...data, videos: [...data.videos, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+    }
+    function handleAddNote(entry) {
+        persist({ ...data, notes: [...data.notes, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+    }
+    function deleteItem(collection, id) {
+        persist({ ...data, [collection]: data[collection].filter((item) => item.id !== id) });
+    }
+    return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex flex-col" },
+        React.createElement("header", { className: "bg-slate-900 text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3" },
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement(IconTrophy, { size: 20, className: "text-orange-500" }),
+                React.createElement("div", null,
+                    React.createElement("h1", { className: "text-lg font-black tracking-tight" }, "Spieler-Akte"),
+                    React.createElement("p", { className: "text-xs text-slate-400" }, "Basketball-Verein \u00B7 interne \u00DCbersicht"))),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                saveError && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs bg-red-500/20 text-red-200 px-3 py-1.5 rounded-full" },
+                    React.createElement(IconAlert, { size: 14 }),
+                    " Speichern fehlgeschlagen")),
+                React.createElement("button", { onClick: () => setModal("changeCode"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
+                    React.createElement(IconLock, { size: 12 }),
+                    " Code \u00E4ndern"))),
+        React.createElement("div", { className: "bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center gap-2 text-xs text-amber-800" },
+            React.createElement(IconInfo, { size: 14, className: "shrink-0" }),
+            "Zugriff ist nur mit eurem gemeinsamen Code m\u00F6glich. Alle, die den Code kennen, sehen und bearbeiten dieselben Daten \u2013 es gibt keine Trennung nach einzelnem Trainer."),
+        React.createElement("div", { className: "flex flex-col md:flex-row flex-1" },
+            React.createElement("aside", { className: "w-full md:w-80 border-b md:border-b-0 md:border-r border-stone-200 bg-white p-4 flex flex-col gap-3" },
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => setSelectedTeamId(e.target.value) },
+                        React.createElement("option", { value: "all" }, "Alle Teams"),
+                        teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
+                    React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg px-3 text-sm font-medium", title: "Team anlegen" },
+                        React.createElement(IconPlus, { size: 16 }))),
+                React.createElement("div", { className: "relative" },
+                    React.createElement(IconSearch, { size: 15, className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" }),
+                    React.createElement("input", { className: inputClass + " pl-8", placeholder: "Spieler suchen...", value: search, onChange: (e) => setSearch(e.target.value) })),
+                React.createElement("button", { onClick: () => setModal("player"), disabled: teams.length === 0, className: "w-full flex items-center justify-center gap-1.5 bg-orange-600 hover:bg-orange-700 disabled:bg-stone-200 disabled:text-slate-400 text-white rounded-lg py-2 text-sm font-semibold transition" },
+                    React.createElement(IconPlus, { size: 16 }),
+                    " Spieler anlegen"),
+                teams.length === 0 && React.createElement("p", { className: "text-xs text-slate-400" }, "Legt zuerst ein Team an."),
+                React.createElement("div", { className: "flex-1 overflow-y-auto -mx-1 px-1 space-y-1" },
+                    players.length === 0 && teams.length > 0 && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-6" }, "Keine Spieler gefunden.")),
+                    players.map((p) => (React.createElement("button", { key: p.id, onClick: () => selectPlayer(p.id), className: `w-full flex items-center gap-3 p-2.5 rounded-lg text-left transition ${selectedPlayerId === p.id ? "bg-slate-900 text-white" : "hover:bg-stone-100 text-slate-900"}` },
+                        React.createElement("span", { className: `w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${selectedPlayerId === p.id ? "bg-orange-500 text-white" : "bg-slate-900 text-white"}` }, p.number !== "" && p.number !== undefined ? p.number : "–"),
+                        React.createElement("span", { className: "min-w-0 flex-1" },
+                            React.createElement("span", { className: "block text-sm font-semibold truncate" }, p.name),
+                            React.createElement("span", { className: `block text-xs truncate ${selectedPlayerId === p.id ? "text-slate-300" : "text-slate-500"}` }, p.position)),
+                        React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` })))))),
+            React.createElement("main", { className: "flex-1 p-6" },
+                !selectedPlayer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
+                    React.createElement(IconUsers, { size: 36 }),
+                    React.createElement("p", { className: "text-sm" }, "W\u00E4hle einen Spieler aus der Liste, oder lege einen neuen an."))),
+                selectedPlayer && (React.createElement("div", null,
+                    React.createElement("div", { className: "bg-white rounded-xl border border-stone-200 p-6 flex items-start justify-between flex-wrap gap-4 shadow-sm" },
+                        React.createElement("div", { className: "flex items-start gap-4" },
+                            React.createElement("div", { className: "w-16 h-16 rounded-xl bg-slate-900 text-white flex items-center justify-center text-2xl font-black shrink-0" }, selectedPlayer.number !== "" && selectedPlayer.number !== undefined ? selectedPlayer.number : "–"),
+                            React.createElement("div", null,
+                                React.createElement("h2", { className: "text-2xl font-black text-slate-900 leading-tight" }, selectedPlayer.name),
+                                React.createElement("p", { className: "text-sm text-slate-500 mt-0.5" },
+                                    selectedTeam?.name || "Kein Team",
+                                    " \u00B7 ",
+                                    selectedPlayer.position,
+                                    selectedPlayer.birthdate && React.createElement(React.Fragment, null,
+                                        " \u00B7 geb. ",
+                                        fmtDate(selectedPlayer.birthdate))),
+                                React.createElement("span", { className: `inline-block mt-2 text-xs font-semibold px-2.5 py-1 rounded-full border ${STATUS_STYLES[selectedPlayer.status]?.badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label))),
+                        React.createElement("div", { className: "flex gap-2" },
+                            React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg border border-stone-200 hover:bg-stone-50 text-slate-600", "aria-label": "Bearbeiten" },
+                                React.createElement(IconEdit, { size: 16 })),
+                            React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg border border-stone-200 hover:bg-red-50 text-red-500", "aria-label": "L\u00F6schen" },
+                                React.createElement(IconTrash, { size: 16 })))),
+                    confirmDeletePlayer && (React.createElement("div", { className: "mt-3 bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between flex-wrap gap-3" },
+                        React.createElement("p", { className: "text-sm text-red-700" }, "Spieler wirklich l\u00F6schen? Alle Statistiken, Tests, Videos und Notizen werden mitgel\u00F6scht."),
+                        React.createElement("div", { className: "flex gap-2" },
+                            React.createElement("button", { onClick: () => setConfirmDeletePlayer(false), className: "px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-slate-600 hover:bg-stone-50" }, "Abbrechen"),
+                            React.createElement("button", { onClick: handleDeletePlayer, className: "px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700" }, "Endg\u00FCltig l\u00F6schen")))),
+                    React.createElement("div", { className: "flex gap-1 border-b border-stone-200 mt-6 overflow-x-auto" }, TABS.map((t) => {
+                        const Icon = t.icon;
+                        return (React.createElement("button", { key: t.key, onClick: () => setActiveTab(t.key), className: `flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition ${activeTab === t.key ? "border-orange-600 text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}` },
+                            React.createElement(Icon, { size: 15 }),
+                            " ",
+                            t.label));
+                    })),
+                    React.createElement("div", { className: "mt-5" },
+                        activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
+                            React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-4" }, [
+                                ["Spiele erfasst", playerStats.length],
+                                ["Ø Punkte", avg("punkte")],
+                                ["Ø Rebounds", avgReb],
+                                ["Ø Assists", avg("assists")],
+                            ].map(([label, value]) => (React.createElement("div", { key: label, className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm" },
+                                React.createElement("p", { className: "text-2xl font-black text-orange-600" }, value),
+                                React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, label))))),
+                            React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-4 gap-4" }, [
+                                ["FG%", totalPct("fgm", "fga")],
+                                ["3P%", totalPct("tpm", "tpa")],
+                                ["FT%", totalPct("ftm", "fta")],
+                                ["Ø Fouls", avg("fouls")],
+                            ].map(([label, value]) => (React.createElement("div", { key: label, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
+                                React.createElement("p", { className: "text-lg font-bold text-slate-700" }, value),
+                                React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, label))))),
+                            React.createElement("div", { className: "grid md:grid-cols-2 gap-4" },
+                                React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 shadow-sm" },
+                                    React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzter Athletik-Test"),
+                                    playerTests[0] ? (React.createElement("p", { className: "text-sm text-slate-700" },
+                                        playerTests[0].testType,
+                                        ": ",
+                                        React.createElement("span", { className: "font-semibold" },
+                                            playerTests[0].result,
+                                            " ",
+                                            playerTests[0].unit),
+                                        " (",
+                                        fmtDate(playerTests[0].date),
+                                        ")")) : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Tests erfasst.")),
+                                React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 shadow-sm" },
+                                    React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzte Notiz"),
+                                    playerNotes[0] ? (React.createElement("p", { className: "text-sm text-slate-700 line-clamp-2" }, playerNotes[0].text)) : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Notizen erfasst."))))),
+                        activeTab === "statistik" && (React.createElement("div", null,
+                            React.createElement("div", { className: "flex justify-end mb-3" },
+                                React.createElement("button", { onClick: () => setModal("stat"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
+                                    React.createElement(IconPlus, { size: 15 }),
+                                    " Eintrag")),
+                            playerStats.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Spielstatistiken erfasst.")) : (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 overflow-x-auto shadow-sm" },
+                                React.createElement("table", { className: "w-full text-sm" },
+                                    React.createElement("thead", null,
+                                        React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
+                                            React.createElement("th", { className: "text-left px-3 py-2" }, "Datum"),
+                                            React.createElement("th", { className: "text-left px-3 py-2" }, "Gegner"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Min"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Pkt"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "FG"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "FG%"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "3P"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "3P%"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "FT"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "FT%"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "OREB"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "DREB"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "REB"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Ast"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Stl"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "Blk"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "TO"),
+                                            React.createElement("th", { className: "text-right px-3 py-2" }, "PF"),
+                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Deflections" }, "Defl"),
+                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Charges Taken" }, "Chg"),
+                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Loose Balls" }, "LB"),
+                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Kontestierte W\u00FCrfe" }, "CS"),
+                                            React.createElement("th", { className: "text-right px-3 py-2", title: "Screen Assists" }, "SA"),
+                                            React.createElement("th", { className: "px-3 py-2" }))),
+                                    React.createElement("tbody", null, playerStats.map((s) => {
+                                        const totalReb = (Number(s.rebOff) || 0) + (Number(s.rebDef) || 0) || s.rebounds || 0;
+                                        return (React.createElement("tr", { key: s.id, className: "border-b border-stone-100 last:border-0 hover:bg-stone-50" },
+                                            React.createElement("td", { className: "px-3 py-2 whitespace-nowrap" }, fmtDate(s.date)),
+                                            React.createElement("td", { className: "px-3 py-2" }, s.gegner || "–"),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.minuten || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right font-semibold" }, s.punkte || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right whitespace-nowrap" },
+                                                s.fgm || 0,
+                                                "/",
+                                                s.fga || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s.fgm, s.fga) !== null ? `${pct(s.fgm, s.fga)}%` : "–"),
+                                            React.createElement("td", { className: "px-3 py-2 text-right whitespace-nowrap" },
+                                                s.tpm || 0,
+                                                "/",
+                                                s.tpa || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s.tpm, s.tpa) !== null ? `${pct(s.tpm, s.tpa)}%` : "–"),
+                                            React.createElement("td", { className: "px-3 py-2 text-right whitespace-nowrap" },
+                                                s.ftm || 0,
+                                                "/",
+                                                s.fta || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s.ftm, s.fta) !== null ? `${pct(s.ftm, s.fta)}%` : "–"),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.rebOff || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.rebDef || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right font-medium" }, totalReb),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.assists || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.steals || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.blocks || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.turnovers || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.fouls || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.deflections || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.charges || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.looseBalls || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.contestedShots || 0),
+                                            React.createElement("td", { className: "px-3 py-2 text-right" }, s.screenAssists || 0),
+                                            React.createElement("td", { className: "px-2 py-2 text-right" },
+                                                React.createElement("button", { onClick: () => deleteItem("stats", s.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
+                                                    React.createElement(IconTrash, { size: 14 })))));
+                                    }))))))),
+                        activeTab === "test" && (React.createElement("div", null,
+                            React.createElement("div", { className: "flex justify-end mb-3" },
+                                React.createElement("button", { onClick: () => setModal("test"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
+                                    React.createElement(IconPlus, { size: 15 }),
+                                    " Testergebnis")),
+                            playerTests.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Athletik-Tests erfasst.")) : (React.createElement("div", { className: "space-y-2" }, playerTests.map((t, i) => {
+                                const prev = playerTests.slice(i + 1).find((o) => o.testType === t.testType);
+                                const diff = prev ? +(t.result - prev.result).toFixed(2) : null;
+                                return (React.createElement("div", { key: t.id, className: "bg-white rounded-lg border border-stone-200 p-3 flex items-center justify-between gap-3" },
+                                    React.createElement("div", null,
+                                        React.createElement("p", { className: "text-sm font-semibold text-slate-900" }, t.testType),
+                                        React.createElement("p", { className: "text-xs text-slate-500" }, fmtDate(t.date))),
+                                    React.createElement("div", { className: "flex items-center gap-3" },
+                                        React.createElement("p", { className: "text-sm font-bold text-slate-900" },
+                                            t.result,
+                                            " ",
+                                            React.createElement("span", { className: "font-normal text-slate-400" }, t.unit)),
+                                        diff !== null && diff !== 0 && (React.createElement("span", { className: `flex items-center gap-0.5 text-xs font-medium ${diff > 0 ? "text-emerald-600" : "text-red-500"}` },
+                                            diff > 0 ? React.createElement(IconTrendUp, { size: 13 }) : React.createElement(IconTrendDown, { size: 13 }),
+                                            " ",
+                                            Math.abs(diff))),
+                                        React.createElement("button", { onClick: () => deleteItem("tests", t.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
+                                            React.createElement(IconTrash, { size: 14 })))));
+                            }))))),
+                        activeTab === "video" && (React.createElement("div", null,
+                            React.createElement("div", { className: "flex justify-end mb-3" },
+                                React.createElement("button", { onClick: () => setModal("video"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
+                                    React.createElement(IconPlus, { size: 15 }),
+                                    " Video")),
+                            playerVideos.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Videos verkn\u00FCpft.")) : (React.createElement("div", { className: "grid sm:grid-cols-2 gap-4" }, playerVideos.map((v) => {
+                                const embedUrl = getEmbedUrl(v.url);
+                                return (React.createElement("div", { key: v.id, className: "bg-white rounded-lg border border-stone-200 overflow-hidden shadow-sm" },
+                                    embedUrl ? (React.createElement("div", { className: "relative w-full bg-black", style: { paddingBottom: "56.25%" } },
+                                        React.createElement("iframe", { src: embedUrl, className: "absolute inset-0 w-full h-full", frameBorder: "0", allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture", allowFullScreen: true, title: v.description || v.type }))) : (React.createElement("a", { href: v.url, target: "_blank", rel: "noopener noreferrer", className: "flex flex-col items-center justify-center gap-1.5 h-36 bg-stone-50 text-slate-400 hover:text-orange-600 hover:bg-stone-100 transition" },
+                                        React.createElement(IconVideo, { size: 22 }),
+                                        React.createElement("span", { className: "text-xs font-medium" }, "Keine Vorschau, Link \u00F6ffnen"))),
+                                    React.createElement("div", { className: "p-3" },
+                                        React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                                            React.createElement("div", { className: "flex items-center gap-2 min-w-0" },
+                                                React.createElement("span", { className: "text-xs font-semibold px-2 py-0.5 rounded-full bg-stone-100 text-slate-600 shrink-0" }, v.type),
+                                                React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, fmtDate(v.date))),
+                                            React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
+                                                React.createElement("a", { href: v.url, target: "_blank", rel: "noopener noreferrer", className: "text-slate-400 hover:text-orange-600", "aria-label": "In neuem Tab \u00F6ffnen" },
+                                                    React.createElement(IconExternal, { size: 14 })),
+                                                React.createElement("button", { onClick: () => deleteItem("videos", v.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Video l\u00F6schen" },
+                                                    React.createElement(IconTrash, { size: 14 })))),
+                                        v.description && React.createElement("p", { className: "text-sm text-slate-700 mt-1.5" }, v.description))));
+                            }))))),
+                        activeTab === "notiz" && (React.createElement("div", null,
+                            React.createElement("div", { className: "flex justify-end mb-3" },
+                                React.createElement("button", { onClick: () => setModal("note"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
+                                    React.createElement(IconPlus, { size: 15 }),
+                                    " Notiz")),
+                            playerNotes.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Notizen erfasst.")) : (React.createElement("div", { className: "space-y-2" }, playerNotes.map((n) => (React.createElement("div", { key: n.id, className: "bg-white rounded-lg border border-stone-200 p-3" },
+                                React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                                    React.createElement("div", { className: "flex items-center gap-2" },
+                                        React.createElement("span", { className: `text-xs font-semibold px-2 py-0.5 rounded-full border ${CATEGORY_STYLES[n.category]}` }, NOTE_CATEGORIES.find((c) => c.value === n.category)?.label),
+                                        React.createElement("span", { className: "text-xs text-slate-400" },
+                                            fmtDate(n.date),
+                                            " \u00B7 ",
+                                            n.author)),
+                                    React.createElement("button", { onClick: () => deleteItem("notes", n.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Notiz l\u00F6schen" },
+                                        React.createElement(IconTrash, { size: 14 }))),
+                                React.createElement("p", { className: "text-sm text-slate-700 mt-2" }, n.text))))))))))))),
+        modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
+            React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
+        modal === "player" && (React.createElement(Modal, { title: "Spieler anlegen", onClose: () => setModal(null) },
+            React.createElement(PlayerForm, { teams: teams, onSubmit: handleAddPlayer, onClose: () => setModal(null) }))),
+        modal === "editPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Spieler bearbeiten", onClose: () => setModal(null) },
+            React.createElement(PlayerForm, { teams: teams, initial: selectedPlayer, onSubmit: handleEditPlayer, onClose: () => setModal(null) }))),
+        modal === "stat" && (React.createElement(Modal, { title: "Spielstatistik hinzuf\u00FCgen", onClose: () => setModal(null), wide: true },
+            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null) }))),
+        modal === "test" && (React.createElement(Modal, { title: "Athletik-Test hinzuf\u00FCgen", onClose: () => setModal(null) },
+            React.createElement(TestForm, { onSubmit: handleAddTest, onClose: () => setModal(null) }))),
+        modal === "video" && (React.createElement(Modal, { title: "Video verkn\u00FCpfen", onClose: () => setModal(null) },
+            React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null) }))),
+        modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
+            React.createElement(NoteForm, { onSubmit: handleAddNote, onClose: () => setModal(null) }))),
+        modal === "changeCode" && (React.createElement(Modal, { title: "Zugriffscode \u00E4ndern", onClose: () => setModal(null) },
+            React.createElement(ChangeCodeForm, { onSubmit: changeAccessCode, onClose: () => setModal(null) })))));
+}
+ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(SpielerAkte, null));
+</script>
+</body>
+</html>
