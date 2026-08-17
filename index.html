@@ -170,6 +170,16 @@ const IconFile = (p) => React.createElement(Icon, { ...p },
     React.createElement("polyline", { points: "14 2 14 8 20 8" }));
 const IconPaperclip = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M21.44 11.05 12.25 20.24a5 5 0 0 1-7.07-7.07l9.19-9.19a3.5 3.5 0 0 1 4.95 4.95L9.64 18.36a2 2 0 0 1-2.83-2.83l8.49-8.48" }));
+const IconCalendar = (p) => React.createElement(Icon, { ...p },
+    React.createElement("rect", { x: "3", y: "4", width: "18", height: "18", rx: "2" }),
+    React.createElement("line", { x1: "16", y1: "2", x2: "16", y2: "6" }),
+    React.createElement("line", { x1: "8", y1: "2", x2: "8", y2: "6" }),
+    React.createElement("line", { x1: "3", y1: "10", x2: "21", y2: "10" }),
+    React.createElement("path", { d: "m9 16 2 2 4-4" }));
+const IconUpload = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
+    React.createElement("polyline", { points: "17 8 12 3 7 8" }),
+    React.createElement("line", { x1: "12", y1: "3", x2: "12", y2: "15" }));
 const POSITIONS = ["Point Guard", "Shooting Guard", "Small Forward", "Power Forward", "Center"];
 const STATUS_OPTIONS = [
     { value: "aktiv", label: "Aktiv" },
@@ -269,6 +279,61 @@ const getEmbedUrl = (url) => {
     catch (e) { /* invalid URL, no embed */ }
     return null;
 };
+const normalizeName = (s) => (s || "").toLowerCase().trim().replace(/\s+/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+function parseGermanNumber(s) {
+    if (s === undefined || s === null)
+        return 0;
+    const cleaned = String(s).replace("%", "").trim().replace(",", ".");
+    const n = parseFloat(cleaned);
+    return isNaN(n) ? 0 : n;
+}
+function splitCsvLine(line, delimiter) {
+    return line.split(delimiter).map((c) => c.trim().replace(/^"|"$/g, ""));
+}
+function parseAttendanceCsv(text) {
+    const lines = text.split(/\r\n|\n|\r/).filter((l) => l.length > 0);
+    const delimiter = (lines[0] || "").split(";").length > (lines[0] || "").split(",").length ? ";" : ",";
+    let headerIdx = -1;
+    let cols = {};
+    for (let i = 0; i < Math.min(lines.length, 10); i++) {
+        const cells = splitCsvLine(lines[i], delimiter).map((c) => c.toLowerCase());
+        const nameIdx = cells.findIndex((c) => c === "spieler" || c.includes("spieler") && !c.includes("id") && !c.includes("team"));
+        const teamIdx = cells.findIndex((c) => c.includes("team"));
+        if (nameIdx !== -1 && teamIdx !== -1) {
+            headerIdx = i;
+            cols = {
+                name: nameIdx,
+                team: teamIdx,
+                anwesend: cells.findIndex((c) => c === "anwesend"),
+                abwesend: cells.findIndex((c) => c === "abwesend"),
+                entschuldigt: cells.findIndex((c) => c.includes("entschuldigt")),
+                gesamt: cells.findIndex((c) => c.includes("gesamt")),
+            };
+            break;
+        }
+    }
+    if (headerIdx === -1)
+        return { rows: [], error: "Konnte die Spalten \"Spieler\" und \"Stammteam\" nicht finden. Ist das die richtige Datei/Seite?" };
+    const rows = [];
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+        const cells = splitCsvLine(lines[i], delimiter);
+        if (/automatische wochen|aktuelle kw|vorwoche/i.test(cells[0] || ""))
+            continue;
+        const name = (cells[cols.name] || "").trim();
+        if (!name)
+            continue;
+        const team = (cells[cols.team] || "").trim();
+        rows.push({
+            name,
+            team: team === "0" ? "" : team,
+            anwesend: cols.anwesend !== -1 ? Math.round(parseGermanNumber(cells[cols.anwesend])) : 0,
+            abwesend: cols.abwesend !== -1 ? Math.round(parseGermanNumber(cells[cols.abwesend])) : 0,
+            entschuldigt: cols.entschuldigt !== -1 ? Math.round(parseGermanNumber(cells[cols.entschuldigt])) : 0,
+            einheitenGesamt: cols.gesamt !== -1 ? Math.round(parseGermanNumber(cells[cols.gesamt])) : 0,
+        });
+    }
+    return { rows, error: null };
+}
 const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#eb1e23] focus:border-[#eb1e23]";
 const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
 function Modal({ title, onClose, children, wide }) {
@@ -674,10 +739,112 @@ function ChangeCodeForm({ onSubmit, onClose }) {
         React.createElement("p", { className: "text-xs text-slate-500" }, "Gebt den neuen Code an alle Trainer weiter \u2013 der alte Code funktioniert danach nicht mehr."),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Code speichern")));
 }
+function AttendanceImportModal({ players, teams, onConfirm, onClose }) {
+    const [stage, setStage] = useState("upload");
+    const [parseError, setParseError] = useState("");
+    const [rows, setRows] = useState([]);
+    const [matches, setMatches] = useState([]);
+    const [date, setDate] = useState(today());
+    const [fileName, setFileName] = useState("");
+    const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
+    const playerOptionLabel = (p) => `${p.name}${p.teamId ? " (" + teamName(p.teamId) + ")" : ""}`;
+    function handleFile(e) {
+        const file = e.target.files[0];
+        if (!file)
+            return;
+        setFileName(file.name);
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const { rows: parsed, error } = parseAttendanceCsv(ev.target.result);
+            if (error) {
+                setParseError(error);
+                return;
+            }
+            if (parsed.length === 0) {
+                setParseError("Keine verwertbaren Zeilen in der Datei gefunden.");
+                return;
+            }
+            setRows(parsed);
+            setMatches(parsed.map((row) => {
+                const norm = normalizeName(row.name);
+                const hit = players.find((p) => normalizeName(p.name) === norm);
+                return hit ? hit.id : "";
+            }));
+            setParseError("");
+            setStage("review");
+        };
+        reader.onerror = () => setParseError("Datei konnte nicht gelesen werden.");
+        reader.readAsText(file, "windows-1252");
+    }
+    function setMatchAt(i, playerId) {
+        setMatches((m) => m.map((v, idx) => (idx === i ? playerId : v)));
+    }
+    function handleConfirm() {
+        const entries = rows
+            .map((row, i) => ({ row, playerId: matches[i] }))
+            .filter((x) => x.playerId)
+            .map((x) => ({
+            playerId: x.playerId,
+            anwesend: x.row.anwesend,
+            abwesend: x.row.abwesend,
+            entschuldigt: x.row.entschuldigt,
+            einheitenGesamt: x.row.einheitenGesamt,
+        }));
+        onConfirm(entries, date);
+        onClose();
+    }
+    const matchedCount = matches.filter(Boolean).length;
+    if (stage === "upload") {
+        return (React.createElement("div", { className: "space-y-4" },
+            React.createElement("p", { className: "text-xs text-slate-500" }, "CSV-Export aus eurer Anwesenheits-\u00DCbersicht ausw\u00E4hlen. Titel-/Fu\u00DFzeilen werden automatisch \u00FCbersprungen, ihr m\u00FCsst nichts vorbereiten."),
+            React.createElement("label", { className: "flex flex-col items-center justify-center gap-2 border-2 border-dashed border-stone-300 rounded-lg py-8 cursor-pointer hover:border-[#eb1e23] hover:bg-red-50/30 transition" },
+                React.createElement(IconUpload, { size: 24, className: "text-slate-400" }),
+                React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, "CSV-Datei ausw\u00E4hlen"),
+                React.createElement("input", { type: "file", accept: ".csv,text/csv", className: "hidden", onChange: handleFile })),
+            fileName && !parseError && React.createElement("p", { className: "text-xs text-slate-400" },
+                "Zuletzt gew\u00E4hlt: ",
+                fileName),
+            parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError)));
+    }
+    return (React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "flex items-center justify-between gap-3 flex-wrap" },
+            React.createElement(Field, { label: "Datum dieses Schnappschusses" },
+                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
+            React.createElement("p", { className: "text-xs text-slate-500" },
+                matchedCount,
+                " von ",
+                rows.length,
+                " Zeilen zugeordnet")),
+        React.createElement("div", { className: "max-h-[45vh] overflow-y-auto border border-stone-200 rounded-lg" },
+            React.createElement("table", { className: "w-full text-xs" },
+                React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
+                    React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
+                        React.createElement("th", { className: "text-left px-2.5 py-2" }, "Aus Datei"),
+                        React.createElement("th", { className: "text-right px-2.5 py-2" }, "Einh."),
+                        React.createElement("th", { className: "text-left px-2.5 py-2 w-1/2" }, "Zugeordneter Spieler"))),
+                React.createElement("tbody", null, rows.map((row, i) => (React.createElement("tr", { key: i, className: "border-t border-stone-100" },
+                    React.createElement("td", { className: "px-2.5 py-1.5" },
+                        React.createElement("div", { className: "font-medium text-slate-700" }, row.name),
+                        row.team && React.createElement("div", { className: "text-slate-400" }, row.team)),
+                    React.createElement("td", { className: "px-2.5 py-1.5 text-right text-slate-500" },
+                        row.anwesend,
+                        "/",
+                        row.einheitenGesamt),
+                    React.createElement("td", { className: "px-2.5 py-1.5" },
+                        React.createElement("select", { className: `w-full rounded border px-1.5 py-1 text-xs ${matches[i] ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`, value: matches[i], onChange: (e) => setMatchAt(i, e.target.value) },
+                            React.createElement("option", { value: "" }, "\u2013 \u00DCberspringen \u2013"),
+                            players.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))))))))),
+        React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { onClick: () => setStage("upload"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Andere Datei"),
+            React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
+                matchedCount,
+                " Eintr\u00E4ge importieren"))));
+}
 const TABS = [
     { key: "uebersicht", label: "Übersicht", icon: IconUsers },
     { key: "statistik", label: "Statistiken", icon: IconActivity },
     { key: "test", label: "Athletik-Tests", icon: IconClipboard },
+    { key: "anwesenheit", label: "Anwesenheit", icon: IconCalendar },
     { key: "video", label: "Videos", icon: IconVideo },
     { key: "notiz", label: "Notizen", icon: IconNote },
 ];
@@ -702,7 +869,7 @@ function SpielerAkte() {
                 await auth.signInAnonymously();
                 const docRef = db.collection("club").doc("data");
                 const snap = await docRef.get();
-                const defaults = { accessCode: null, teams: [], players: [], stats: [], tests: [], videos: [], notes: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES };
+                const defaults = { accessCode: null, teams: [], players: [], stats: [], tests: [], videos: [], notes: [], attendance: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES };
                 if (snap.exists) {
                     if (!cancelled)
                         setData({ ...defaults, ...snap.data() });
@@ -805,6 +972,7 @@ function SpielerAkte() {
     const playerTests = selectedPlayer ? sortByDateDesc(data.tests.filter((t) => t.playerId === selectedPlayer.id)) : [];
     const playerVideos = selectedPlayer ? sortByDateDesc(data.videos.filter((v) => v.playerId === selectedPlayer.id)) : [];
     const playerNotes = selectedPlayer ? sortByDateDesc(data.notes.filter((n) => n.playerId === selectedPlayer.id)) : [];
+    const playerAttendance = selectedPlayer ? sortByDateDesc((data.attendance || []).filter((a) => a.playerId === selectedPlayer.id)) : [];
     const avg = (key) => (playerStats.length ? (playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length).toFixed(1) : "–");
     const totalPct = (madeKey, attKey) => {
         const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
@@ -852,6 +1020,10 @@ function SpielerAkte() {
     }
     function handleAddNote(entry) {
         persist({ ...data, notes: [...data.notes, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+    }
+    function handleImportAttendance(entries, date) {
+        const newRecords = entries.map((e) => ({ id: uid(), date, ...e }));
+        persist({ ...data, attendance: [...(data.attendance || []), ...newRecords] });
     }
     function deleteItem(collection, id) {
         persist({ ...data, [collection]: data[collection].filter((item) => item.id !== id) });
@@ -948,6 +1120,9 @@ function SpielerAkte() {
                 React.createElement("button", { onClick: () => setModal("testTypes"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
                     React.createElement(IconSettings, { size: 12 }),
                     " Test-Arten"),
+                React.createElement("button", { onClick: () => setModal("importAttendance"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
+                    React.createElement(IconUpload, { size: 12 }),
+                    " Anwesenheit importieren"),
                 React.createElement("button", { onClick: () => setModal("changeCode"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
                     React.createElement(IconLock, { size: 12 }),
                     " Code \u00E4ndern"))),
@@ -1014,9 +1189,16 @@ function SpielerAkte() {
                     })),
                     React.createElement("div", { className: "mt-5" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
-                            React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm w-full md:w-48" },
-                                React.createElement("p", { className: "text-2xl font-black text-[#eb1e23]" }, playerStats.length),
-                                React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Spiele erfasst")),
+                            React.createElement("div", { className: "flex flex-wrap gap-4" },
+                                React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm w-full md:w-48" },
+                                    React.createElement("p", { className: "text-2xl font-black text-[#eb1e23]" }, playerStats.length),
+                                    React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Spiele erfasst")),
+                                playerAttendance[0] && (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm w-full md:w-48" },
+                                    React.createElement("p", { className: "text-2xl font-black text-[#0a96d4]" }, playerAttendance[0].einheitenGesamt ? `${Math.round((playerAttendance[0].anwesend / playerAttendance[0].einheitenGesamt) * 1000) / 10}%` : "–"),
+                                    React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" },
+                                        "Anwesenheit (Stand ",
+                                        fmtDate(playerAttendance[0].date),
+                                        ")")))),
                             statCategories.map((cat) => (cat.fields.length > 0 && (React.createElement("div", { key: cat.id },
                                 React.createElement(SectionLabel, null, cat.label),
                                 React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-4 gap-3 mt-1.5" }, cat.fields.map((f) => (React.createElement("div", { key: f.id, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
@@ -1093,6 +1275,27 @@ function SpielerAkte() {
                                         React.createElement("button", { onClick: () => deleteItem("tests", t.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                             React.createElement(IconTrash, { size: 14 })))));
                             }))))),
+                        activeTab === "anwesenheit" && (React.createElement("div", null, playerAttendance.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Anwesenheitsdaten importiert. \u00DCber \"Anwesenheit importieren\" oben im Header l\u00E4sst sich eine CSV-Datei einlesen.")) : (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 overflow-x-auto shadow-sm" },
+                            React.createElement("table", { className: "w-full text-sm" },
+                                React.createElement("thead", null,
+                                    React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
+                                        React.createElement("th", { className: "text-left px-3 py-2" }, "Stand vom"),
+                                        React.createElement("th", { className: "text-right px-3 py-2" }, "Anwesend"),
+                                        React.createElement("th", { className: "text-right px-3 py-2" }, "Abwesend"),
+                                        React.createElement("th", { className: "text-right px-3 py-2" }, "Entschuldigt"),
+                                        React.createElement("th", { className: "text-right px-3 py-2" }, "Einheiten"),
+                                        React.createElement("th", { className: "text-right px-3 py-2" }, "Quote"),
+                                        React.createElement("th", { className: "px-3 py-2" }))),
+                                React.createElement("tbody", null, playerAttendance.map((a) => (React.createElement("tr", { key: a.id, className: "border-b border-stone-100 last:border-0 hover:bg-stone-50" },
+                                    React.createElement("td", { className: "px-3 py-2 whitespace-nowrap" }, fmtDate(a.date)),
+                                    React.createElement("td", { className: "px-3 py-2 text-right font-semibold" }, a.anwesend),
+                                    React.createElement("td", { className: "px-3 py-2 text-right" }, a.abwesend),
+                                    React.createElement("td", { className: "px-3 py-2 text-right" }, a.entschuldigt),
+                                    React.createElement("td", { className: "px-3 py-2 text-right" }, a.einheitenGesamt),
+                                    React.createElement("td", { className: "px-3 py-2 text-right font-medium" }, a.einheitenGesamt ? `${Math.round((a.anwesend / a.einheitenGesamt) * 1000) / 10}%` : "–"),
+                                    React.createElement("td", { className: "px-2 py-2 text-right" },
+                                        React.createElement("button", { onClick: () => deleteItem("attendance", a.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
+                                            React.createElement(IconTrash, { size: 14 })))))))))))),
                         activeTab === "video" && (React.createElement("div", null,
                             React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("video"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
@@ -1156,7 +1359,9 @@ function SpielerAkte() {
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(NoteForm, { onSubmit: handleAddNote, onClose: () => setModal(null) }))),
         modal === "changeCode" && (React.createElement(Modal, { title: "Zugriffscode \u00E4ndern", onClose: () => setModal(null) },
-            React.createElement(ChangeCodeForm, { onSubmit: changeAccessCode, onClose: () => setModal(null) })))));
+            React.createElement(ChangeCodeForm, { onSubmit: changeAccessCode, onClose: () => setModal(null) }))),
+        modal === "importAttendance" && (React.createElement(Modal, { title: "Anwesenheit aus CSV importieren", onClose: () => setModal(null), wide: true },
+            React.createElement(AttendanceImportModal, { players: data.players, teams: teams, onConfirm: handleImportAttendance, onClose: () => setModal(null) })))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(SpielerAkte, null));
 </script>
