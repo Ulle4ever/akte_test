@@ -334,6 +334,57 @@ function parseAttendanceCsv(text) {
     }
     return { rows, error: null };
 }
+function parseHabitsCsv(text) {
+    const clean = text.replace(/^\uFEFF/, "");
+    const lines = clean.split(/\r\n|\n|\r/);
+    const summaryMarkerIdx = lines.findIndex((l) => l.trim().toUpperCase().startsWith("AUSWERTUNG"));
+    if (summaryMarkerIdx === -1)
+        return { players: [], habits: [], error: "Konnte den Abschnitt \"AUSWERTUNG GESAMT\" nicht finden. Ist das die richtige Datei?" };
+    let headerIdx = -1;
+    for (let i = summaryMarkerIdx + 1; i < Math.min(lines.length, summaryMarkerIdx + 5); i++) {
+        const cells = lines[i].split(";");
+        if (cells.some((c) => c.trim().toLowerCase() === "habit")) {
+            headerIdx = i;
+            break;
+        }
+    }
+    if (headerIdx === -1)
+        return { players: [], habits: [], error: "Konnte die Spieler-Kopfzeile nicht finden." };
+    const headerCells = lines[headerIdx].split(";");
+    const habitColIdx = headerCells.findIndex((c) => c.trim().toLowerCase() === "habit");
+    const players = [];
+    for (let c = habitColIdx + 1; c < headerCells.length; c++) {
+        const raw = headerCells[c].trim();
+        if (!raw)
+            continue;
+        const m = raw.match(/^#(\d+)\s*(.+)$/);
+        if (m)
+            players.push({ colIndex: c, number: parseInt(m[1], 10), name: m[2].trim() });
+    }
+    const skipLabels = ["summe", "situationen", "schnitt"];
+    const habits = [];
+    for (let i = headerIdx + 1; i < lines.length; i++) {
+        const cells = lines[i].split(";");
+        if (cells.length <= habitColIdx)
+            break;
+        const label = (cells[habitColIdx] || "").trim();
+        if (!label)
+            break;
+        if (skipLabels.includes(label.toLowerCase()))
+            continue;
+        const values = {};
+        players.forEach((p) => {
+            const raw = (cells[p.colIndex] || "").trim();
+            if (raw === "")
+                return;
+            const num = parseFloat(raw.replace(",", "."));
+            if (!isNaN(num))
+                values[p.colIndex] = num;
+        });
+        habits.push({ label, values });
+    }
+    return { players, habits, error: null };
+}
 const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#eb1e23] focus:border-[#eb1e23]";
 const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
 function Modal({ title, onClose, children, wide }) {
@@ -840,6 +891,117 @@ function AttendanceImportModal({ players, teams, onConfirm, onClose }) {
                 matchedCount,
                 " Eintr\u00E4ge importieren"))));
 }
+function HabitStatsImportModal({ players, teams, onConfirm, onClose }) {
+    const [stage, setStage] = useState("upload");
+    const [parseError, setParseError] = useState("");
+    const [filePlayers, setFilePlayers] = useState([]);
+    const [habits, setHabits] = useState([]);
+    const [matches, setMatches] = useState([]);
+    const [date, setDate] = useState(today());
+    const [gegner, setGegner] = useState("");
+    const [fileName, setFileName] = useState("");
+    const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
+    const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}${p.teamId ? " (" + teamName(p.teamId) + ")" : ""}`;
+    function handleFile(e) {
+        const file = e.target.files[0];
+        if (!file)
+            return;
+        setFileName(file.name);
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const { players: fp, habits: h, error } = parseHabitsCsv(ev.target.result);
+            if (error) {
+                setParseError(error);
+                return;
+            }
+            if (fp.length === 0) {
+                setParseError("Keine Spieler-Spalten in der Datei gefunden.");
+                return;
+            }
+            setFilePlayers(fp);
+            setHabits(h);
+            setMatches(fp.map((fpl) => {
+                const byNumber = players.filter((p) => Number(p.number) === fpl.number);
+                if (byNumber.length === 1)
+                    return byNumber[0].id;
+                const norm = normalizeName(fpl.name);
+                const byName = players.find((p) => normalizeName(p.name) === norm);
+                return byName ? byName.id : "";
+            }));
+            setParseError("");
+            setStage("review");
+        };
+        reader.onerror = () => setParseError("Datei konnte nicht gelesen werden.");
+        reader.readAsText(file, "utf-8");
+    }
+    function setMatchAt(i, playerId) {
+        setMatches((m) => m.map((v, idx) => (idx === i ? playerId : v)));
+    }
+    function handleConfirm() {
+        const perPlayerValues = {};
+        filePlayers.forEach((fp, i) => {
+            const playerId = matches[i];
+            if (!playerId)
+                return;
+            const values = {};
+            habits.forEach((h) => {
+                const v = h.values[fp.colIndex];
+                if (v !== undefined)
+                    values[h.label] = v;
+            });
+            if (Object.keys(values).length > 0)
+                perPlayerValues[playerId] = values;
+        });
+        onConfirm(perPlayerValues, date, gegner.trim());
+        onClose();
+    }
+    const matchedCount = matches.filter(Boolean).length;
+    const newHabitLabels = habits.map((h) => h.label);
+    if (stage === "upload") {
+        return (React.createElement("div", { className: "space-y-4" },
+            React.createElement("p", { className: "text-xs text-slate-500" }, "CSV-Export aus eurem Habit-Tracking-Tool nach einem Spiel ausw\u00E4hlen. Genutzt wird der Abschnitt \"AUSWERTUNG GESAMT\" mit den Summen je Spieler und Habit."),
+            React.createElement("label", { className: "flex flex-col items-center justify-center gap-2 border-2 border-dashed border-stone-300 rounded-lg py-8 cursor-pointer hover:border-[#eb1e23] hover:bg-red-50/30 transition" },
+                React.createElement(IconUpload, { size: 24, className: "text-slate-400" }),
+                React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, "CSV-Datei ausw\u00E4hlen"),
+                React.createElement("input", { type: "file", accept: ".csv,text/csv", className: "hidden", onChange: handleFile })),
+            fileName && !parseError && React.createElement("p", { className: "text-xs text-slate-400" },
+                "Zuletzt gew\u00E4hlt: ",
+                fileName),
+            parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError)));
+    }
+    return (React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "flex items-center gap-3 flex-wrap" },
+            React.createElement(Field, { label: "Datum des Spiels" },
+                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
+            React.createElement(Field, { label: "Gegner (optional)" },
+                React.createElement("input", { className: inputClass, value: gegner, onChange: (e) => setGegner(e.target.value), placeholder: "z. B. TSV Nord" }))),
+        React.createElement("p", { className: "text-xs text-slate-500" },
+            "Gefundene Habits: ",
+            newHabitLabels.join(", ") || "–",
+            ". Felder, die es unter \"Hustle-Stats\" noch nicht gibt, werden automatisch angelegt. Werte flie\u00DFen in einen bestehenden Statistik-Eintrag vom selben Datum ein, oder es wird ein neuer angelegt."),
+        React.createElement("div", { className: "max-h-[40vh] overflow-y-auto border border-stone-200 rounded-lg" },
+            React.createElement("table", { className: "w-full text-xs" },
+                React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
+                    React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
+                        React.createElement("th", { className: "text-left px-2.5 py-2" }, "Aus Datei"),
+                        React.createElement("th", { className: "text-left px-2.5 py-2 w-1/2" }, "Zugeordneter Spieler"))),
+                React.createElement("tbody", null, filePlayers.map((fp, i) => (React.createElement("tr", { key: i, className: "border-t border-stone-100" },
+                    React.createElement("td", { className: "px-2.5 py-1.5" },
+                        React.createElement("div", { className: "font-medium text-slate-700" },
+                            "#",
+                            fp.number,
+                            " ",
+                            fp.name)),
+                    React.createElement("td", { className: "px-2.5 py-1.5" },
+                        React.createElement("select", { className: `w-full rounded border px-1.5 py-1 text-xs ${matches[i] ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`, value: matches[i], onChange: (e) => setMatchAt(i, e.target.value) },
+                            React.createElement("option", { value: "" }, "\u2013 \u00DCberspringen \u2013"),
+                            players.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))))))))),
+        React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { onClick: () => setStage("upload"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Andere Datei"),
+            React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0 || !date, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
+                matchedCount,
+                " Spieler importieren"))));
+}
 const TABS = [
     { key: "uebersicht", label: "Übersicht", icon: IconUsers },
     { key: "statistik", label: "Statistiken", icon: IconActivity },
@@ -1025,6 +1187,48 @@ function SpielerAkte() {
         const newRecords = entries.map((e) => ({ id: uid(), date, ...e }));
         persist({ ...data, attendance: [...(data.attendance || []), ...newRecords] });
     }
+    function handleImportHabitStats(perPlayerValues, date, gegner) {
+        const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
+        let hustleCat = cats.find((c) => c.id === "hustle");
+        if (!hustleCat) {
+            hustleCat = { id: "hustle", label: "Hustle-Stats", fields: [] };
+            cats.push(hustleCat);
+        }
+        const allLabels = new Set();
+        Object.values(perPlayerValues).forEach((v) => Object.keys(v).forEach((label) => allLabels.add(label)));
+        const labelToFieldId = {};
+        allLabels.forEach((label) => {
+            let foundId = null;
+            for (const c of cats) {
+                const f = c.fields.find((f) => f.label.toLowerCase() === label.toLowerCase());
+                if (f) {
+                    foundId = f.id;
+                    break;
+                }
+            }
+            if (foundId) {
+                labelToFieldId[label] = foundId;
+            }
+            else {
+                const newField = { id: uid(), label, kind: "number" };
+                hustleCat.fields = [...hustleCat.fields, newField];
+                labelToFieldId[label] = newField.id;
+            }
+        });
+        let newStats = [...data.stats];
+        Object.entries(perPlayerValues).forEach(([playerId, valuesByLabel]) => {
+            const fieldValues = {};
+            Object.entries(valuesByLabel).forEach(([label, val]) => { fieldValues[labelToFieldId[label]] = val; });
+            const existingIdx = newStats.findIndex((s) => s.playerId === playerId && s.date === date);
+            if (existingIdx !== -1) {
+                newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
+            }
+            else {
+                newStats.push({ id: uid(), playerId, date, gegner: gegner || "", minuten: 0, ...fieldValues });
+            }
+        });
+        persist({ ...data, statCategories: cats, stats: newStats });
+    }
     function deleteItem(collection, id) {
         persist({ ...data, [collection]: data[collection].filter((item) => item.id !== id) });
     }
@@ -1123,6 +1327,9 @@ function SpielerAkte() {
                 React.createElement("button", { onClick: () => setModal("importAttendance"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
                     React.createElement(IconUpload, { size: 12 }),
                     " Anwesenheit importieren"),
+                React.createElement("button", { onClick: () => setModal("importHabits"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
+                    React.createElement(IconUpload, { size: 12 }),
+                    " Habit-Stats importieren"),
                 React.createElement("button", { onClick: () => setModal("changeCode"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
                     React.createElement(IconLock, { size: 12 }),
                     " Code \u00E4ndern"))),
@@ -1361,7 +1568,9 @@ function SpielerAkte() {
         modal === "changeCode" && (React.createElement(Modal, { title: "Zugriffscode \u00E4ndern", onClose: () => setModal(null) },
             React.createElement(ChangeCodeForm, { onSubmit: changeAccessCode, onClose: () => setModal(null) }))),
         modal === "importAttendance" && (React.createElement(Modal, { title: "Anwesenheit aus CSV importieren", onClose: () => setModal(null), wide: true },
-            React.createElement(AttendanceImportModal, { players: data.players, teams: teams, onConfirm: handleImportAttendance, onClose: () => setModal(null) })))));
+            React.createElement(AttendanceImportModal, { players: data.players, teams: teams, onConfirm: handleImportAttendance, onClose: () => setModal(null) }))),
+        modal === "importHabits" && (React.createElement(Modal, { title: "Habit-Stats aus CSV importieren", onClose: () => setModal(null), wide: true },
+            React.createElement(HabitStatsImportModal, { players: data.players, teams: teams, onConfirm: handleImportHabitStats, onClose: () => setModal(null) })))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(SpielerAkte, null));
 </script>
