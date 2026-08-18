@@ -28,6 +28,7 @@
     font-style: normal;
     font-display: swap;
   }
+  html, body { overflow-x: hidden; max-width: 100vw; }
   body { font-family: "Montserrat", ui-sans-serif, system-ui, sans-serif; }
 </style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -1142,6 +1143,54 @@ function BoxscoreImportModal({ players, teams, onConfirm, onClose }) {
                 matchedCount,
                 " Spieler importieren"))));
 }
+function TeamOverviewTable({ team, players, data, statCategories, onSelectPlayer }) {
+    const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
+    const normalFields = normalCat ? normalCat.fields.filter((f) => f.kind !== "shooting") : [];
+    function avgFor(playerId, fieldId) {
+        const entries = data.stats.filter((s) => s.playerId === playerId);
+        if (entries.length === 0)
+            return "–";
+        const sum = entries.reduce((acc, s) => acc + (Number(s[fieldId]) || 0), 0);
+        return (sum / entries.length).toFixed(1);
+    }
+    function fgPctFor(playerId) {
+        const entries = data.stats.filter((s) => s.playerId === playerId);
+        const made = entries.reduce((acc, s) => acc + (Number(s.fg_m) || 0), 0);
+        const att = entries.reduce((acc, s) => acc + (Number(s.fg_a) || 0), 0);
+        return att ? `${Math.round((made / att) * 1000) / 10}%` : "–";
+    }
+    function latestAttendance(playerId) {
+        const entries = sortByDateDesc((data.attendance || []).filter((a) => a.playerId === playerId));
+        if (entries.length === 0)
+            return "–";
+        const a = entries[0];
+        return a.einheitenGesamt ? `${Math.round((a.anwesend / a.einheitenGesamt) * 1000) / 10}%` : "–";
+    }
+    return (React.createElement("div", null,
+        React.createElement("div", { className: "mb-4" },
+            React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, team?.name || "Team"),
+            React.createElement("p", { className: "text-sm text-slate-500" },
+                players.length,
+                " Spieler \u00B7 Klick auf einen Spieler f\u00FCr die Akte")),
+        players.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Spieler in diesem Team.")) : (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 overflow-x-auto shadow-sm" },
+            React.createElement("table", { className: "w-full text-sm" },
+                React.createElement("thead", null,
+                    React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
+                        React.createElement("th", { className: "text-left px-3 py-2" }, "#"),
+                        React.createElement("th", { className: "text-left px-3 py-2" }, "Name"),
+                        React.createElement("th", { className: "text-left px-3 py-2" }, "Position"),
+                        normalFields.map((f) => React.createElement("th", { key: f.id, className: "text-right px-3 py-2" }, f.label)),
+                        React.createElement("th", { className: "text-right px-3 py-2" }, "FG%"),
+                        React.createElement("th", { className: "text-right px-3 py-2" }, "Anwesenheit"))),
+                React.createElement("tbody", null, players.map((p) => (React.createElement("tr", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "border-b border-stone-100 last:border-0 hover:bg-stone-50 cursor-pointer" },
+                    React.createElement("td", { className: "px-3 py-2" },
+                        React.createElement("span", { className: "w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-black" }, p.number !== "" && p.number !== undefined ? p.number : "–")),
+                    React.createElement("td", { className: "px-3 py-2 font-medium text-slate-800" }, p.name),
+                    React.createElement("td", { className: "px-3 py-2 text-slate-500" }, p.position),
+                    normalFields.map((f) => React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, avgFor(p.id, f.id))),
+                    React.createElement("td", { className: "px-3 py-2 text-right" }, fgPctFor(p.id)),
+                    React.createElement("td", { className: "px-3 py-2 text-right" }, latestAttendance(p.id)))))))))));
+}
 const TABS = [
     { key: "uebersicht", label: "Übersicht", icon: IconUsers },
     { key: "statistik", label: "Statistiken", icon: IconActivity },
@@ -1566,9 +1615,10 @@ function SpielerAkte() {
                             React.createElement("span", { className: `block text-xs truncate ${selectedPlayerId === p.id ? "text-slate-300" : "text-slate-500"}` }, p.position)),
                         React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` })))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-6" },
-                !selectedPlayer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
+                !selectedPlayer && selectedTeamId !== "all" && (React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: data.players.filter((p) => p.teamId === selectedTeamId), data: data, statCategories: statCategories, onSelectPlayer: selectPlayer })),
+                !selectedPlayer && selectedTeamId === "all" && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
-                    React.createElement("p", { className: "text-sm" }, "W\u00E4hle einen Spieler aus der Liste, oder lege einen neuen an."))),
+                    React.createElement("p", { className: "text-sm" }, "W\u00E4hle ein Team f\u00FCr die Team-\u00DCbersicht, einen Spieler f\u00FCr die Akte, oder lege einen neuen Spieler an."))),
                 selectedPlayer && (React.createElement("div", null,
                     React.createElement("div", { className: "bg-white rounded-xl border border-stone-200 p-6 flex items-start justify-between flex-wrap gap-4 shadow-sm" },
                         React.createElement("div", { className: "flex items-start gap-4" },
