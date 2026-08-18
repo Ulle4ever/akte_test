@@ -536,60 +536,36 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
 function SectionLabel({ children }) {
     return React.createElement("p", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider pt-1" }, children);
 }
-function Sparkline({ data, color = "#eb1e23" }) {
-    if (!data || data.length < 2) {
-        return React.createElement("div", { className: "h-10 flex items-center text-xs text-slate-300" }, "Zu wenig Spiele");
-    }
-    const w = 160, h = 40, pad = 4;
-    const min = Math.min(...data), max = Math.max(...data);
-    const range = max - min || 1;
-    const pts = data.map((v, i) => {
-        const x = pad + (i / (data.length - 1)) * (w - pad * 2);
-        const y = h - pad - ((v - min) / range) * (h - pad * 2);
-        return `${x.toFixed(1)},${y.toFixed(1)}`;
-    }).join(" ");
-    const last = data[data.length - 1];
-    const lastX = pad + (w - pad * 2);
-    const lastY = h - pad - ((last - min) / range) * (h - pad * 2);
-    return (React.createElement("svg", { width: "100%", height: h, viewBox: `0 0 ${w} ${h}`, preserveAspectRatio: "none", style: { overflow: "visible" } },
-        React.createElement("polyline", { points: pts, fill: "none", stroke: color, strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round", vectorEffect: "non-scaling-stroke" }),
-        React.createElement("circle", { cx: lastX.toFixed(1), cy: lastY.toFixed(1), r: "3", fill: color })));
-}
-function TrendCard({ label, avgValue, series, suffix = "" }) {
-    const hasSeries = series && series.length >= 2;
-    const delta = hasSeries ? Math.round((series[series.length - 1] - series[0]) * 10) / 10 : null;
-    const deltaColor = delta === null ? "" : delta >= 0 ? "text-emerald-600" : "text-[#eb1e23]";
-    const deltaStr = delta === null ? null : `${delta >= 0 ? "+" : ""}${delta}${suffix}`;
-    return (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-3" },
-        React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mb-1 truncate", title: label }, label),
-        React.createElement("div", { className: "flex items-baseline gap-2 mb-1" },
-            React.createElement("span", { className: "text-lg font-bold text-slate-800" },
-                avgValue,
-                suffix),
-            deltaStr && React.createElement("span", { className: `text-xs font-semibold ${deltaColor}` }, deltaStr)),
-        hasSeries ? React.createElement(Sparkline, { data: series }) : React.createElement("p", { className: "text-xs text-slate-300 h-10 flex items-center" }, "Noch zu wenig Spiele")));
-}
-function ShootingTrendChart({ series }) {
+function CategoryTrendChart({ series, mode = "auto" }) {
     const w = 640, h = 200, padL = 32, padR = 12, padT = 12, padB = 24;
     const maxPoints = Math.max(...series.map((s) => s.points.length), 2);
     const xFor = (i) => padL + (i / (maxPoints - 1)) * (w - padL - padR);
-    const yFor = (v) => padT + (1 - v / 100) * (h - padT - padB);
-    const hasAny = series.some((s) => s.points.some((v) => v !== null));
+    const hasAny = series.some((s) => s.points.some((v) => v !== null && v !== undefined));
     if (!hasAny) {
-        return React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Wurfdaten erfasst.");
+        return React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Daten f\u00FCr diese Grafik erfasst.");
     }
+    let axisMin = 0, axisMax = 100;
+    if (mode === "auto") {
+        const allVals = series.flatMap((s) => s.points.filter((v) => v !== null && v !== undefined));
+        const dataMax = Math.max(...allVals, 0);
+        axisMax = Math.max(Math.ceil(dataMax * 1.15), 4);
+        axisMin = 0;
+    }
+    const yFor = (v) => padT + (1 - (v - axisMin) / (axisMax - axisMin)) * (h - padT - padB);
+    const gridSteps = 4;
+    const gridValues = Array.from({ length: gridSteps + 1 }, (_, i) => Math.round(axisMin + ((axisMax - axisMin) * i) / gridSteps));
     return (React.createElement("div", null,
         React.createElement("svg", { width: "100%", viewBox: `0 0 ${w} ${h}`, style: { overflow: "visible" } },
-            [0, 25, 50, 75, 100].map((v) => (React.createElement("g", { key: v },
+            gridValues.map((v) => (React.createElement("g", { key: v },
                 React.createElement("line", { x1: padL, x2: w - padR, y1: yFor(v), y2: yFor(v), stroke: "#e7e5e4", strokeWidth: "1" }),
                 React.createElement("text", { x: padL - 6, y: yFor(v) + 3, textAnchor: "end", fontSize: "10", fill: "#a8a29e" },
                     v,
-                    "%")))),
+                    mode === "percent" ? "%" : "")))),
             series.map((s) => {
-                const validPts = s.points.map((v, i) => (v === null ? null : `${xFor(i).toFixed(1)},${yFor(v).toFixed(1)}`)).filter(Boolean).join(" ");
+                const validPts = s.points.map((v, i) => (v === null || v === undefined ? null : `${xFor(i).toFixed(1)},${yFor(v).toFixed(1)}`)).filter(Boolean).join(" ");
                 return (React.createElement("g", { key: s.label },
                     React.createElement("polyline", { points: validPts, fill: "none", stroke: s.color, strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
-                    s.points.map((v, i) => (v === null ? null : React.createElement("circle", { key: i, cx: xFor(i), cy: yFor(v), r: "3", fill: s.color })))));
+                    s.points.map((v, i) => (v === null || v === undefined ? null : React.createElement("circle", { key: i, cx: xFor(i), cy: yFor(v), r: "3", fill: s.color })))));
             })),
         React.createElement("div", { className: "flex flex-wrap gap-3 mt-2" }, series.map((s) => (React.createElement("span", { key: s.label, className: "flex items-center gap-1.5 text-xs text-slate-500" },
             React.createElement("span", { className: "w-2.5 h-2.5 rounded-sm", style: { background: s.color } }),
@@ -1722,15 +1698,23 @@ function SpielerAkte() {
                                 const shootingFields = cat.fields.filter((f) => f.kind === "shooting");
                                 if (numberFields.length === 0 && shootingFields.length === 0)
                                     return null;
+                                const chartColors = ["#eb1e23", "#0a96d4", "#eda100", "#1baf7a", "#4a3aa7", "#e87ba4"];
                                 return (React.createElement("div", { key: cat.id },
                                     React.createElement(SectionLabel, null, cat.label),
-                                    numberFields.length > 0 && (React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-3 gap-3 mt-1.5" }, numberFields.map((f) => (React.createElement(TrendCard, { key: f.id, label: `Ø ${f.label}`, avgValue: avg(f.id), series: playerStatsChrono.map((s) => Number(s[f.id]) || 0) }))))),
-                                    shootingFields.length > 0 && (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 mt-1.5 shadow-sm" },
-                                        React.createElement(ShootingTrendChart, { series: shootingFields.map((f, i) => ({
+                                    numberFields.length > 0 && (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 mt-1.5 shadow-sm" },
+                                        React.createElement(CategoryTrendChart, { mode: "auto", series: numberFields.map((f, i) => ({
                                                 label: f.label,
-                                                color: ["#eb1e23", "#0a96d4", "#eda100"][i % 3],
-                                                points: playerStatsChrono.map((s) => pct(s[`${f.id}_m`], s[`${f.id}_a`])),
-                                            })) })))));
+                                                color: chartColors[i % chartColors.length],
+                                                points: playerStatsChrono.map((s) => Number(s[f.id]) || 0),
+                                            })) }))),
+                                    shootingFields.length > 0 && (React.createElement("div", { className: "grid grid-cols-3 gap-3 mt-1.5" }, shootingFields.map((f) => {
+                                        const made = playerStats.reduce((sum, s) => sum + (Number(s[`${f.id}_m`]) || 0), 0);
+                                        const att = playerStats.reduce((sum, s) => sum + (Number(s[`${f.id}_a`]) || 0), 0);
+                                        const value = att ? `${Math.round((made / att) * 1000) / 10}%` : "–";
+                                        return (React.createElement("div", { key: f.id, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
+                                            React.createElement("p", { className: "text-lg font-bold text-slate-700" }, value),
+                                            React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5 truncate", title: f.label }, f.label)));
+                                    })))));
                             }),
                             React.createElement("div", { className: "grid md:grid-cols-2 gap-4" },
                                 React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 shadow-sm" },
