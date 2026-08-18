@@ -28,7 +28,6 @@
     font-style: normal;
     font-display: swap;
   }
-  html, body { overflow-x: hidden; max-width: 100vw; }
   body { font-family: "Montserrat", ui-sans-serif, system-ui, sans-serif; }
 </style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
@@ -535,41 +534,6 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
 }
 function SectionLabel({ children }) {
     return React.createElement("p", { className: "text-xs font-bold text-slate-400 uppercase tracking-wider pt-1" }, children);
-}
-function CategoryTrendChart({ series, mode = "auto" }) {
-    const w = 640, h = 200, padL = 32, padR = 12, padT = 12, padB = 24;
-    const maxPoints = Math.max(...series.map((s) => s.points.length), 2);
-    const xFor = (i) => padL + (i / (maxPoints - 1)) * (w - padL - padR);
-    const hasAny = series.some((s) => s.points.some((v) => v !== null && v !== undefined));
-    if (!hasAny) {
-        return React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Daten f\u00FCr diese Grafik erfasst.");
-    }
-    let axisMin = 0, axisMax = 100;
-    if (mode === "auto") {
-        const allVals = series.flatMap((s) => s.points.filter((v) => v !== null && v !== undefined));
-        const dataMax = Math.max(...allVals, 0);
-        axisMax = Math.max(Math.ceil(dataMax * 1.15), 4);
-        axisMin = 0;
-    }
-    const yFor = (v) => padT + (1 - (v - axisMin) / (axisMax - axisMin)) * (h - padT - padB);
-    const gridSteps = 4;
-    const gridValues = Array.from({ length: gridSteps + 1 }, (_, i) => Math.round(axisMin + ((axisMax - axisMin) * i) / gridSteps));
-    return (React.createElement("div", null,
-        React.createElement("svg", { width: "100%", viewBox: `0 0 ${w} ${h}`, style: { overflow: "visible" } },
-            gridValues.map((v) => (React.createElement("g", { key: v },
-                React.createElement("line", { x1: padL, x2: w - padR, y1: yFor(v), y2: yFor(v), stroke: "#e7e5e4", strokeWidth: "1" }),
-                React.createElement("text", { x: padL - 6, y: yFor(v) + 3, textAnchor: "end", fontSize: "10", fill: "#a8a29e" },
-                    v,
-                    mode === "percent" ? "%" : "")))),
-            series.map((s) => {
-                const validPts = s.points.map((v, i) => (v === null || v === undefined ? null : `${xFor(i).toFixed(1)},${yFor(v).toFixed(1)}`)).filter(Boolean).join(" ");
-                return (React.createElement("g", { key: s.label },
-                    React.createElement("polyline", { points: validPts, fill: "none", stroke: s.color, strokeWidth: "2", strokeLinecap: "round", strokeLinejoin: "round" }),
-                    s.points.map((v, i) => (v === null || v === undefined ? null : React.createElement("circle", { key: i, cx: xFor(i), cy: yFor(v), r: "3", fill: s.color })))));
-            })),
-        React.createElement("div", { className: "flex flex-wrap gap-3 mt-2" }, series.map((s) => (React.createElement("span", { key: s.label, className: "flex items-center gap-1.5 text-xs text-slate-500" },
-            React.createElement("span", { className: "w-2.5 h-2.5 rounded-sm", style: { background: s.color } }),
-            s.label))))));
 }
 function SimpleListManager({ title, description, items, onAdd, onRename, onDelete, onMove, onClose, addPlaceholder }) {
     const [newLabel, setNewLabel] = useState("");
@@ -1178,54 +1142,6 @@ function BoxscoreImportModal({ players, teams, onConfirm, onClose }) {
                 matchedCount,
                 " Spieler importieren"))));
 }
-function TeamOverviewTable({ team, players, data, statCategories, onSelectPlayer }) {
-    const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
-    const normalFields = normalCat ? normalCat.fields.filter((f) => f.kind !== "shooting") : [];
-    function avgFor(playerId, fieldId) {
-        const entries = data.stats.filter((s) => s.playerId === playerId);
-        if (entries.length === 0)
-            return "–";
-        const sum = entries.reduce((acc, s) => acc + (Number(s[fieldId]) || 0), 0);
-        return (sum / entries.length).toFixed(1);
-    }
-    function fgPctFor(playerId) {
-        const entries = data.stats.filter((s) => s.playerId === playerId);
-        const made = entries.reduce((acc, s) => acc + (Number(s.fg_m) || 0), 0);
-        const att = entries.reduce((acc, s) => acc + (Number(s.fg_a) || 0), 0);
-        return att ? `${Math.round((made / att) * 1000) / 10}%` : "–";
-    }
-    function latestAttendance(playerId) {
-        const entries = sortByDateDesc((data.attendance || []).filter((a) => a.playerId === playerId));
-        if (entries.length === 0)
-            return "–";
-        const a = entries[0];
-        return a.einheitenGesamt ? `${Math.round((a.anwesend / a.einheitenGesamt) * 1000) / 10}%` : "–";
-    }
-    return (React.createElement("div", null,
-        React.createElement("div", { className: "mb-4" },
-            React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, team?.name || "Team"),
-            React.createElement("p", { className: "text-sm text-slate-500" },
-                players.length,
-                " Spieler \u00B7 Klick auf einen Spieler f\u00FCr die Akte")),
-        players.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Spieler in diesem Team.")) : (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 overflow-x-auto shadow-sm" },
-            React.createElement("table", { className: "w-full text-sm" },
-                React.createElement("thead", null,
-                    React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
-                        React.createElement("th", { className: "text-left px-3 py-2" }, "#"),
-                        React.createElement("th", { className: "text-left px-3 py-2" }, "Name"),
-                        React.createElement("th", { className: "text-left px-3 py-2" }, "Position"),
-                        normalFields.map((f) => React.createElement("th", { key: f.id, className: "text-right px-3 py-2" }, f.label)),
-                        React.createElement("th", { className: "text-right px-3 py-2" }, "FG%"),
-                        React.createElement("th", { className: "text-right px-3 py-2" }, "Anwesenheit"))),
-                React.createElement("tbody", null, players.map((p) => (React.createElement("tr", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "border-b border-stone-100 last:border-0 hover:bg-stone-50 cursor-pointer" },
-                    React.createElement("td", { className: "px-3 py-2" },
-                        React.createElement("span", { className: "w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-black" }, p.number !== "" && p.number !== undefined ? p.number : "–")),
-                    React.createElement("td", { className: "px-3 py-2 font-medium text-slate-800" }, p.name),
-                    React.createElement("td", { className: "px-3 py-2 text-slate-500" }, p.position),
-                    normalFields.map((f) => React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, avgFor(p.id, f.id))),
-                    React.createElement("td", { className: "px-3 py-2 text-right" }, fgPctFor(p.id)),
-                    React.createElement("td", { className: "px-3 py-2 text-right" }, latestAttendance(p.id)))))))))));
-}
 const TABS = [
     { key: "uebersicht", label: "Übersicht", icon: IconUsers },
     { key: "statistik", label: "Statistiken", icon: IconActivity },
@@ -1355,12 +1271,16 @@ function SpielerAkte() {
     const selectedPlayer = data.players.find((p) => p.id === selectedPlayerId) || null;
     const selectedTeam = selectedPlayer ? teams.find((t) => t.id === selectedPlayer.teamId) : null;
     const playerStats = selectedPlayer ? sortByDateDesc(data.stats.filter((s) => s.playerId === selectedPlayer.id)) : [];
-    const playerStatsChrono = [...playerStats].reverse();
     const playerTests = selectedPlayer ? sortByDateDesc(data.tests.filter((t) => t.playerId === selectedPlayer.id)) : [];
     const playerVideos = selectedPlayer ? sortByDateDesc(data.videos.filter((v) => v.playerId === selectedPlayer.id)) : [];
     const playerNotes = selectedPlayer ? sortByDateDesc(data.notes.filter((n) => n.playerId === selectedPlayer.id)) : [];
     const playerAttendance = selectedPlayer ? sortByDateDesc((data.attendance || []).filter((a) => a.playerId === selectedPlayer.id)) : [];
     const avg = (key) => (playerStats.length ? (playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length).toFixed(1) : "–");
+    const totalPct = (madeKey, attKey) => {
+        const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
+        const att = playerStats.reduce((sum, s) => sum + (Number(s[attKey]) || 0), 0);
+        return att ? `${Math.round((made / att) * 1000) / 10}%` : "–";
+    };
     function selectPlayer(id) {
         setSelectedPlayerId(id);
         setActiveTab("uebersicht");
@@ -1646,10 +1566,9 @@ function SpielerAkte() {
                             React.createElement("span", { className: `block text-xs truncate ${selectedPlayerId === p.id ? "text-slate-300" : "text-slate-500"}` }, p.position)),
                         React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` })))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-6" },
-                !selectedPlayer && selectedTeamId !== "all" && (React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: data.players.filter((p) => p.teamId === selectedTeamId), data: data, statCategories: statCategories, onSelectPlayer: selectPlayer })),
-                !selectedPlayer && selectedTeamId === "all" && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
+                !selectedPlayer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
-                    React.createElement("p", { className: "text-sm" }, "W\u00E4hle ein Team f\u00FCr die Team-\u00DCbersicht, einen Spieler f\u00FCr die Akte, oder lege einen neuen Spieler an."))),
+                    React.createElement("p", { className: "text-sm" }, "W\u00E4hle einen Spieler aus der Liste, oder lege einen neuen an."))),
                 selectedPlayer && (React.createElement("div", null,
                     React.createElement("div", { className: "bg-white rounded-xl border border-stone-200 p-6 flex items-start justify-between flex-wrap gap-4 shadow-sm" },
                         React.createElement("div", { className: "flex items-start gap-4" },
@@ -1693,29 +1612,11 @@ function SpielerAkte() {
                                         "Anwesenheit (Stand ",
                                         fmtDate(playerAttendance[0].date),
                                         ")")))),
-                            statCategories.map((cat) => {
-                                const numberFields = cat.fields.filter((f) => f.kind !== "shooting");
-                                const shootingFields = cat.fields.filter((f) => f.kind === "shooting");
-                                if (numberFields.length === 0 && shootingFields.length === 0)
-                                    return null;
-                                const chartColors = ["#eb1e23", "#0a96d4", "#be2228", "#4178a0", "#f2726f", "#5fb8e0", "#8a0f14", "#0a5a80"];
-                                return (React.createElement("div", { key: cat.id },
-                                    React.createElement(SectionLabel, null, cat.label),
-                                    numberFields.length > 0 && (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 mt-1.5 shadow-sm" },
-                                        React.createElement(CategoryTrendChart, { mode: "auto", series: numberFields.map((f, i) => ({
-                                                label: f.label,
-                                                color: chartColors[i % chartColors.length],
-                                                points: playerStatsChrono.map((s) => Number(s[f.id]) || 0),
-                                            })) }))),
-                                    shootingFields.length > 0 && (React.createElement("div", { className: "grid grid-cols-3 gap-3 mt-1.5" }, shootingFields.map((f) => {
-                                        const made = playerStats.reduce((sum, s) => sum + (Number(s[`${f.id}_m`]) || 0), 0);
-                                        const att = playerStats.reduce((sum, s) => sum + (Number(s[`${f.id}_a`]) || 0), 0);
-                                        const value = att ? `${Math.round((made / att) * 1000) / 10}%` : "–";
-                                        return (React.createElement("div", { key: f.id, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
-                                            React.createElement("p", { className: "text-lg font-bold text-slate-700" }, value),
-                                            React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5 truncate", title: f.label }, f.label)));
-                                    })))));
-                            }),
+                            statCategories.map((cat) => (cat.fields.length > 0 && (React.createElement("div", { key: cat.id },
+                                React.createElement(SectionLabel, null, cat.label),
+                                React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-4 gap-3 mt-1.5" }, cat.fields.map((f) => (React.createElement("div", { key: f.id, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
+                                    React.createElement("p", { className: "text-lg font-bold text-slate-700" }, f.kind === "shooting" ? totalPct(`${f.id}_m`, `${f.id}_a`) : avg(f.id)),
+                                    React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5 truncate", title: f.label }, f.kind === "shooting" ? f.label : `Ø ${f.label}`))))))))),
                             React.createElement("div", { className: "grid md:grid-cols-2 gap-4" },
                                 React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 shadow-sm" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzter Athletik-Test"),
