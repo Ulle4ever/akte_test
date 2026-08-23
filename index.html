@@ -188,9 +188,9 @@ const STATUS_OPTIONS = [
     { value: "reha", label: "Reha" },
 ];
 const STATUS_STYLES = {
-    aktiv: { dot: "bg-emerald-500", badge: "bg-emerald-50 text-emerald-700 border-emerald-200" },
-    verletzt: { dot: "bg-[#eb1e23]", badge: "bg-red-50 text-[#be2228] border-red-200" },
-    reha: { dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700 border-amber-200" },
+    aktiv: { dot: "bg-emerald-500", badge: "bg-emerald-50 text-emerald-700 border-emerald-200", text: "text-emerald-700" },
+    verletzt: { dot: "bg-[#eb1e23]", badge: "bg-red-50 text-[#be2228] border-red-200", text: "text-[#be2228]" },
+    reha: { dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700 border-amber-200", text: "text-amber-700" },
 };
 const VIDEO_TYPES = ["Spielszene", "Trainingsdrill", "Analyse"];
 const NOTE_CATEGORIES = [
@@ -255,6 +255,12 @@ const fmtDate = (d) => {
     return dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 };
 const pct = (made, att) => (att ? Math.round((Number(made) / Number(att)) * 1000) / 10 : null);
+const splitName = (fullName) => {
+    const parts = (fullName || "").trim().split(/\s+/);
+    if (parts.length <= 1)
+        return { first: "", last: fullName || "" };
+    return { first: parts.slice(0, -1).join(" "), last: parts[parts.length - 1] };
+};
 const fmtNum = (v, d = 1) => {
     const n = Number(v);
     if (v === undefined || v === null || v === "" || isNaN(n))
@@ -1441,7 +1447,7 @@ function TeamOverviewTable({ team, players, data, statCategories, onSelectPlayer
             React.createElement("p", { className: "text-sm text-slate-500" },
                 players.length,
                 " Spieler \u00B7 Klick auf einen Spieler f\u00FCr die Akte")),
-        players.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Spieler in diesem Team.")) : (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 overflow-x-auto shadow-sm" },
+        players.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Spieler in diesem Team.")) : (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-x-auto" },
             React.createElement("table", { className: "w-full text-sm" },
                 React.createElement("thead", null,
                     React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
@@ -1453,7 +1459,7 @@ function TeamOverviewTable({ team, players, data, statCategories, onSelectPlayer
                         React.createElement("th", { className: "text-right px-3 py-2" }, "Anwesenheit"))),
                 React.createElement("tbody", null, players.map((p) => (React.createElement("tr", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "border-b border-stone-100 last:border-0 hover:bg-stone-50 cursor-pointer" },
                     React.createElement("td", { className: "px-3 py-2" },
-                        React.createElement("span", { className: "w-7 h-7 rounded-full bg-slate-900 text-white flex items-center justify-center text-xs font-black" }, p.number !== "" && p.number !== undefined ? p.number : "–")),
+                        React.createElement("span", { className: "w-7 h-7 rounded-full bg-stone-100 text-slate-600 flex items-center justify-center text-xs font-bold" }, p.number !== "" && p.number !== undefined ? p.number : "–")),
                     React.createElement("td", { className: "px-3 py-2 font-medium text-slate-800" }, p.name),
                     React.createElement("td", { className: "px-3 py-2 text-slate-500" }, p.position),
                     normalFields.map((f) => React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, avgFor(p.id, f.id))),
@@ -1925,22 +1931,22 @@ function SpielerAkte() {
                     React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => setSelectedTeamId(e.target.value) },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
                         teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
-                    React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg px-3 text-sm font-medium", title: "Team anlegen" },
+                    React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
                         React.createElement(IconPlus, { size: 16 }))),
                 React.createElement("div", { className: "relative" },
                     React.createElement(IconSearch, { size: 15, className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" }),
                     React.createElement("input", { className: inputClass + " pl-8", placeholder: "Spieler suchen...", value: search, onChange: (e) => setSearch(e.target.value) })),
-                React.createElement("button", { onClick: () => setModal("player"), disabled: teams.length === 0, className: "w-full flex items-center justify-center gap-1.5 bg-[#eb1e23] hover:bg-[#be2228] disabled:bg-stone-200 disabled:text-slate-400 text-white rounded-lg py-2 text-sm font-semibold transition" },
+                React.createElement("button", { onClick: () => setModal("player"), disabled: teams.length === 0, className: "w-full flex items-center justify-center gap-1.5 bg-[#eb1e23] hover:bg-[#be2228] disabled:bg-stone-200 disabled:text-slate-400 text-white rounded-xl py-2.5 text-sm font-semibold transition shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)]" },
                     React.createElement(IconPlus, { size: 16 }),
                     " Spieler anlegen"),
                 teams.length === 0 && React.createElement("p", { className: "text-xs text-slate-400" }, "Legt zuerst ein Team an."),
-                React.createElement("div", { className: "flex-1 overflow-y-auto -mx-1 px-1 space-y-1" },
+                React.createElement("div", { className: "flex-1 overflow-y-auto -mx-1 px-1 space-y-1.5" },
                     players.length === 0 && teams.length > 0 && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-6" }, "Keine Spieler gefunden.")),
-                    players.map((p) => (React.createElement("button", { key: p.id, onClick: () => selectPlayer(p.id), className: `w-full flex items-center gap-3 p-2.5 rounded-lg text-left transition ${selectedPlayerId === p.id ? "bg-slate-900 text-white" : "hover:bg-stone-100 text-slate-900"}` },
-                        React.createElement("span", { className: `w-8 h-8 rounded-full flex items-center justify-center text-xs font-black shrink-0 ${selectedPlayerId === p.id ? "bg-[#eb1e23] text-white" : "bg-slate-900 text-white"}` }, p.number !== "" && p.number !== undefined ? p.number : "–"),
+                    players.map((p) => (React.createElement("button", { key: p.id, onClick: () => selectPlayer(p.id), className: `w-full flex items-center gap-3 p-2.5 rounded-xl text-left transition ${selectedPlayerId === p.id ? "bg-red-50 border-l-[3px] border-[#eb1e23] pl-[9px]" : "hover:bg-stone-50 text-slate-900 border-l-[3px] border-transparent pl-[9px]"}` },
+                        React.createElement("span", { className: `w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${selectedPlayerId === p.id ? "bg-[#eb1e23] text-white" : "bg-stone-100 text-slate-600"}` }, p.number !== "" && p.number !== undefined ? p.number : "–"),
                         React.createElement("span", { className: "min-w-0 flex-1" },
-                            React.createElement("span", { className: "block text-sm font-semibold truncate" }, p.name),
-                            React.createElement("span", { className: `block text-xs truncate ${selectedPlayerId === p.id ? "text-slate-300" : "text-slate-500"}` }, p.position)),
+                            React.createElement("span", { className: `block text-sm font-semibold truncate ${selectedPlayerId === p.id ? "text-slate-900" : ""}` }, p.name),
+                            React.createElement("span", { className: "block text-xs truncate text-slate-500" }, p.position)),
                         React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` })))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-6" },
                 !selectedPlayer && selectedTeamId !== "all" && (React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: data.players.filter((p) => p.teamId === selectedTeamId), data: data, statCategories: statCategories, onSelectPlayer: selectPlayer })),
@@ -1948,24 +1954,27 @@ function SpielerAkte() {
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "W\u00E4hle ein Team f\u00FCr die Team-\u00DCbersicht, einen Spieler f\u00FCr die Akte, oder lege einen neuen Spieler an."))),
                 selectedPlayer && (React.createElement("div", null,
-                    React.createElement("div", { className: "bg-white rounded-xl border border-stone-200 p-6 flex items-start justify-between flex-wrap gap-4 shadow-sm" },
-                        React.createElement("div", { className: "flex items-start gap-4" },
-                            React.createElement("div", { className: "w-16 h-16 rounded-xl bg-slate-900 text-white flex items-center justify-center text-2xl font-black shrink-0" }, selectedPlayer.number !== "" && selectedPlayer.number !== undefined ? selectedPlayer.number : "–"),
+                    React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-6" },
+                        React.createElement("div", { className: "flex items-start justify-between flex-wrap gap-4" },
                             React.createElement("div", null,
-                                React.createElement("h2", { className: "text-2xl font-black text-slate-900 leading-tight" }, selectedPlayer.name),
-                                React.createElement("p", { className: "text-sm text-slate-500 mt-0.5" },
-                                    selectedTeam?.name || "Kein Team",
-                                    " \u00B7 ",
-                                    selectedPlayer.position,
-                                    selectedPlayer.birthdate && React.createElement(React.Fragment, null,
-                                        " \u00B7 geb. ",
-                                        fmtDate(selectedPlayer.birthdate))),
-                                React.createElement("span", { className: `inline-block mt-2 text-xs font-semibold px-2.5 py-1 rounded-full border ${STATUS_STYLES[selectedPlayer.status]?.badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label))),
-                        React.createElement("div", { className: "flex gap-2" },
-                            React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg border border-stone-200 hover:bg-stone-50 text-slate-600", "aria-label": "Bearbeiten" },
-                                React.createElement(IconEdit, { size: 16 })),
-                            React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg border border-stone-200 hover:bg-red-50 text-red-500", "aria-label": "L\u00F6schen" },
-                                React.createElement(IconTrash, { size: 16 })))),
+                                React.createElement("div", { className: "flex items-baseline gap-1.5 flex-wrap" },
+                                    splitName(selectedPlayer.name).first && (React.createElement("span", { className: "text-3xl font-normal text-slate-400" }, splitName(selectedPlayer.name).first)),
+                                    React.createElement("span", { className: "text-3xl font-bold text-slate-900" }, splitName(selectedPlayer.name).last),
+                                    selectedPlayer.number !== "" && selectedPlayer.number !== undefined && (React.createElement("span", { className: "text-3xl font-bold text-[#eb1e23] ml-1" }, selectedPlayer.number))),
+                                React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-1" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ") || "Kein Team"),
+                                React.createElement("div", { className: "h-[3px] w-11 bg-[#0a96d4] rounded-full mt-3" })),
+                            React.createElement("div", { className: "flex gap-2" },
+                                React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Bearbeiten" },
+                                    React.createElement(IconEdit, { size: 16 })),
+                                React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg hover:bg-red-50 text-red-400", "aria-label": "L\u00F6schen" },
+                                    React.createElement(IconTrash, { size: 16 })))),
+                        React.createElement("div", { className: "flex flex-wrap gap-8 mt-5 pt-4 border-t border-stone-100" },
+                            selectedPlayer.birthdate && (React.createElement("div", null,
+                                React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, "Geburtsdatum"),
+                                React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, fmtDate(selectedPlayer.birthdate)))),
+                            React.createElement("div", null,
+                                React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, "Status"),
+                                React.createElement("p", { className: `text-sm font-semibold ${STATUS_STYLES[selectedPlayer.status]?.text || "text-slate-800"}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label)))),
                     confirmDeletePlayer && (React.createElement("div", { className: "mt-3 bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between flex-wrap gap-3" },
                         React.createElement("p", { className: "text-sm text-red-700" }, "Spieler wirklich l\u00F6schen? Alle Statistiken, Tests, Videos und Notizen werden mitgel\u00F6scht."),
                         React.createElement("div", { className: "flex gap-2" },
@@ -1982,10 +1991,10 @@ function SpielerAkte() {
                     React.createElement("div", { className: "mt-5" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
                             React.createElement("div", { className: "flex flex-wrap gap-4" },
-                                React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm w-full md:w-48" },
+                                React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 text-center w-full md:w-48" },
                                     React.createElement("p", { className: "text-2xl font-black text-[#eb1e23]" }, playerStats.length),
                                     React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Spiele erfasst")),
-                                playerAttendance[0] && (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 text-center shadow-sm w-full md:w-48" },
+                                playerAttendance[0] && (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 text-center w-full md:w-48" },
                                     React.createElement("p", { className: "text-2xl font-black text-[#0a96d4]" }, playerAttendance[0].einheitenGesamt ? `${Math.round((playerAttendance[0].anwesend / playerAttendance[0].einheitenGesamt) * 1000) / 10}%` : "–"),
                                     React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" },
                                         "Anwesenheit (Stand ",
@@ -1999,7 +2008,7 @@ function SpielerAkte() {
                                     { label: "Assists", id: "assists" },
                                     { label: "Turnover", id: "turnovers" },
                                     { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]) },
-                                ].filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-lg border border-stone-200 p-3 text-center" },
+                                ].filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 text-center" },
                                     React.createElement("p", { className: "text-lg font-bold text-slate-700" }, avg(x.id)),
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
                             React.createElement("div", null,
@@ -2008,16 +2017,16 @@ function SpielerAkte() {
                                     if (cat.fields.length === 0)
                                         return null;
                                     const isOpen = expandedCats.has(cat.id);
-                                    return (React.createElement("div", { key: cat.id, className: "border border-stone-200 rounded-lg overflow-hidden bg-white shadow-sm" },
+                                    return (React.createElement("div", { key: cat.id, className: "rounded-2xl overflow-hidden bg-white shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)]" },
                                         React.createElement("button", { onClick: () => toggleCat(cat.id), className: "w-full flex items-center justify-between px-4 py-3 hover:bg-stone-50 transition" },
                                             React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, cat.label),
                                             React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}` })),
-                                        isOpen && (React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-4 gap-3 p-4 pt-0" }, cat.fields.map((f) => (React.createElement("div", { key: f.id, className: "bg-stone-50 rounded-lg border border-stone-200 p-3 text-center" },
+                                        isOpen && (React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-4 gap-3 p-4 pt-0" }, cat.fields.map((f) => (React.createElement("div", { key: f.id, className: "bg-stone-50 rounded-xl p-3 text-center" },
                                             React.createElement("p", { className: "text-lg font-bold text-slate-700" }, f.kind === "shooting" ? totalPct(`${f.id}_m`, `${f.id}_a`) : avg(f.id)),
                                             React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5 truncate", title: f.label }, f.kind === "shooting" ? f.label : `Ø ${f.label}`))))))));
                                 }))),
                             React.createElement("div", { className: "grid md:grid-cols-2 gap-4" },
-                                React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 shadow-sm" },
+                                React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzter Athletik-Test"),
                                     playerTests[0] ? (React.createElement("p", { className: "text-sm text-slate-700" },
                                         playerTests[0].testType,
@@ -2029,7 +2038,7 @@ function SpielerAkte() {
                                         " (",
                                         fmtDate(playerTests[0].date),
                                         ")")) : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Tests erfasst.")),
-                                React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 p-4 shadow-sm" },
+                                React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzte Notiz"),
                                     playerNotes[0] ? (React.createElement("p", { className: "text-sm text-slate-700 line-clamp-2" }, playerNotes[0].text)) : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Notizen erfasst."))))),
                         activeTab === "statistik" && (React.createElement("div", null,
@@ -2037,7 +2046,7 @@ function SpielerAkte() {
                                 React.createElement("button", { onClick: () => setModal("stat"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
                                     React.createElement(IconPlus, { size: 15 }),
                                     " Eintrag")),
-                            playerStats.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Spielstatistiken erfasst.")) : (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 overflow-x-auto shadow-sm" },
+                            playerStats.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Spielstatistiken erfasst.")) : (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-x-auto" },
                                 React.createElement("table", { className: "w-full text-sm" },
                                     React.createElement("thead", null,
                                         React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
@@ -2071,7 +2080,7 @@ function SpielerAkte() {
                             playerTests.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Athletik-Tests erfasst.")) : (React.createElement("div", { className: "space-y-2" }, playerTests.map((t, i) => {
                                 const prev = playerTests.slice(i + 1).find((o) => o.testType === t.testType);
                                 const diff = prev ? +(t.result - prev.result).toFixed(2) : null;
-                                return (React.createElement("div", { key: t.id, className: "bg-white rounded-lg border border-stone-200 p-3 flex items-center justify-between gap-3" },
+                                return (React.createElement("div", { key: t.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 flex items-center justify-between gap-3" },
                                     React.createElement("div", null,
                                         React.createElement("p", { className: "text-sm font-semibold text-slate-900" }, t.testType),
                                         React.createElement("p", { className: "text-xs text-slate-500" }, fmtDate(t.date))),
@@ -2087,7 +2096,7 @@ function SpielerAkte() {
                                         React.createElement("button", { onClick: () => deleteItem("tests", t.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                             React.createElement(IconTrash, { size: 14 })))));
                             }))))),
-                        activeTab === "anwesenheit" && (React.createElement("div", null, playerAttendance.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Anwesenheitsdaten importiert. \u00DCber \"Anwesenheit importieren\" oben im Header l\u00E4sst sich eine CSV-Datei einlesen.")) : (React.createElement("div", { className: "bg-white rounded-lg border border-stone-200 overflow-x-auto shadow-sm" },
+                        activeTab === "anwesenheit" && (React.createElement("div", null, playerAttendance.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Anwesenheitsdaten importiert. \u00DCber \"Anwesenheit importieren\" oben im Header l\u00E4sst sich eine CSV-Datei einlesen.")) : (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-x-auto" },
                             React.createElement("table", { className: "w-full text-sm" },
                                 React.createElement("thead", null,
                                     React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
@@ -2116,7 +2125,7 @@ function SpielerAkte() {
                             playerVideos.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Videos verkn\u00FCpft.")) : (React.createElement("div", { className: "space-y-2" }, playerVideos.map((v) => {
                                 const embedUrl = getEmbedUrl(v.url);
                                 const isOpen = expandedVideos.has(v.id);
-                                return (React.createElement("div", { key: v.id, className: "bg-white rounded-lg border border-stone-200 overflow-hidden shadow-sm" },
+                                return (React.createElement("div", { key: v.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-hidden" },
                                     React.createElement("div", { className: "w-full flex items-center gap-3 px-3 py-2.5" },
                                         React.createElement("button", { onClick: () => (embedUrl ? toggleVideo(v.id) : window.open(v.url, "_blank", "noopener,noreferrer")), className: "flex items-center gap-3 min-w-0 flex-1 text-left hover:opacity-80 transition" },
                                             React.createElement("span", { className: `shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${embedUrl ? "bg-red-50 text-[#eb1e23]" : "bg-stone-100 text-slate-400"}` },
@@ -2141,7 +2150,7 @@ function SpielerAkte() {
                                 React.createElement("button", { onClick: () => setModal("note"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
                                     React.createElement(IconPlus, { size: 15 }),
                                     " Notiz")),
-                            playerNotes.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Notizen erfasst.")) : (React.createElement("div", { className: "space-y-2" }, playerNotes.map((n) => (React.createElement("div", { key: n.id, className: "bg-white rounded-lg border border-stone-200 p-3" },
+                            playerNotes.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Notizen erfasst.")) : (React.createElement("div", { className: "space-y-2" }, playerNotes.map((n) => (React.createElement("div", { key: n.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
                                 React.createElement("div", { className: "flex items-center justify-between gap-2" },
                                     React.createElement("div", { className: "flex items-center gap-2" },
                                         React.createElement("span", { className: `text-xs font-semibold px-2 py-0.5 rounded-full border ${CATEGORY_STYLES[n.category]}` }, NOTE_CATEGORIES.find((c) => c.value === n.category)?.label),
