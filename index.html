@@ -1279,39 +1279,66 @@ function AdvancedRechnerLiveModal({ players, teams, onConfirm, onClose }) {
     const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
     const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}${p.teamId ? " (" + teamName(p.teamId) + ")" : ""}`;
     function openRechner() {
-        winRef.current = window.open("rechner.html", "spielerAkteRechner");
+        const w = window.open("rechner.html", "spielerAkteRechner");
+        if (!w) {
+            setError("Der Browser hat das Öffnen blockiert (Pop-up-Blocker). Bitte Pop-ups für diese Seite erlauben und nochmal versuchen.");
+            return;
+        }
+        winRef.current = w;
         setError("");
     }
     function fetchValues() {
-        const w = winRef.current;
-        if (!w || w.closed) {
-            setError("Der Rechner ist gerade nicht geöffnet. Bitte zuerst öffnen.");
-            return;
-        }
-        if (typeof w.spielerAkteExport !== "function") {
-            setError("Konnte keine Verbindung zum Rechner herstellen. Liegt die rechner.html im selben Verzeichnis wie diese Datei?");
-            return;
-        }
-        let data;
         try {
-            data = w.spielerAkteExport();
+            const w = winRef.current;
+            if (!w) {
+                setError("Der Rechner wurde noch nicht geöffnet. Erst auf \"Rechner in neuem Tab öffnen\" klicken.");
+                return;
+            }
+            let closed = false;
+            try {
+                closed = w.closed;
+            }
+            catch (e) { /* manche Browser blockieren sogar diese Abfrage */ }
+            if (closed) {
+                setError("Der Rechner-Tab wurde geschlossen. Bitte erneut öffnen.");
+                return;
+            }
+            let exportFn;
+            try {
+                exportFn = w.spielerAkteExport;
+            }
+            catch (e) {
+                setError("Kein Zugriff auf den Rechner-Tab (Browser blockiert die Verbindung). Liegen beide Dateien wirklich auf derselben Adresse (selbes Repository)?");
+                return;
+            }
+            if (typeof exportFn !== "function") {
+                setError("Der Rechner-Tab antwortet nicht. Ist dort wirklich die aktuelle rechner.html geladen (nicht eine alte, gecachte Version)? Einmal dort Strg+F5 versuchen.");
+                return;
+            }
+            let data;
+            try {
+                data = exportFn.call(w);
+            }
+            catch (e) {
+                setError("Fehler beim Abrufen der Werte: " + (e?.message || String(e)));
+                return;
+            }
+            if (!data || data.length === 0) {
+                setError("Keine Spieler im Rechner gefunden. Sind dort Spieler mit Namen eingetragen?");
+                return;
+            }
+            setRows(data);
+            setMatches(data.map((row) => {
+                const norm = normalizeName(row.name);
+                const hit = players.find((p) => normalizeName(p.name) === norm);
+                return hit ? hit.id : "";
+            }));
+            setError("");
+            setStage("review");
         }
         catch (e) {
-            setError("Fehler beim Abrufen der Werte: " + (e?.message || e));
-            return;
+            setError("Unerwarteter Fehler: " + (e?.message || String(e)));
         }
-        if (!data || data.length === 0) {
-            setError("Keine Spieler im Rechner gefunden.");
-            return;
-        }
-        setRows(data);
-        setMatches(data.map((row) => {
-            const norm = normalizeName(row.name);
-            const hit = players.find((p) => normalizeName(p.name) === norm);
-            return hit ? hit.id : "";
-        }));
-        setError("");
-        setStage("review");
     }
     function setMatchAt(i, playerId) {
         setMatches((m) => m.map((v, idx) => (idx === i ? playerId : v)));
