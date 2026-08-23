@@ -58,6 +58,12 @@ const firebaseConfig = {
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const auth = firebase.auth();
+/* Zweite, unabhängige Firebase-App-Instanz. Wird nur benutzt, um neue
+   Spieler/Eltern-Zugänge anzulegen, ohne dass dabei der gerade eingeloggte
+   Trainer aus seiner eigenen Sitzung geworfen wird (das würde sonst passieren,
+   weil "neuen Nutzer anlegen" in Firebase automatisch zu diesem Nutzer wechselt). */
+const secondaryApp = firebase.initializeApp(firebaseConfig, "secondary");
+const secondaryAuth = secondaryApp.auth();
 /* ============================================================
    CLOUDINARY-KONFIGURATION (für PDF/Scan-Anhänge bei Notizen)
    Cloud Name: Cloudinary-Dashboard, oben links direkt sichtbar.
@@ -293,6 +299,19 @@ const getEmbedUrl = (url) => {
     return null;
 };
 const normalizeName = (s) => (s || "").toLowerCase().trim().replace(/\s+/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+function codeToEmail(code) {
+    return `${code.trim().toLowerCase().replace(/[^a-z0-9]/g, "")}@spieler-akte.local`;
+}
+function codeToPassword(code) {
+    return code.trim() + "-Sak26!";
+}
+function generateCode() {
+    const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
+    let out = "";
+    for (let i = 0; i < 8; i++)
+        out += chars[Math.floor(Math.random() * chars.length)];
+    return out;
+}
 const findFieldId = (statCategories, labels) => {
     for (const c of statCategories) {
         const f = c.fields.find((f) => labels.includes(f.label.toLowerCase()));
@@ -982,25 +1001,6 @@ function NoteForm({ onSubmit, onClose }) {
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", disabled: uploading, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, uploading ? "Wird hochgeladen…" : "Notiz speichern")));
 }
-function ChangeCodeForm({ onSubmit, onClose }) {
-    const [code, setCode] = useState("");
-    const [error, setError] = useState("");
-    function handleSubmit(e) {
-        e.preventDefault();
-        if (code.trim().length < 4) {
-            setError("Mindestens 4 Zeichen.");
-            return;
-        }
-        onSubmit(code.trim());
-        onClose();
-    }
-    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
-        React.createElement(Field, { label: "Neuer Zugriffscode" },
-            React.createElement("input", { className: inputClass, type: "text", value: code, onChange: (e) => { setCode(e.target.value); setError(""); }, autoFocus: true }),
-            error && React.createElement("p", { className: "text-xs text-red-600 mt-1" }, error)),
-        React.createElement("p", { className: "text-xs text-slate-500" }, "Gebt den neuen Code an alle Trainer weiter \u2013 der alte Code funktioniert danach nicht mehr."),
-        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Code speichern")));
-}
 function AttendanceImportModal({ players, teams, onConfirm, onClose }) {
     const [stage, setStage] = useState("upload");
     const [parseError, setParseError] = useState("");
@@ -1380,6 +1380,83 @@ function AdvancedStatsImportModal({ players, teams, onConfirm, onClose }) {
                 matchedCount,
                 " Spieler importieren"))));
 }
+function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, onLoad, onCreate, onDelete, onClose }) {
+    const [showForm, setShowForm] = useState(false);
+    const [label, setLabel] = useState("");
+    const [code, setCode] = useState(() => generateCode());
+    const [role, setRole] = useState("player");
+    const [playerId, setPlayerId] = useState("");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    useEffect(() => { if (!accountsLoaded)
+        onLoad(); }, []);
+    async function handleCreate(e) {
+        e.preventDefault();
+        setError("");
+        if (!label.trim()) {
+            setError("Bitte einen Namen/Bezeichnung für den Zugang angeben.");
+            return;
+        }
+        if (!code.trim()) {
+            setError("Bitte einen Code angeben oder generieren lassen.");
+            return;
+        }
+        if (role === "player" && !playerId) {
+            setError("Bitte einen Spieler auswählen.");
+            return;
+        }
+        setBusy(true);
+        try {
+            await onCreate({ label: label.trim(), code: code.trim(), role, playerId });
+            setLabel("");
+            setCode(generateCode());
+            setPlayerId("");
+            setShowForm(false);
+        }
+        catch (err) {
+            setError(err?.code === "auth/email-already-in-use" ? "Dieser Code ist schon vergeben, bitte einen anderen generieren." : "Fehler beim Anlegen: " + (err?.message || err));
+        }
+        finally {
+            setBusy(false);
+        }
+    }
+    function playerName(id) {
+        return players.find((p) => p.id === id)?.name || "(gelöschter Spieler)";
+    }
+    return (React.createElement("div", { className: "space-y-4" },
+        React.createElement("p", { className: "text-xs text-slate-500" }, "Trainer-Zug\u00E4nge sehen und bearbeiten alles. Spieler/Eltern-Zug\u00E4nge sehen nur Kalender, Videos und Basic-Stats des verkn\u00FCpften Spielers. Jeder Zugang bekommt einen eigenen Code zum Anmelden \u2013 kein Passwort, keine E-Mail n\u00F6tig."),
+        !showForm ? (React.createElement("button", { onClick: () => setShowForm(true), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800" },
+            React.createElement(IconPlus, { size: 15 }),
+            " Neuen Zugang anlegen")) : (React.createElement("form", { onSubmit: handleCreate, className: "space-y-3 bg-stone-50 rounded-xl p-4" },
+            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                React.createElement(Field, { label: "Rolle" },
+                    React.createElement("select", { className: inputClass, value: role, onChange: (e) => { setRole(e.target.value); setPlayerId(""); } },
+                        React.createElement("option", { value: "player" }, "Spieler / Eltern"),
+                        React.createElement("option", { value: "trainer" }, "Trainer"))),
+                role === "player" && (React.createElement(Field, { label: "Verkn\u00FCpfter Spieler" },
+                    React.createElement("select", { className: inputClass, value: playerId, onChange: (e) => setPlayerId(e.target.value) },
+                        React.createElement("option", { value: "" }, "\u2013 ausw\u00E4hlen \u2013"),
+                        players.map((p) => React.createElement("option", { key: p.id, value: p.id }, p.name)))))),
+            React.createElement(Field, { label: "Name / Bezeichnung (nur zur eigenen \u00DCbersicht)" },
+                React.createElement("input", { type: "text", className: inputClass, value: label, onChange: (e) => setLabel(e.target.value), placeholder: role === "trainer" ? "z. B. Max Trainer" : "z. B. Eltern von Marko Cuvalo" })),
+            React.createElement(Field, { label: "Code (wird zum Anmelden ben\u00F6tigt)" },
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("input", { type: "text", className: inputClass + " font-mono tracking-wide", value: code, onChange: (e) => setCode(e.target.value) }),
+                    React.createElement("button", { type: "button", onClick: () => setCode(generateCode()), className: "shrink-0 bg-stone-200 hover:bg-stone-300 text-slate-700 rounded-lg px-3 text-sm font-medium" }, "Neu generieren"))),
+            error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+            React.createElement("div", { className: "flex gap-2" },
+                React.createElement("button", { type: "button", onClick: () => setShowForm(false), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2 text-sm font-semibold" }, "Abbrechen"),
+                React.createElement("button", { type: "submit", disabled: busy, className: "flex-1 bg-[#eb1e23] hover:bg-[#be2228] disabled:opacity-60 text-white rounded-lg py-2 text-sm font-semibold" }, busy ? "Wird angelegt…" : "Zugang anlegen")))),
+        React.createElement("div", { className: "space-y-2" }, !accountsLoaded ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "L\u00E4dt\u2026")) : accounts.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Zug\u00E4nge angelegt.")) : (accounts.map((a) => (React.createElement("div", { key: a.uid, className: "flex items-center justify-between gap-3 bg-white rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
+            React.createElement("div", { className: "min-w-0" },
+                React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, a.label || a.email),
+                React.createElement("p", { className: "text-xs text-slate-400" },
+                    a.role === "trainer" ? "Trainer" : `Spieler-Zugang · ${playerName(a.playerId)}`,
+                    " \u00B7 Code: ",
+                    React.createElement("span", { className: "font-mono" }, a.code))),
+            a.uid !== currentUid && (React.createElement("button", { onClick: () => onDelete(a.uid), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Zugang entfernen" },
+                React.createElement(IconTrash, { size: 15 }))))))))));
+}
 function AdvancedRechnerLiveModal({ players, teams, onConfirm, onClose }) {
     const [stage, setStage] = useState("open");
     const [error, setError] = useState("");
@@ -1518,24 +1595,24 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
                     item.label));
             }))))));
 }
-function TeamOverviewTable({ team, players, data, statCategories, onSelectPlayer }) {
+function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
     const normalFields = normalCat ? normalCat.fields.filter((f) => f.kind !== "shooting") : [];
     function avgFor(playerId, fieldId) {
-        const entries = data.stats.filter((s) => s.playerId === playerId);
+        const entries = (players.find((p) => p.id === playerId)?.stats) || [];
         if (entries.length === 0)
             return "–";
         const sum = entries.reduce((acc, s) => acc + (Number(s[fieldId]) || 0), 0);
         return fmtNum(sum / entries.length, 1);
     }
     function fgPctFor(playerId) {
-        const entries = data.stats.filter((s) => s.playerId === playerId);
+        const entries = (players.find((p) => p.id === playerId)?.stats) || [];
         const made = entries.reduce((acc, s) => acc + (Number(s.fg_m) || 0), 0);
         const att = entries.reduce((acc, s) => acc + (Number(s.fg_a) || 0), 0);
         return att ? `${Math.round((made / att) * 1000) / 10}%` : "–";
     }
     function latestAttendance(playerId) {
-        const entries = sortByDateDesc((data.attendance || []).filter((a) => a.playerId === playerId));
+        const entries = sortByDateDesc((privateData[playerId]?.attendance) || []);
         if (entries.length === 0)
             return "–";
         const a = entries[0];
@@ -1568,14 +1645,15 @@ function TeamOverviewTable({ team, players, data, statCategories, onSelectPlayer
 }
 const TABS = [
     { key: "uebersicht", label: "Übersicht", icon: IconUsers },
+    { key: "kalender", label: "Kalender", icon: IconCalendar },
     { key: "statistik", label: "Statistiken", icon: IconActivity },
     { key: "test", label: "Athletik-Tests", icon: IconClipboard },
     { key: "anwesenheit", label: "Anwesenheit", icon: IconCalendar },
     { key: "video", label: "Videos", icon: IconVideo },
     { key: "notiz", label: "Notizen", icon: IconNote },
 ];
+const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "video"];
 function SpielerAkte() {
-    const [data, setData] = useState(null);
     const [loading, setLoading] = useState(true);
     const [saveError, setSaveError] = useState(false);
     const [selectedTeamId, setSelectedTeamId] = useState("all");
@@ -1608,51 +1686,176 @@ function SpielerAkte() {
     const [search, setSearch] = useState("");
     const [modal, setModal] = useState(null);
     const [confirmDeletePlayer, setConfirmDeletePlayer] = useState(false);
-    const [unlocked, setUnlocked] = useState(false);
-    const [codeInput, setCodeInput] = useState("");
-    const [codeError, setCodeError] = useState("");
     const [loadError, setLoadError] = useState(null);
+    const [firebaseUser, setFirebaseUser] = useState(undefined); // undefined = noch am prüfen, null = ausgeloggt
+    const [account, setAccount] = useState(null); // { role: "trainer"|"player", playerId?, email }
+    const [meta, setMeta] = useState(null); // { teams, statCategories, testTypes }
+    const [players, setPlayers] = useState([]);
+    const [privateData, setPrivateData] = useState({}); // { [playerId]: { notes, tests, attendance } }, nur für Trainer geladen
+    const [loginEmail, setLoginEmail] = useState("");
+    const [loginPassword, setLoginPassword] = useState("");
+    const [loginError, setLoginError] = useState("");
+    const [loginBusy, setLoginBusy] = useState(false);
     useEffect(() => {
-        let cancelled = false;
-        async function load() {
+        const unsub = auth.onAuthStateChanged(async (user) => {
+            setFirebaseUser(user);
+            setLoadError(null);
+            if (!user) {
+                setAccount(null);
+                setMeta(null);
+                setPlayers([]);
+                setPrivateData({});
+                setLoading(false);
+                return;
+            }
             try {
-                await auth.signInAnonymously();
-                const docRef = db.collection("club").doc("data");
-                const snap = await docRef.get();
-                const defaults = { accessCode: null, teams: [], players: [], stats: [], tests: [], videos: [], notes: [], attendance: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES };
-                if (snap.exists) {
-                    if (!cancelled)
-                        setData({ ...defaults, ...snap.data() });
+                const accSnap = await db.collection("accounts").doc(user.uid).get();
+                if (!accSnap.exists) {
+                    setLoadError("Für dieses Konto ist kein Zugang hinterlegt. Bitte an einen Trainer wenden.");
+                    setLoading(false);
+                    return;
                 }
-                else {
-                    await docRef.set(defaults);
-                    if (!cancelled)
-                        setData(defaults);
-                }
+                setAccount(accSnap.data());
             }
             catch (e) {
-                if (!cancelled)
-                    setLoadError(e.message || "Verbindung zur Datenbank fehlgeschlagen.");
+                setLoadError(e.message || "Fehler beim Laden des Zugangs.");
+                setLoading(false);
             }
-            finally {
+        });
+        return () => unsub();
+    }, []);
+    useEffect(() => {
+        if (!account)
+            return;
+        let cancelled = false;
+        async function loadData() {
+            try {
+                const metaSnap = await db.collection("club").doc("meta").get();
+                const metaDefaults = { teams: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES };
+                if (!cancelled)
+                    setMeta(metaSnap.exists ? { ...metaDefaults, ...metaSnap.data() } : metaDefaults);
+                if (account.role === "trainer") {
+                    const playersSnap = await db.collection("players").get();
+                    const loadedPlayers = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                    if (!cancelled)
+                        setPlayers(loadedPlayers);
+                    const privDefaults = { notes: [], tests: [], attendance: [] };
+                    const privEntries = await Promise.all(loadedPlayers.map(async (p) => {
+                        const s = await db.collection("playerPrivate").doc(p.id).get();
+                        return [p.id, s.exists ? { ...privDefaults, ...s.data() } : privDefaults];
+                    }));
+                    if (!cancelled)
+                        setPrivateData(Object.fromEntries(privEntries));
+                }
+                else if (account.role === "player" && account.playerId) {
+                    const pSnap = await db.collection("players").doc(account.playerId).get();
+                    if (!cancelled)
+                        setPlayers(pSnap.exists ? [{ id: pSnap.id, ...pSnap.data() }] : []);
+                }
                 if (!cancelled)
                     setLoading(false);
             }
+            catch (e) {
+                if (!cancelled) {
+                    setLoadError(e.message || "Verbindung zur Datenbank fehlgeschlagen.");
+                    setLoading(false);
+                }
+            }
         }
-        load();
+        loadData();
         return () => { cancelled = true; };
-    }, []);
-    async function persist(newData) {
-        setData(newData);
+    }, [account]);
+    async function handleLogin(e) {
+        e.preventDefault();
+        setLoginError("");
+        setLoginBusy(true);
         try {
-            await db.collection("club").doc("data").set(newData);
+            await auth.signInWithEmailAndPassword(codeToEmail(loginEmail), codeToPassword(loginEmail));
+        }
+        catch (err) {
+            setLoginError("Code nicht gültig.");
+        }
+        finally {
+            setLoginBusy(false);
+        }
+    }
+    function handleLogout() {
+        auth.signOut();
+    }
+    async function persistPlayerFields(playerId, changes) {
+        setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, ...changes } : p)));
+        try {
+            await db.collection("players").doc(playerId).set(changes, { merge: true });
             setSaveError(false);
         }
         catch (e) {
             setSaveError(true);
         }
     }
-    if (loading) {
+    async function persistPrivateFields(playerId, changes) {
+        setPrivateData((prev) => ({ ...prev, [playerId]: { ...prev[playerId], ...changes } }));
+        try {
+            await db.collection("playerPrivate").doc(playerId).set(changes, { merge: true });
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+    }
+    async function persistMeta(changes) {
+        setMeta((prev) => ({ ...prev, ...changes }));
+        try {
+            await db.collection("club").doc("meta").set(changes, { merge: true });
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+    }
+    async function createPlayerDoc(playerId, initialData) {
+        setPlayers((prev) => [...prev, { id: playerId, ...initialData }]);
+        setPrivateData((prev) => ({ ...prev, [playerId]: { notes: [], tests: [], attendance: [] } }));
+        try {
+            await db.collection("players").doc(playerId).set(initialData);
+            await db.collection("playerPrivate").doc(playerId).set({ notes: [], tests: [], attendance: [] });
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+    }
+    async function deletePlayerDoc(playerId) {
+        setPlayers((prev) => prev.filter((p) => p.id !== playerId));
+        setPrivateData((prev) => { const next = { ...prev }; delete next[playerId]; return next; });
+        try {
+            await db.collection("players").doc(playerId).delete();
+            await db.collection("playerPrivate").doc(playerId).delete();
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+    }
+    const [accounts, setAccounts] = useState([]);
+    const [accountsLoaded, setAccountsLoaded] = useState(false);
+    async function loadAccounts() {
+        const snap = await db.collection("accounts").get();
+        setAccounts(snap.docs.map((d) => ({ uid: d.id, ...d.data() })));
+        setAccountsLoaded(true);
+    }
+    async function createAccount({ label, code, role, playerId }) {
+        const cred = await secondaryAuth.createUserWithEmailAndPassword(codeToEmail(code), codeToPassword(code));
+        const newUid = cred.user.uid;
+        const accountDoc = { label, code, role, playerId: role === "player" ? playerId : null };
+        await db.collection("accounts").doc(newUid).set(accountDoc);
+        await secondaryAuth.signOut();
+        setAccounts((prev) => [...prev, { uid: newUid, ...accountDoc }]);
+    }
+    async function deleteAccount(uid) {
+        await db.collection("accounts").doc(uid).delete();
+        setAccounts((prev) => prev.filter((a) => a.uid !== uid));
+    }
+    if (firebaseUser === undefined || (firebaseUser && loading)) {
         return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50" },
             React.createElement(IconLoader, { className: "animate-spin text-slate-400", size: 28 })));
     }
@@ -1662,67 +1865,37 @@ function SpielerAkte() {
                 React.createElement(IconAlert, { size: 26, className: "mx-auto text-red-500 mb-2" }),
                 React.createElement("p", { className: "text-sm font-semibold text-slate-900 mb-1" }, "Verbindung zur Datenbank fehlgeschlagen"),
                 React.createElement("p", { className: "text-xs text-slate-500" }, loadError),
-                React.createElement("p", { className: "text-xs text-slate-400 mt-3" }, "Pr\u00FCft, ob firebaseConfig oben im Code eingetragen ist. Falls ihr das gerade nur in der Chat-Vorschau testet: das kann an der Sandbox liegen \u2013 \u00F6ffnet stattdessen die echte, gehostete Adresse."))));
+                React.createElement("button", { onClick: handleLogout, className: "mt-4 text-xs text-slate-500 underline" }, "Abmelden und erneut versuchen"))));
     }
-    if (!data) {
-        return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50 text-slate-500 text-sm" }, "Daten konnten nicht geladen werden."));
-    }
-    function setupAccessCode(code) {
-        persist({ ...data, accessCode: code });
-        setUnlocked(true);
-    }
-    function tryUnlock(e) {
-        e.preventDefault();
-        if (codeInput === data.accessCode) {
-            setUnlocked(true);
-            setCodeError("");
-        }
-        else {
-            setCodeError("Falscher Code.");
-        }
-    }
-    function changeAccessCode(newCode) {
-        persist({ ...data, accessCode: newCode });
-    }
-    if (!data.accessCode) {
+    if (!firebaseUser) {
         return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex items-center justify-center p-6" },
-            React.createElement("div", { className: "w-full max-w-sm bg-white rounded-xl border border-stone-200 p-6" },
+            React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-6" },
                 React.createElement("div", { className: "flex items-center gap-2 mb-1" },
-                    React.createElement(IconKey, { size: 18, className: "text-[#eb1e23]" }),
-                    React.createElement("h2", { className: "text-base font-bold text-slate-900" }, "Zugriffscode einrichten")),
-                React.createElement("p", { className: "text-sm text-slate-500 mb-4" }, "Legt einmalig einen gemeinsamen Code fest und gebt ihn nur an eure Trainer weiter. Ohne den Code kommt niemand an die Spielerdaten."),
-                React.createElement("form", { onSubmit: (e) => { e.preventDefault(); if (codeInput.trim().length < 4) {
-                        setCodeError("Mindestens 4 Zeichen.");
-                        return;
-                    } setupAccessCode(codeInput.trim()); }, className: "space-y-3" },
-                    React.createElement("input", { className: inputClass, type: "text", placeholder: "Neuer Code (mind. 4 Zeichen)", value: codeInput, onChange: (e) => { setCodeInput(e.target.value); setCodeError(""); }, autoFocus: true }),
-                    codeError && React.createElement("p", { className: "text-xs text-red-600" }, codeError),
-                    React.createElement("button", { type: "submit", className: "w-full bg-[#eb1e23] hover:bg-[#be2228] text-white rounded-lg py-2.5 text-sm font-semibold transition" }, "Code festlegen und starten")))));
+                    React.createElement(IconLock, { size: 18, className: "text-[#eb1e23]" }),
+                    React.createElement("h2", { className: "text-base font-bold text-slate-900" }, "Anmelden")),
+                React.createElement("p", { className: "text-sm text-slate-500 mb-4" }, "Gib deinen pers\u00F6nlichen Code ein."),
+                React.createElement("form", { onSubmit: handleLogin, className: "space-y-3" },
+                    React.createElement("input", { className: inputClass + " tracking-wide", type: "text", placeholder: "Code", value: loginEmail, onChange: (e) => { setLoginEmail(e.target.value); setLoginError(""); }, autoFocus: true, autoCapitalize: "none", autoCorrect: "off" }),
+                    loginError && React.createElement("p", { className: "text-xs text-red-600" }, loginError),
+                    React.createElement("button", { type: "submit", disabled: loginBusy, className: "w-full bg-[#eb1e23] hover:bg-[#be2228] disabled:opacity-60 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, loginBusy ? "Wird geprüft…" : "Anmelden")))));
     }
-    if (!unlocked) {
-        return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex items-center justify-center p-6" },
-            React.createElement("div", { className: "w-full max-w-sm bg-white rounded-xl border border-stone-200 p-6" },
-                React.createElement("div", { className: "flex items-center gap-2 mb-1" },
-                    React.createElement(IconLock, { size: 18, className: "text-slate-700" }),
-                    React.createElement("h2", { className: "text-base font-bold text-slate-900" }, "Zugriffscode eingeben")),
-                React.createElement("p", { className: "text-sm text-slate-500 mb-4" }, "Nur f\u00FCr Trainer des Vereins. Fragt den Code bei einem Kollegen nach."),
-                React.createElement("form", { onSubmit: tryUnlock, className: "space-y-3" },
-                    React.createElement("input", { className: inputClass, type: "password", placeholder: "Code", value: codeInput, onChange: (e) => { setCodeInput(e.target.value); setCodeError(""); }, autoFocus: true }),
-                    codeError && React.createElement("p", { className: "text-xs text-red-600" }, codeError),
-                    React.createElement("button", { type: "submit", className: "w-full bg-slate-900 hover:bg-slate-800 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, "Entsperren")))));
+    if (!account || !meta) {
+        return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50" },
+            React.createElement(IconLoader, { className: "animate-spin text-slate-400", size: 28 })));
     }
-    const teams = data.teams;
-    const players = data.players
+    const isTrainer = account.role === "trainer";
+    const teams = meta.teams;
+    const visiblePlayers = players
         .filter((p) => selectedTeamId === "all" || p.teamId === selectedTeamId)
         .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
         .sort((a, b) => a.name.localeCompare(b.name));
-    const selectedPlayer = data.players.find((p) => p.id === selectedPlayerId) || null;
+    const selectedPlayer = players.find((p) => p.id === selectedPlayerId) || null;
     const selectedTeam = selectedPlayer ? teams.find((t) => t.id === selectedPlayer.teamId) : null;
-    const playerStats = selectedPlayer ? sortByDateDesc(data.stats.filter((s) => s.playerId === selectedPlayer.id)) : [];
-    const playerTests = selectedPlayer ? sortByDateDesc(data.tests.filter((t) => t.playerId === selectedPlayer.id)) : [];
-    const playerVideos = selectedPlayer ? sortByDateDesc(data.videos.filter((v) => v.playerId === selectedPlayer.id)) : [];
-    const playerNotes = selectedPlayer ? sortByDateDesc(data.notes.filter((n) => n.playerId === selectedPlayer.id)) : [];
-    const playerAttendance = selectedPlayer ? sortByDateDesc((data.attendance || []).filter((a) => a.playerId === selectedPlayer.id)) : [];
+    const playerStats = selectedPlayer ? sortByDateDesc(selectedPlayer.stats || []) : [];
+    const playerTests = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.tests || []) : [];
+    const playerVideos = selectedPlayer ? sortByDateDesc(selectedPlayer.videos || []) : [];
+    const playerNotes = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.notes || []) : [];
+    const playerAttendance = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.attendance || []) : [];
     const avg = (key) => (playerStats.length ? fmtNum(playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length, 1) : "–");
     const totalPct = (madeKey, attKey) => {
         const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
@@ -1734,49 +1907,52 @@ function SpielerAkte() {
         setActiveTab("uebersicht");
         setConfirmDeletePlayer(false);
     }
+    useEffect(() => {
+        if (account?.role === "player" && account.playerId && !selectedPlayerId) {
+            setSelectedPlayerId(account.playerId);
+        }
+    }, [account, selectedPlayerId]);
     function handleAddTeam(team) {
         const newTeam = { id: uid(), ...team };
-        persist({ ...data, teams: [...data.teams, newTeam] });
+        persistMeta({ teams: [...meta.teams, newTeam] });
     }
     function handleAddPlayer(player) {
-        const newPlayer = { id: uid(), ...player };
-        persist({ ...data, players: [...data.players, newPlayer] });
-        selectPlayer(newPlayer.id);
+        const newId = uid();
+        createPlayerDoc(newId, { ...player, stats: [], videos: [] });
+        selectPlayer(newId);
     }
     function handleEditPlayer(changes) {
-        persist({ ...data, players: data.players.map((p) => (p.id === selectedPlayer.id ? { ...p, ...changes } : p)) });
+        persistPlayerFields(selectedPlayer.id, changes);
     }
     function handleDeletePlayer() {
-        const id = selectedPlayer.id;
-        persist({
-            ...data,
-            players: data.players.filter((p) => p.id !== id),
-            stats: data.stats.filter((s) => s.playerId !== id),
-            tests: data.tests.filter((t) => t.playerId !== id),
-            videos: data.videos.filter((v) => v.playerId !== id),
-            notes: data.notes.filter((n) => n.playerId !== id),
-        });
+        deletePlayerDoc(selectedPlayer.id);
         setSelectedPlayerId(null);
         setConfirmDeletePlayer(false);
     }
     function handleAddStat(entry) {
-        persist({ ...data, stats: [...data.stats, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+        persistPlayerFields(selectedPlayer.id, { stats: [...(selectedPlayer.stats || []), { id: uid(), ...entry }] });
     }
     function handleEditStat(entry) {
-        persist({ ...data, stats: data.stats.map((s) => (s.id === entry.id ? { ...s, ...entry } : s)) });
+        persistPlayerFields(selectedPlayer.id, { stats: (selectedPlayer.stats || []).map((s) => (s.id === entry.id ? { ...s, ...entry } : s)) });
     }
     function handleAddTest(entry) {
-        persist({ ...data, tests: [...data.tests, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+        const cur = privateData[selectedPlayer.id]?.tests || [];
+        persistPrivateFields(selectedPlayer.id, { tests: [...cur, { id: uid(), ...entry }] });
     }
     function handleAddVideo(entry) {
-        persist({ ...data, videos: [...data.videos, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+        persistPlayerFields(selectedPlayer.id, { videos: [...(selectedPlayer.videos || []), { id: uid(), ...entry }] });
     }
     function handleAddNote(entry) {
-        persist({ ...data, notes: [...data.notes, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+        const cur = privateData[selectedPlayer.id]?.notes || [];
+        persistPrivateFields(selectedPlayer.id, { notes: [...cur, { id: uid(), ...entry }] });
     }
     function handleImportAttendance(entries, date) {
-        const newRecords = entries.map((e) => ({ id: uid(), date, ...e }));
-        persist({ ...data, attendance: [...(data.attendance || []), ...newRecords] });
+        const byPlayer = {};
+        entries.forEach((e) => { (byPlayer[e.playerId] = byPlayer[e.playerId] || []).push({ id: uid(), date, ...e }); });
+        Object.entries(byPlayer).forEach(([playerId, newRecords]) => {
+            const cur = privateData[playerId]?.attendance || [];
+            persistPrivateFields(playerId, { attendance: [...cur, ...newRecords] });
+        });
     }
     function handleImportHabitStats(perPlayerValues, date, gegner) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
@@ -1806,19 +1982,23 @@ function SpielerAkte() {
                 labelToFieldId[label] = newField.id;
             }
         });
-        let newStats = [...data.stats];
+        persistMeta({ statCategories: cats });
         Object.entries(perPlayerValues).forEach(([playerId, valuesByLabel]) => {
             const fieldValues = {};
             Object.entries(valuesByLabel).forEach(([label, val]) => { fieldValues[labelToFieldId[label]] = val; });
-            const existingIdx = newStats.findIndex((s) => s.playerId === playerId && s.date === date);
+            const player = players.find((p) => p.id === playerId);
+            if (!player)
+                return;
+            const newStats = [...(player.stats || [])];
+            const existingIdx = newStats.findIndex((s) => s.date === date);
             if (existingIdx !== -1) {
                 newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
             }
             else {
-                newStats.push({ id: uid(), playerId, date, gegner: gegner || "", minuten: 0, ...fieldValues });
+                newStats.push({ id: uid(), date, gegner: gegner || "", minuten: 0, ...fieldValues });
             }
+            persistPlayerFields(playerId, { stats: newStats });
         });
-        persist({ ...data, statCategories: cats, stats: newStats });
     }
     function handleImportBoxscore(entries, date, gegner) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
@@ -1838,7 +2018,7 @@ function SpielerAkte() {
         const rebOffFieldId = findOrCreateField("Rebounds Offensiv", ["Offensive Rebounds", "OR"]);
         const rebDefFieldId = findOrCreateField("Rebounds Defensiv", ["Defensive Rebounds", "DR"]);
         const effFieldId = findOrCreateField("Effizienz", ["EFF", "EF"]);
-        let newStats = [...data.stats];
+        persistMeta({ statCategories: cats });
         entries.forEach(({ playerId, stats: row }) => {
             const fieldValues = { minuten: row.minuten };
             if (row.punkte !== null)
@@ -1873,15 +2053,19 @@ function SpielerAkte() {
                 fieldValues.ft_m = row.ftm;
             if (row.fta !== null)
                 fieldValues.ft_a = row.fta;
-            const existingIdx = newStats.findIndex((s) => s.playerId === playerId && s.date === date);
+            const player = players.find((p) => p.id === playerId);
+            if (!player)
+                return;
+            const newStats = [...(player.stats || [])];
+            const existingIdx = newStats.findIndex((s) => s.date === date);
             if (existingIdx !== -1) {
                 newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
             }
             else {
-                newStats.push({ id: uid(), playerId, date, gegner: gegner || "", ...fieldValues });
+                newStats.push({ id: uid(), date, gegner: gegner || "", ...fieldValues });
             }
+            persistPlayerFields(playerId, { stats: newStats });
         });
-        persist({ ...data, statCategories: cats, stats: newStats });
     }
     function handleImportAdvancedStats(entries, date, gegner) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
@@ -1911,32 +2095,42 @@ function SpielerAkte() {
                 labelToFieldId[label] = newField.id;
             }
         });
-        let newStats = [...data.stats];
+        persistMeta({ statCategories: cats });
         entries.forEach(({ playerId, values }) => {
             const fieldValues = {};
             Object.entries(values).forEach(([label, val]) => { fieldValues[labelToFieldId[label]] = val; });
-            const existingIdx = newStats.findIndex((s) => s.playerId === playerId && s.date === date);
+            const player = players.find((p) => p.id === playerId);
+            if (!player)
+                return;
+            const newStats = [...(player.stats || [])];
+            const existingIdx = newStats.findIndex((s) => s.date === date);
             if (existingIdx !== -1) {
                 newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
             }
             else {
-                newStats.push({ id: uid(), playerId, date, gegner: gegner || "", ...fieldValues });
+                newStats.push({ id: uid(), date, gegner: gegner || "", ...fieldValues });
             }
+            persistPlayerFields(playerId, { stats: newStats });
         });
-        persist({ ...data, statCategories: cats, stats: newStats });
     }
     function deleteItem(collection, id) {
-        persist({ ...data, [collection]: data[collection].filter((item) => item.id !== id) });
+        if (collection === "stats" || collection === "videos") {
+            persistPlayerFields(selectedPlayer.id, { [collection]: (selectedPlayer[collection] || []).filter((item) => item.id !== id) });
+        }
+        else {
+            const cur = privateData[selectedPlayer.id]?.[collection] || [];
+            persistPrivateFields(selectedPlayer.id, { [collection]: cur.filter((item) => item.id !== id) });
+        }
     }
-    const statCategories = data.statCategories || DEFAULT_STAT_CATEGORIES;
+    const statCategories = meta.statCategories || DEFAULT_STAT_CATEGORIES;
     function addStatCategory(label) {
-        persist({ ...data, statCategories: [...statCategories, { id: uid(), label, fields: [] }] });
+        persistMeta({ statCategories: [...statCategories, { id: uid(), label, fields: [] }] });
     }
     function renameStatCategory(catId, label) {
-        persist({ ...data, statCategories: statCategories.map((c) => (c.id === catId ? { ...c, label } : c)) });
+        persistMeta({ statCategories: statCategories.map((c) => (c.id === catId ? { ...c, label } : c)) });
     }
     function deleteStatCategory(catId) {
-        persist({ ...data, statCategories: statCategories.filter((c) => c.id !== catId) });
+        persistMeta({ statCategories: statCategories.filter((c) => c.id !== catId) });
     }
     function moveStatCategory(catId, dir) {
         const cats = [...statCategories];
@@ -1945,29 +2139,25 @@ function SpielerAkte() {
         if (i < 0 || j < 0 || j >= cats.length)
             return;
         [cats[i], cats[j]] = [cats[j], cats[i]];
-        persist({ ...data, statCategories: cats });
+        persistMeta({ statCategories: cats });
     }
     function addStatFieldToCategory(catId, label, kind) {
-        persist({
-            ...data,
+        persistMeta({
             statCategories: statCategories.map((c) => (c.id === catId ? { ...c, fields: [...c.fields, { id: uid(), label, kind }] } : c)),
         });
     }
     function renameStatFieldInCategory(catId, fieldId, label) {
-        persist({
-            ...data,
+        persistMeta({
             statCategories: statCategories.map((c) => c.id === catId ? { ...c, fields: c.fields.map((f) => (f.id === fieldId ? { ...f, label } : f)) } : c),
         });
     }
     function deleteStatFieldFromCategory(catId, fieldId) {
-        persist({
-            ...data,
+        persistMeta({
             statCategories: statCategories.map((c) => (c.id === catId ? { ...c, fields: c.fields.filter((f) => f.id !== fieldId) } : c)),
         });
     }
     function moveStatFieldInCategory(catId, fieldId, dir) {
-        persist({
-            ...data,
+        persistMeta({
             statCategories: statCategories.map((c) => {
                 if (c.id !== catId)
                     return c;
@@ -1981,15 +2171,15 @@ function SpielerAkte() {
             }),
         });
     }
-    const testTypes = data.testTypes || DEFAULT_TEST_TYPES;
+    const testTypes = meta.testTypes || DEFAULT_TEST_TYPES;
     function addTestType(label) {
-        persist({ ...data, testTypes: [...testTypes, { id: uid(), label }] });
+        persistMeta({ testTypes: [...testTypes, { id: uid(), label }] });
     }
     function renameTestType(id, label) {
-        persist({ ...data, testTypes: testTypes.map((t) => (t.id === id ? { ...t, label } : t)) });
+        persistMeta({ testTypes: testTypes.map((t) => (t.id === id ? { ...t, label } : t)) });
     }
     function deleteTestType(id) {
-        persist({ ...data, testTypes: testTypes.filter((t) => t.id !== id) });
+        persistMeta({ testTypes: testTypes.filter((t) => t.id !== id) });
     }
     function moveTestType(id, dir) {
         const types = [...testTypes];
@@ -1998,7 +2188,7 @@ function SpielerAkte() {
         if (i < 0 || j < 0 || j >= types.length)
             return;
         [types[i], types[j]] = [types[j], types[i]];
-        persist({ ...data, testTypes: types });
+        persistMeta({ testTypes: types });
     }
     return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex flex-col" },
         React.createElement("header", { className: "bg-black text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3 shadow-[0_2px_16px_rgba(0,0,0,0.25)] relative z-10" },
@@ -2015,29 +2205,35 @@ function SpielerAkte() {
                         React.createElement("p", { className: "text-lg font-bold leading-none" }, teams.length),
                         React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mt-0.5" }, "Teams")),
                     React.createElement("div", null,
-                        React.createElement("p", { className: "text-lg font-bold leading-none" }, data.players.length),
+                        React.createElement("p", { className: "text-lg font-bold leading-none" }, players.length),
                         React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mt-0.5" }, "Spieler")))),
             React.createElement("div", { className: "flex items-center gap-2" },
                 saveError && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs bg-red-500/20 text-red-200 px-3 py-1.5 rounded-full" },
                     React.createElement(IconAlert, { size: 14 }),
                     " Speichern fehlgeschlagen")),
-                React.createElement(HeaderMenu, { label: "Importieren", icon: IconUpload, isOpen: openHeaderMenu === "import", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "import" ? null : "import"), onClose: () => setOpenHeaderMenu(null), items: [
+                isTrainer && (React.createElement(HeaderMenu, { label: "Importieren", icon: IconUpload, isOpen: openHeaderMenu === "import", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "import" ? null : "import"), onClose: () => setOpenHeaderMenu(null), items: [
                         { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
                         { label: "Habit-Stats importieren", icon: IconActivity, onClick: () => setModal("importHabits") },
                         { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => setModal("importBoxscore") },
                         { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
                         { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
-                    ] }),
-                React.createElement(HeaderMenu, { label: "Verwalten", icon: IconSettings, isOpen: openHeaderMenu === "settings", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "settings" ? null : "settings"), onClose: () => setOpenHeaderMenu(null), items: [
-                        { label: "Statistik-Kategorien", icon: IconSettings, onClick: () => setModal("statFields") },
-                        { label: "Test-Arten", icon: IconClipboard, onClick: () => setModal("testTypes") },
-                        { label: "Zugriffscode ändern", icon: IconLock, onClick: () => setModal("changeCode") },
-                    ] }))),
-        React.createElement("div", { className: "bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center gap-2 text-xs text-amber-800" },
-            React.createElement(IconInfo, { size: 14, className: "shrink-0" }),
-            "Zugriff ist nur mit eurem gemeinsamen Code m\u00F6glich. Alle, die den Code kennen, sehen und bearbeiten dieselben Daten \u2013 es gibt keine Trennung nach einzelnem Trainer."),
+                    ] })),
+                React.createElement(HeaderMenu, { label: "Verwalten", icon: IconSettings, isOpen: openHeaderMenu === "settings", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "settings" ? null : "settings"), onClose: () => setOpenHeaderMenu(null), items: isTrainer
+                        ? [
+                            { label: "Statistik-Kategorien", icon: IconSettings, onClick: () => setModal("statFields") },
+                            { label: "Test-Arten", icon: IconClipboard, onClick: () => setModal("testTypes") },
+                            { label: "Zugänge verwalten", icon: IconLock, onClick: () => setModal("accounts") },
+                            { label: "Abmelden", icon: IconExternal, onClick: handleLogout },
+                        ]
+                        : [{ label: "Abmelden", icon: IconExternal, onClick: handleLogout }] }))),
+        React.createElement("div", { className: "bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center justify-between gap-2 text-xs text-amber-800" },
+            React.createElement("span", { className: "flex items-center gap-2" },
+                React.createElement(IconInfo, { size: 14, className: "shrink-0" }),
+                " Angemeldet als ",
+                account.label || (isTrainer ? "Trainer" : "Spieler-Zugang")),
+            React.createElement("button", { onClick: handleLogout, className: "underline shrink-0" }, "Abmelden")),
         React.createElement("div", { className: "flex flex-col md:flex-row flex-1" },
-            React.createElement("aside", { className: "w-full md:w-80 border-b md:border-b-0 md:border-r border-stone-200 bg-white p-4 flex flex-col gap-3" },
+            isTrainer && (React.createElement("aside", { className: "w-full md:w-80 border-b md:border-b-0 md:border-r border-stone-200 bg-white p-4 flex flex-col gap-3" },
                 React.createElement("div", { className: "flex gap-2" },
                     React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => setSelectedTeamId(e.target.value) },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
@@ -2058,9 +2254,9 @@ function SpielerAkte() {
                         React.createElement("span", { className: "min-w-0 flex-1" },
                             React.createElement("span", { className: `block text-sm font-semibold truncate ${selectedPlayerId === p.id ? "text-slate-900" : ""}` }, p.name),
                             React.createElement("span", { className: "block text-xs truncate text-slate-500" }, p.position)),
-                        React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` })))))),
+                        React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` }))))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-6" },
-                !selectedPlayer && selectedTeamId !== "all" && (React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: data.players.filter((p) => p.teamId === selectedTeamId), data: data, statCategories: statCategories, onSelectPlayer: selectPlayer })),
+                !selectedPlayer && selectedTeamId !== "all" && (React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: players.filter((p) => p.teamId === selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && selectedTeamId === "all" && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "W\u00E4hle ein Team f\u00FCr die Team-\u00DCbersicht, einen Spieler f\u00FCr die Akte, oder lege einen neuen Spieler an."))),
@@ -2074,11 +2270,11 @@ function SpielerAkte() {
                                     selectedPlayer.number !== "" && selectedPlayer.number !== undefined && (React.createElement("span", { className: "text-3xl font-bold text-[#eb1e23] ml-1" }, selectedPlayer.number))),
                                 React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-1" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ") || "Kein Team"),
                                 React.createElement("div", { className: "h-[3px] w-11 bg-[#0a96d4] rounded-full mt-3" })),
-                            React.createElement("div", { className: "flex gap-2" },
+                            isTrainer && (React.createElement("div", { className: "flex gap-2" },
                                 React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Bearbeiten" },
                                     React.createElement(IconEdit, { size: 16 })),
                                 React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg hover:bg-red-50 text-red-400", "aria-label": "L\u00F6schen" },
-                                    React.createElement(IconTrash, { size: 16 })))),
+                                    React.createElement(IconTrash, { size: 16 }))))),
                         React.createElement("div", { className: "flex flex-wrap gap-8 mt-5 pt-4 border-t border-stone-100" },
                             selectedPlayer.birthdate && (React.createElement("div", null,
                                 React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, "Geburtsdatum"),
@@ -2091,7 +2287,7 @@ function SpielerAkte() {
                         React.createElement("div", { className: "flex gap-2" },
                             React.createElement("button", { onClick: () => setConfirmDeletePlayer(false), className: "px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-slate-600 hover:bg-stone-50" }, "Abbrechen"),
                             React.createElement("button", { onClick: handleDeletePlayer, className: "px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700" }, "Endg\u00FCltig l\u00F6schen")))),
-                    React.createElement("div", { className: "flex gap-1 bg-stone-100 rounded-xl p-1 mt-6 overflow-x-auto" }, TABS.map((t) => {
+                    React.createElement("div", { className: "flex gap-1 bg-stone-100 rounded-xl p-1 mt-6 overflow-x-auto" }, TABS.filter((t) => isTrainer || PLAYER_ROLE_TABS.includes(t.key)).map((t) => {
                         const Icon = t.icon;
                         const active = activeTab === t.key;
                         return (React.createElement("button", { key: t.key, onClick: () => setActiveTab(t.key), className: `flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition ${active ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}` },
@@ -2124,7 +2320,7 @@ function SpielerAkte() {
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Details"),
-                                React.createElement("div", { className: "space-y-2 mt-1.5" }, statCategories.map((cat) => {
+                                React.createElement("div", { className: "space-y-2 mt-1.5" }, statCategories.filter((cat) => isTrainer || cat.id !== "advanced").map((cat) => {
                                     if (cat.fields.length === 0)
                                         return null;
                                     const isOpen = expandedCats.has(cat.id);
@@ -2152,6 +2348,9 @@ function SpielerAkte() {
                                 React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzte Notiz"),
                                     playerNotes[0] ? (React.createElement("p", { className: "text-sm text-slate-700 line-clamp-2" }, playerNotes[0].text)) : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Notizen erfasst."))))),
+                        activeTab === "kalender" && (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-8 text-center" },
+                            React.createElement(IconCalendar, { size: 28, className: "mx-auto text-slate-300 mb-2" }),
+                            React.createElement("p", { className: "text-sm text-slate-500" }, "Der Kalender kommt im n\u00E4chsten Schritt dazu."))),
                         activeTab === "statistik" && (React.createElement("div", null,
                             React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("stat"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
@@ -2231,10 +2430,10 @@ function SpielerAkte() {
                                         React.createElement("button", { onClick: () => deleteItem("attendance", a.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                             React.createElement(IconTrash, { size: 14 })))))))))))),
                         activeTab === "video" && (React.createElement("div", null,
-                            React.createElement("div", { className: "flex justify-end mb-3" },
+                            isTrainer && (React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("video"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
                                     React.createElement(IconPlus, { size: 15 }),
-                                    " Video")),
+                                    " Video"))),
                             playerVideos.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Videos verkn\u00FCpft.")) : (React.createElement("div", { className: "space-y-2" }, playerVideos.map((v) => {
                                 const embedUrl = getEmbedUrl(v.url);
                                 const isOpen = expandedVideos.has(v.id);
@@ -2251,7 +2450,7 @@ function SpielerAkte() {
                                         React.createElement("div", { className: "shrink-0 flex items-center gap-2" },
                                             React.createElement("a", { href: v.url, target: "_blank", rel: "noopener noreferrer", className: "text-slate-400 hover:text-[#eb1e23]", "aria-label": "In neuem Tab \u00F6ffnen" },
                                                 React.createElement(IconExternal, { size: 14 })),
-                                            React.createElement("button", { onClick: () => deleteItem("videos", v.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Video l\u00F6schen" },
+                                            isTrainer && React.createElement("button", { onClick: () => deleteItem("videos", v.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Video l\u00F6schen" },
                                                 React.createElement(IconTrash, { size: 14 })),
                                             embedUrl && (React.createElement("button", { onClick: () => toggleVideo(v.id), "aria-label": isOpen ? "Einklappen" : "Ausklappen" },
                                                 React.createElement(IconArrowDown, { size: 14, className: `text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}` }))))),
@@ -2298,18 +2497,18 @@ function SpielerAkte() {
             React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null) }))),
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(NoteForm, { onSubmit: handleAddNote, onClose: () => setModal(null) }))),
-        modal === "changeCode" && (React.createElement(Modal, { title: "Zugriffscode \u00E4ndern", onClose: () => setModal(null) },
-            React.createElement(ChangeCodeForm, { onSubmit: changeAccessCode, onClose: () => setModal(null) }))),
+        modal === "accounts" && (React.createElement(Modal, { title: "Zug\u00E4nge verwalten", onClose: () => setModal(null), wide: true },
+            React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onDelete: deleteAccount, onClose: () => setModal(null) }))),
         modal === "importAttendance" && (React.createElement(Modal, { title: "Anwesenheit aus CSV importieren", onClose: () => setModal(null), wide: true },
-            React.createElement(AttendanceImportModal, { players: data.players, teams: teams, onConfirm: handleImportAttendance, onClose: () => setModal(null) }))),
+            React.createElement(AttendanceImportModal, { players: players, teams: teams, onConfirm: handleImportAttendance, onClose: () => setModal(null) }))),
         modal === "importHabits" && (React.createElement(Modal, { title: "Habit-Stats aus CSV importieren", onClose: () => setModal(null), wide: true },
-            React.createElement(HabitStatsImportModal, { players: data.players, teams: teams, onConfirm: handleImportHabitStats, onClose: () => setModal(null) }))),
+            React.createElement(HabitStatsImportModal, { players: players, teams: teams, onConfirm: handleImportHabitStats, onClose: () => setModal(null) }))),
         modal === "importBoxscore" && (React.createElement(Modal, { title: "Boxscore einf\u00FCgen", onClose: () => setModal(null), wide: true },
-            React.createElement(BoxscoreImportModal, { players: data.players, teams: teams, onConfirm: handleImportBoxscore, onClose: () => setModal(null) }))),
+            React.createElement(BoxscoreImportModal, { players: players, teams: teams, onConfirm: handleImportBoxscore, onClose: () => setModal(null) }))),
         modal === "importAdvanced" && (React.createElement(Modal, { title: "Advanced Stats importieren", onClose: () => setModal(null), wide: true },
-            React.createElement(AdvancedStatsImportModal, { players: data.players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
+            React.createElement(AdvancedStatsImportModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
         modal === "advancedRechnerLive" && (React.createElement(Modal, { title: "Advanced-Rechner verbinden", onClose: () => setModal(null), wide: true },
-            React.createElement(AdvancedRechnerLiveModal, { players: data.players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) })))));
+            React.createElement(AdvancedRechnerLiveModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) })))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(SpielerAkte, null));
 </script>
