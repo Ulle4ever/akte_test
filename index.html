@@ -406,64 +406,162 @@ function parseHabitsCsv(text) {
     }
     return { players, habits, error: null };
 }
+const BOX_ALIASES = {
+    min: ["min", "minuten", "mp", "gespielte minuten"],
+    pts: ["pts", "punkte", "points", "p"],
+    reb: ["reb", "rebounds", "tr", "trb", "rb"],
+    as: ["as", "ast", "assists", "a"],
+    st: ["st", "stl", "steals"],
+    bl: ["bl", "blk", "blocks"],
+    to: ["to", "tov", "turnovers", "ballverluste", "tos"],
+    f: ["f", "pf", "fouls", "fouls (pf)", "fouls(pf)"],
+    or: ["or", "orb", "off. reb", "offensiverebounds", "oreb", "reb off"],
+    dr: ["dr", "drb", "def. reb", "defensiverebounds", "dreb", "reb def"],
+    ef: ["ef", "eff", "effizienz", "efficiency"],
+    fgm: ["fgm", "fg m", "fg-m"],
+    fga: ["fga", "fg a", "fg-a"],
+    "3pm": ["3pm", "tpm", "3p m", "3p-m", "dreier m"],
+    "3pa": ["3pa", "tpa", "3p a", "3p-a", "dreier a"],
+    ftm: ["ftm", "ft m", "ft-m"],
+    fta: ["fta", "ft a", "ft-a"],
+    fg_combo: ["fg"],
+    tp_combo: ["3fg", "3pt", "3-pt", "threes", "dreier"],
+    ft_combo: ["ft"],
+};
+const TOTALS_ROW_RE = /^(team\s*)?(totals?|gesamt|summe)$/i;
+const NAME_HEADER_RE = /^(name|spieler|player)$/i;
+const NUM_HEADER_RE = /^(nr\.?|nummer|#|number|no\.?)$/i;
 function parseBoxscoreText(text) {
     const lines = text.split(/\r\n|\n|\r/).map((l) => l.trim()).filter((l) => l.length > 0);
-    const headerIdx = lines.findIndex((l) => l.includes("\t") && /\bmin\b/i.test(l) && /\bpts\b/i.test(l));
-    if (headerIdx === -1)
-        return { players: [], error: "Konnte die Kopfzeile mit \"Min\" und \"Pts\" nicht finden. Wurde die Tabelle komplett kopiert?" };
-    const headerCells = lines[headerIdx].split("\t").map((c) => c.trim().toLowerCase());
-    const colIndex = {};
-    headerCells.slice(1).forEach((c, i) => { colIndex[c] = i; });
-    const players = [];
-    let i = headerIdx + 1;
-    while (i < lines.length) {
-        const line = lines[i];
-        if (/^\d+$/.test(line)) {
-            const number = parseInt(line, 10);
-            let j = i + 1;
-            const nameParts = [];
-            while (j < lines.length && !lines[j].includes("\t")) {
-                nameParts.push(lines[j]);
-                j++;
-            }
-            if (j < lines.length && lines[j].includes("\t")) {
-                const cells = lines[j].split("\t").map((c) => c.trim());
-                const get = (key) => {
-                    const idx = colIndex[key];
-                    if (idx === undefined || idx >= cells.length)
-                        return null;
-                    const v = cells[idx].replace(",", ".");
-                    if (v === "")
-                        return null;
-                    const n = parseFloat(v);
-                    return isNaN(n) ? null : n;
-                };
-                const minRaw = colIndex["min"] !== undefined ? cells[colIndex["min"]] : null;
-                let minuten = 0;
-                if (minRaw && minRaw.includes(":")) {
-                    const [mm, ss] = minRaw.split(":").map(Number);
-                    minuten = Math.round(((mm || 0) + (ss || 0) / 60) * 10) / 10;
-                }
-                players.push({
-                    number, name: nameParts.join(" ").trim(), minuten,
-                    punkte: get("pts"), rebounds: get("reb"), assists: get("as"), steals: get("st"),
-                    blocks: get("bl"), turnovers: get("to"), fouls: get("f"),
-                    rebOff: get("or"), rebDef: get("dr"), eff: get("ef"),
-                    fgm: get("fgm"), fga: get("fga"),
-                    tpm: get("3pm"), tpa: get("3pa"),
-                    ftm: get("ftm"), fta: get("fta"),
-                });
-                i = j + 1;
-            }
-            else {
-                i = j;
-            }
-        }
-        else {
-            i++;
+    let headerIdx = -1;
+    for (let idx = 0; idx < lines.length; idx++) {
+        if (!lines[idx].includes("\t"))
+            continue;
+        const cells = lines[idx].split("\t").map((c) => c.trim().toLowerCase());
+        const hasMin = cells.some((c) => BOX_ALIASES.min.includes(c));
+        const hasPts = cells.some((c) => BOX_ALIASES.pts.includes(c));
+        if (hasMin && hasPts) {
+            headerIdx = idx;
+            break;
         }
     }
-    return { players, error: players.length === 0 ? "Keine Spielerzeilen erkannt." : null };
+    if (headerIdx === -1)
+        return { players: [], error: "Konnte die Kopfzeile mit Minuten- und Punkte-Spalte nicht finden. Wurde die Tabelle komplett kopiert?" };
+    const headerCellsRaw = lines[headerIdx].split("\t").map((c) => c.trim());
+    const headerCells = headerCellsRaw.map((c) => c.toLowerCase());
+    const nameColIdx = headerCells.findIndex((c) => NAME_HEADER_RE.test(c));
+    const numColIdx = headerCells.findIndex((c) => NUM_HEADER_RE.test(c));
+    const hasSeparateNameCol = nameColIdx !== -1;
+    // colIndex maps canonical stat key -> column index within a per-player data row.
+    // In "separate columns" layout, the data row IS the header row's own indexing.
+    // In the "combined Nr.+Name" layout (NBBL-style), number+name arrive as their own lines
+    // before the tab-separated data row, which therefore excludes the header's first column.
+    const colIndex = {};
+    const offset = hasSeparateNameCol ? 0 : 1;
+    headerCells.forEach((c, i) => {
+        if (i < offset)
+            return;
+        for (const [canon, aliases] of Object.entries(BOX_ALIASES)) {
+            if (aliases.includes(c))
+                colIndex[canon] = i - offset;
+        }
+    });
+    function buildPlayer(number, name, cells) {
+        const get = (key) => {
+            const idx = colIndex[key];
+            if (idx === undefined || idx >= cells.length)
+                return null;
+            const v = (cells[idx] || "").trim().replace(",", ".");
+            if (v === "")
+                return null;
+            const n = parseFloat(v);
+            return isNaN(n) ? null : n;
+        };
+        const getCombo = (comboKey, madeKey, attKey) => {
+            const idx = colIndex[comboKey];
+            if (idx !== undefined && idx < cells.length) {
+                const raw = (cells[idx] || "").trim();
+                const m = raw.match(/^(\d+)\s*\/\s*(\d+)$/);
+                if (m)
+                    return { made: parseInt(m[1], 10), att: parseInt(m[2], 10) };
+            }
+            const made = get(madeKey), att = get(attKey);
+            return { made, att };
+        };
+        const minRaw = colIndex["min"] !== undefined ? (cells[colIndex["min"]] || "").trim() : "";
+        let minuten = 0;
+        if (minRaw.includes(":")) {
+            const [mm, ss] = minRaw.split(":").map(Number);
+            minuten = Math.round(((mm || 0) + (ss || 0) / 60) * 10) / 10;
+        }
+        else if (minRaw) {
+            minuten = Math.round((parseFloat(minRaw.replace(",", ".")) || 0) * 10) / 10;
+        }
+        const fg = getCombo("fg_combo", "fgm", "fga");
+        const tp = getCombo("tp_combo", "3pm", "3pa");
+        const ft = getCombo("ft_combo", "ftm", "fta");
+        const rebOff = get("or"), rebDef = get("dr");
+        let rebounds = get("reb");
+        if (rebounds === null && (rebOff !== null || rebDef !== null))
+            rebounds = (rebOff || 0) + (rebDef || 0);
+        return {
+            number, name, minuten,
+            punkte: get("pts"), rebounds, assists: get("as"), steals: get("st"),
+            blocks: get("bl"), turnovers: get("to"), fouls: get("f"),
+            rebOff, rebDef, eff: get("ef"),
+            fgm: fg.made, fga: fg.att,
+            tpm: tp.made, tpa: tp.att,
+            ftm: ft.made, fta: ft.att,
+        };
+    }
+    const players = [];
+    if (hasSeparateNameCol) {
+        // Layout B: one tab-separated line per player, number and name are their own columns.
+        for (let i = headerIdx + 1; i < lines.length; i++) {
+            if (!lines[i].includes("\t"))
+                continue;
+            let cells = lines[i].split("\t").map((c) => c.trim());
+            // Some exports drop the number cell entirely (not even an empty one) when it's blank,
+            // shifting every later column left by one. Detect and realign when plausible.
+            if (numColIdx === 0 && cells.length === headerCells.length - 1 && !/^\d+$/.test(cells[0])) {
+                cells = ["", ...cells];
+            }
+            const name = cells[nameColIdx] || "";
+            if (!name || TOTALS_ROW_RE.test(name.trim()))
+                continue;
+            const number = numColIdx !== -1 ? parseInt((cells[numColIdx] || "").replace(/\D/g, ""), 10) : NaN;
+            players.push(buildPlayer(isNaN(number) ? null : number, name, cells));
+        }
+    }
+    else {
+        // Layout A (NBBL-style): jersey number on its own line, name on the next line(s),
+        // then a tab-separated data row (which does not repeat the number/name).
+        let i = headerIdx + 1;
+        while (i < lines.length) {
+            const line = lines[i];
+            if (/^\d+$/.test(line)) {
+                const number = parseInt(line, 10);
+                let j = i + 1;
+                const nameParts = [];
+                while (j < lines.length && !lines[j].includes("\t")) {
+                    nameParts.push(lines[j]);
+                    j++;
+                }
+                if (j < lines.length && lines[j].includes("\t")) {
+                    const cells = lines[j].split("\t").map((c) => c.trim());
+                    players.push(buildPlayer(number, nameParts.join(" ").trim(), cells));
+                    i = j + 1;
+                }
+                else {
+                    i = j;
+                }
+            }
+            else {
+                i++;
+            }
+        }
+    }
+    return { players, error: players.length === 0 ? "Keine Spielerzeilen erkannt. Falls das Format von einer anderen Seite kommt, schick mir gern ein Beispiel, dann passe ich die Erkennung an." : null };
 }
 function parseAdvancedStatsCsv(text) {
     const clean = text.replace(/^\uFEFF/, "");
@@ -711,17 +809,17 @@ function StatCategoriesManager({ categories, onAddCat, onRenameCat, onDeleteCat,
             React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 text-white rounded-lg px-4 text-sm font-semibold hover:bg-slate-800" }, "Kategorie")),
         React.createElement("button", { onClick: onClose, className: "w-full bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Fertig")));
 }
-function StatForm({ onSubmit, onClose, statCategories }) {
+function StatForm({ onSubmit, onClose, statCategories, initialEntry }) {
     const [form, setForm] = useState(() => {
-        const base = { date: today(), gegner: "", minuten: "" };
+        const base = { date: initialEntry?.date || today(), gegner: initialEntry?.gegner || "", minuten: initialEntry?.minuten ?? "" };
         statCategories.forEach((cat) => {
             cat.fields.forEach((f) => {
                 if (f.kind === "shooting") {
-                    base[`${f.id}_m`] = "";
-                    base[`${f.id}_a`] = "";
+                    base[`${f.id}_m`] = initialEntry?.[`${f.id}_m`] ?? "";
+                    base[`${f.id}_a`] = initialEntry?.[`${f.id}_a`] ?? "";
                 }
                 else {
-                    base[f.id] = "";
+                    base[f.id] = initialEntry?.[f.id] ?? "";
                 }
             });
         });
@@ -737,6 +835,8 @@ function StatForm({ onSubmit, onClose, statCategories }) {
             return;
         }
         const entry = { date: form.date, gegner: form.gegner.trim(), minuten: n("minuten") };
+        if (initialEntry?.id)
+            entry.id = initialEntry.id;
         statCategories.forEach((cat) => {
             cat.fields.forEach((f) => {
                 if (f.kind === "shooting") {
@@ -1403,7 +1503,7 @@ function AdvancedRechnerLiveModal({ players, teams, onConfirm, onClose }) {
 }
 function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
     return (React.createElement("div", { className: "relative" },
-        React.createElement("button", { onClick: onToggle, className: `flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition ${isOpen ? "bg-white text-slate-900" : "text-slate-200 bg-white/10 hover:bg-white/20"}` },
+        React.createElement("button", { onClick: onToggle, className: `flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition ${isOpen ? "bg-white text-slate-900" : "text-white bg-white/15 hover:bg-white/25"}` },
             React.createElement(Icon, { size: 13 }),
             " ",
             label,
@@ -1484,6 +1584,7 @@ function SpielerAkte() {
     const [expandedCats, setExpandedCats] = useState(() => new Set());
     const [expandedVideos, setExpandedVideos] = useState(() => new Set());
     const [openHeaderMenu, setOpenHeaderMenu] = useState(null);
+    const [editingStat, setEditingStat] = useState(null);
     function toggleVideo(id) {
         setExpandedVideos((prev) => {
             const next = new Set(prev);
@@ -1660,6 +1761,9 @@ function SpielerAkte() {
     }
     function handleAddStat(entry) {
         persist({ ...data, stats: [...data.stats, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
+    }
+    function handleEditStat(entry) {
+        persist({ ...data, stats: data.stats.map((s) => (s.id === entry.id ? { ...s, ...entry } : s)) });
     }
     function handleAddTest(entry) {
         persist({ ...data, tests: [...data.tests, { id: uid(), playerId: selectedPlayer.id, ...entry }] });
@@ -1897,7 +2001,7 @@ function SpielerAkte() {
         persist({ ...data, testTypes: types });
     }
     return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex flex-col" },
-        React.createElement("header", { className: "bg-black text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3" },
+        React.createElement("header", { className: "bg-black text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3 shadow-[0_2px_16px_rgba(0,0,0,0.25)] relative z-10" },
             React.createElement("div", { className: "flex items-center gap-3" },
                 React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars K\u00F6ln", className: "h-11 w-11 object-contain shrink-0" }),
                 React.createElement("div", null,
@@ -1905,7 +2009,14 @@ function SpielerAkte() {
                         React.createElement("span", { className: "h-[2px] w-5 bg-[#eb1e23]" }),
                         React.createElement("h1", { className: "font-display text-xl tracking-wide leading-none" }, "SPIELER-AKTE"),
                         React.createElement("span", { className: "h-[2px] w-5 bg-[#0a96d4]" })),
-                    React.createElement("p", { className: "text-xs text-[#e6e7ea]" }, "Rheinstars K\u00F6ln \u00B7 interne \u00DCbersicht"))),
+                    React.createElement("p", { className: "text-xs text-[#e6e7ea]" }, "Rheinstars K\u00F6ln \u00B7 interne \u00DCbersicht")),
+                React.createElement("div", { className: "hidden md:flex items-center gap-4 ml-4 pl-4 border-l border-white/15" },
+                    React.createElement("div", null,
+                        React.createElement("p", { className: "text-lg font-bold leading-none" }, teams.length),
+                        React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mt-0.5" }, "Teams")),
+                    React.createElement("div", null,
+                        React.createElement("p", { className: "text-lg font-bold leading-none" }, data.players.length),
+                        React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mt-0.5" }, "Spieler")))),
             React.createElement("div", { className: "flex items-center gap-2" },
                 saveError && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs bg-red-500/20 text-red-200 px-3 py-1.5 rounded-full" },
                     React.createElement(IconAlert, { size: 14 }),
@@ -2069,7 +2180,9 @@ function SpielerAkte() {
                                                 "/",
                                                 s[`${f.id}_a`] || 0),
                                             React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s[`${f.id}_m`], s[`${f.id}_a`]) !== null ? `${pct(s[`${f.id}_m`], s[`${f.id}_a`])}%` : "–"))) : (React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, fmtNum(s[f.id], 1)))))),
-                                        React.createElement("td", { className: "px-2 py-2 text-right" },
+                                        React.createElement("td", { className: "px-2 py-2 text-right whitespace-nowrap" },
+                                            React.createElement("button", { onClick: () => { setEditingStat(s); setModal("editStat"); }, className: "text-slate-300 hover:text-[#0a96d4] mr-2", "aria-label": "Eintrag bearbeiten" },
+                                                React.createElement(IconEdit, { size: 14 })),
                                             React.createElement("button", { onClick: () => deleteItem("stats", s.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                                 React.createElement(IconTrash, { size: 14 })))))))))))),
                         activeTab === "test" && (React.createElement("div", null,
@@ -2173,6 +2286,8 @@ function SpielerAkte() {
             React.createElement(PlayerForm, { teams: teams, initial: selectedPlayer, onSubmit: handleEditPlayer, onClose: () => setModal(null) }))),
         modal === "stat" && (React.createElement(Modal, { title: "Spielstatistik hinzuf\u00FCgen", onClose: () => setModal(null), wide: true },
             React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statCategories: statCategories }))),
+        modal === "editStat" && editingStat && (React.createElement(Modal, { title: "Spielstatistik bearbeiten", onClose: () => { setModal(null); setEditingStat(null); }, wide: true },
+            React.createElement(StatForm, { onSubmit: handleEditStat, onClose: () => { setModal(null); setEditingStat(null); }, statCategories: statCategories, initialEntry: editingStat }))),
         modal === "statFields" && (React.createElement(Modal, { title: "Statistik-Kategorien verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(StatCategoriesManager, { categories: statCategories, onAddCat: addStatCategory, onRenameCat: renameStatCategory, onDeleteCat: deleteStatCategory, onMoveCat: moveStatCategory, onAddField: addStatFieldToCategory, onRenameField: renameStatFieldInCategory, onDeleteField: deleteStatFieldFromCategory, onMoveField: moveStatFieldInCategory, onClose: () => setModal(null) }))),
         modal === "testTypes" && (React.createElement(Modal, { title: "Test-Arten verwalten", onClose: () => setModal(null) },
