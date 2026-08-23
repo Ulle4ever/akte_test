@@ -1765,6 +1765,11 @@ function SpielerAkte() {
         loadData();
         return () => { cancelled = true; };
     }, [account]);
+    useEffect(() => {
+        if (account?.role === "player" && account.playerId && !selectedPlayerId) {
+            setSelectedPlayerId(account.playerId);
+        }
+    }, [account, selectedPlayerId]);
     async function handleLogin(e) {
         e.preventDefault();
         setLoginError("");
@@ -1907,11 +1912,6 @@ function SpielerAkte() {
         setActiveTab("uebersicht");
         setConfirmDeletePlayer(false);
     }
-    useEffect(() => {
-        if (account?.role === "player" && account.playerId && !selectedPlayerId) {
-            setSelectedPlayerId(account.playerId);
-        }
-    }, [account, selectedPlayerId]);
     function handleAddTeam(team) {
         const newTeam = { id: uid(), ...team };
         persistMeta({ teams: [...meta.teams, newTeam] });
