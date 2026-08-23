@@ -303,7 +303,7 @@ function codeToEmail(code) {
     return `${code.trim().toLowerCase().replace(/[^a-z0-9]/g, "")}@spieler-akte.local`;
 }
 function codeToPassword(code) {
-    return code.trim() + "-Sak26!";
+    return code.trim().toLowerCase() + "-sak26!";
 }
 function generateCode() {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnpqrstuvwxyz23456789";
