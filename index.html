@@ -1395,6 +1395,23 @@ function AdvancedRechnerLiveModal({ players, teams, onConfirm, onClose }) {
                 matchedCount,
                 " Spieler importieren"))));
 }
+function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
+    return (React.createElement("div", { className: "relative" },
+        React.createElement("button", { onClick: onToggle, className: `flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition ${isOpen ? "bg-white text-slate-900" : "text-slate-200 bg-white/10 hover:bg-white/20"}` },
+            React.createElement(Icon, { size: 13 }),
+            " ",
+            label,
+            React.createElement(IconArrowDown, { size: 11, className: `transition-transform ${isOpen ? "rotate-180" : ""}` })),
+        isOpen && (React.createElement(React.Fragment, null,
+            React.createElement("div", { className: "fixed inset-0 z-40", onClick: onClose }),
+            React.createElement("div", { className: "absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-stone-200 py-1.5 z-50 overflow-hidden" }, items.map((item) => {
+                const ItemIcon = item.icon;
+                return (React.createElement("button", { key: item.label, onClick: () => { item.onClick(); onClose(); }, className: "w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-slate-700 hover:bg-stone-50 transition text-left" },
+                    React.createElement("span", { className: "w-7 h-7 rounded-full bg-red-50 text-[#eb1e23] flex items-center justify-center shrink-0" },
+                        React.createElement(ItemIcon, { size: 13 })),
+                    item.label));
+            }))))));
+}
 function TeamOverviewTable({ team, players, data, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
     const normalFields = normalCat ? normalCat.fields.filter((f) => f.kind !== "shooting") : [];
@@ -1460,6 +1477,7 @@ function SpielerAkte() {
     const [activeTab, setActiveTab] = useState("uebersicht");
     const [expandedCats, setExpandedCats] = useState(() => new Set());
     const [expandedVideos, setExpandedVideos] = useState(() => new Set());
+    const [openHeaderMenu, setOpenHeaderMenu] = useState(null);
     function toggleVideo(id) {
         setExpandedVideos((prev) => {
             const next = new Set(prev);
@@ -1886,30 +1904,18 @@ function SpielerAkte() {
                 saveError && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs bg-red-500/20 text-red-200 px-3 py-1.5 rounded-full" },
                     React.createElement(IconAlert, { size: 14 }),
                     " Speichern fehlgeschlagen")),
-                React.createElement("button", { onClick: () => setModal("statFields"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
-                    React.createElement(IconSettings, { size: 12 }),
-                    " Statistiken"),
-                React.createElement("button", { onClick: () => setModal("testTypes"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
-                    React.createElement(IconSettings, { size: 12 }),
-                    " Test-Arten"),
-                React.createElement("button", { onClick: () => setModal("importAttendance"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
-                    React.createElement(IconUpload, { size: 12 }),
-                    " Anwesenheit importieren"),
-                React.createElement("button", { onClick: () => setModal("importHabits"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
-                    React.createElement(IconUpload, { size: 12 }),
-                    " Habit-Stats importieren"),
-                React.createElement("button", { onClick: () => setModal("importBoxscore"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
-                    React.createElement(IconUpload, { size: 12 }),
-                    " Boxscore einf\u00FCgen"),
-                React.createElement("button", { onClick: () => setModal("importAdvanced"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
-                    React.createElement(IconUpload, { size: 12 }),
-                    " Advanced Stats importieren"),
-                React.createElement("button", { onClick: () => setModal("advancedRechnerLive"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
-                    React.createElement(IconUpload, { size: 12 }),
-                    " Advanced-Rechner verbinden"),
-                React.createElement("button", { onClick: () => setModal("changeCode"), className: "flex items-center gap-1.5 text-xs text-slate-300 hover:text-white bg-white/10 hover:bg-white/20 px-2.5 py-1.5 rounded-full transition" },
-                    React.createElement(IconLock, { size: 12 }),
-                    " Code \u00E4ndern"))),
+                React.createElement(HeaderMenu, { label: "Importieren", icon: IconUpload, isOpen: openHeaderMenu === "import", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "import" ? null : "import"), onClose: () => setOpenHeaderMenu(null), items: [
+                        { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
+                        { label: "Habit-Stats importieren", icon: IconActivity, onClick: () => setModal("importHabits") },
+                        { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => setModal("importBoxscore") },
+                        { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
+                        { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
+                    ] }),
+                React.createElement(HeaderMenu, { label: "Verwalten", icon: IconSettings, isOpen: openHeaderMenu === "settings", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "settings" ? null : "settings"), onClose: () => setOpenHeaderMenu(null), items: [
+                        { label: "Statistik-Kategorien", icon: IconSettings, onClick: () => setModal("statFields") },
+                        { label: "Test-Arten", icon: IconClipboard, onClick: () => setModal("testTypes") },
+                        { label: "Zugriffscode ändern", icon: IconLock, onClick: () => setModal("changeCode") },
+                    ] }))),
         React.createElement("div", { className: "bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center gap-2 text-xs text-amber-800" },
             React.createElement(IconInfo, { size: 14, className: "shrink-0" }),
             "Zugriff ist nur mit eurem gemeinsamen Code m\u00F6glich. Alle, die den Code kennen, sehen und bearbeiten dieselben Daten \u2013 es gibt keine Trennung nach einzelnem Trainer."),
