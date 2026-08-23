@@ -90,6 +90,10 @@ section:hover{box-shadow:0 1px 2px rgba(20,30,40,.05), 0 16px 34px -16px rgba(20
 .sec-head h2::after{content:"";display:block;width:30px;height:2px;background:var(--rsk-cyan);margin-top:7px;
   border-radius:2px}
 .sec-head p{margin:4px 0 0;font-size:13px;color:var(--muted);max-width:75ch}
+summary.sec-head{cursor:pointer;list-style:none;}
+summary.sec-head::-webkit-details-marker{display:none}
+summary.sec-head::before{content:"▸";display:inline-block;margin-right:10px;font-size:14px;color:var(--rsk-cyan);transition:transform .15s ease;}
+details[open]>summary.sec-head::before{transform:rotate(90deg);}
 .sec-body{padding:20px}
 
 .field-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:13px 16px}
@@ -335,23 +339,25 @@ footer a{color:var(--action)}
 
   <!-- ===== Rechenweg ===== -->
   <section>
-    <div class="sec-head">
-      <div>
-        <div class="eyebrow"><span class="stepno">5</span>Schritt 5</div>
-        <h2>Rechenweg · <span id="chain-name">—</span></h2>
-        <p>Jede Kennzahl mit eingesetzten Zahlen.</p>
+    <details>
+      <summary class="sec-head">
+        <div>
+          <div class="eyebrow"><span class="stepno">5</span>Schritt 5</div>
+          <h2>Rechenweg · <span id="chain-name">—</span></h2>
+          <p>Jede Kennzahl mit eingesetzten Zahlen. Zum Aufklappen anklicken.</p>
+        </div>
+      </summary>
+      <div class="sec-body">
+        <div class="group-label">Teamgrößen</div>
+        <div class="chain" id="chain-team"></div>
+        <div class="group-label">Offensive Rating</div>
+        <div class="chain" id="chain-o"></div>
+        <div class="group-label">Defensive Rating</div>
+        <div class="chain" id="chain-d"></div>
+        <div class="group-label">Advanced Stats</div>
+        <div class="chain" id="chain-a"></div>
       </div>
-    </div>
-    <div class="sec-body">
-      <div class="group-label">Teamgrößen</div>
-      <div class="chain" id="chain-team"></div>
-      <div class="group-label">Offensive Rating</div>
-      <div class="chain" id="chain-o"></div>
-      <div class="group-label">Defensive Rating</div>
-      <div class="chain" id="chain-d"></div>
-      <div class="group-label">Advanced Stats</div>
-      <div class="chain" id="chain-a"></div>
-    </div>
+    </details>
   </section>
 
   <footer>

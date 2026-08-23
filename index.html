@@ -255,6 +255,12 @@ const fmtDate = (d) => {
     return dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 };
 const pct = (made, att) => (att ? Math.round((Number(made) / Number(att)) * 1000) / 10 : null);
+const fmtNum = (v, d = 1) => {
+    const n = Number(v);
+    if (v === undefined || v === null || v === "" || isNaN(n))
+        return "–";
+    return n.toFixed(d).replace(".", ",");
+};
 const getEmbedUrl = (url) => {
     try {
         const u = new URL(url);
@@ -1397,7 +1403,7 @@ function TeamOverviewTable({ team, players, data, statCategories, onSelectPlayer
         if (entries.length === 0)
             return "–";
         const sum = entries.reduce((acc, s) => acc + (Number(s[fieldId]) || 0), 0);
-        return (sum / entries.length).toFixed(1);
+        return fmtNum(sum / entries.length, 1);
     }
     function fgPctFor(playerId) {
         const entries = data.stats.filter((s) => s.playerId === playerId);
@@ -1453,6 +1459,17 @@ function SpielerAkte() {
     const [selectedPlayerId, setSelectedPlayerId] = useState(null);
     const [activeTab, setActiveTab] = useState("uebersicht");
     const [expandedCats, setExpandedCats] = useState(() => new Set());
+    const [expandedVideos, setExpandedVideos] = useState(() => new Set());
+    function toggleVideo(id) {
+        setExpandedVideos((prev) => {
+            const next = new Set(prev);
+            if (next.has(id))
+                next.delete(id);
+            else
+                next.add(id);
+            return next;
+        });
+    }
     function toggleCat(id) {
         setExpandedCats((prev) => {
             const next = new Set(prev);
@@ -1581,7 +1598,7 @@ function SpielerAkte() {
     const playerVideos = selectedPlayer ? sortByDateDesc(data.videos.filter((v) => v.playerId === selectedPlayer.id)) : [];
     const playerNotes = selectedPlayer ? sortByDateDesc(data.notes.filter((n) => n.playerId === selectedPlayer.id)) : [];
     const playerAttendance = selectedPlayer ? sortByDateDesc((data.attendance || []).filter((a) => a.playerId === selectedPlayer.id)) : [];
-    const avg = (key) => (playerStats.length ? (playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length).toFixed(1) : "–");
+    const avg = (key) => (playerStats.length ? fmtNum(playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length, 1) : "–");
     const totalPct = (madeKey, attKey) => {
         const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
         const att = playerStats.reduce((sum, s) => sum + (Number(s[attKey]) || 0), 0);
@@ -1948,10 +1965,11 @@ function SpielerAkte() {
                         React.createElement("div", { className: "flex gap-2" },
                             React.createElement("button", { onClick: () => setConfirmDeletePlayer(false), className: "px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-slate-600 hover:bg-stone-50" }, "Abbrechen"),
                             React.createElement("button", { onClick: handleDeletePlayer, className: "px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700" }, "Endg\u00FCltig l\u00F6schen")))),
-                    React.createElement("div", { className: "flex gap-1 border-b border-stone-200 mt-6 overflow-x-auto" }, TABS.map((t) => {
+                    React.createElement("div", { className: "flex gap-1 bg-stone-100 rounded-xl p-1 mt-6 overflow-x-auto" }, TABS.map((t) => {
                         const Icon = t.icon;
-                        return (React.createElement("button", { key: t.key, onClick: () => setActiveTab(t.key), className: `flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium border-b-2 whitespace-nowrap transition ${activeTab === t.key ? "border-[#eb1e23] text-slate-900" : "border-transparent text-slate-500 hover:text-slate-700"}` },
-                            React.createElement(Icon, { size: 15 }),
+                        const active = activeTab === t.key;
+                        return (React.createElement("button", { key: t.key, onClick: () => setActiveTab(t.key), className: `flex-1 flex items-center justify-center gap-1.5 px-4 py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition ${active ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}` },
+                            React.createElement(Icon, { size: 15, className: active ? "text-[#eb1e23]" : "" }),
                             " ",
                             t.label));
                     })),
@@ -2035,7 +2053,7 @@ function SpielerAkte() {
                                                 s[`${f.id}_m`] || 0,
                                                 "/",
                                                 s[`${f.id}_a`] || 0),
-                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s[`${f.id}_m`], s[`${f.id}_a`]) !== null ? `${pct(s[`${f.id}_m`], s[`${f.id}_a`])}%` : "–"))) : (React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, s[f.id] || 0))))),
+                                            React.createElement("td", { className: "px-3 py-2 text-right text-slate-400" }, pct(s[`${f.id}_m`], s[`${f.id}_a`]) !== null ? `${pct(s[`${f.id}_m`], s[`${f.id}_a`])}%` : "–"))) : (React.createElement("td", { key: f.id, className: "px-3 py-2 text-right" }, fmtNum(s[f.id], 1)))))),
                                         React.createElement("td", { className: "px-2 py-2 text-right" },
                                             React.createElement("button", { onClick: () => deleteItem("stats", s.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                                 React.createElement(IconTrash, { size: 14 })))))))))))),
@@ -2089,24 +2107,28 @@ function SpielerAkte() {
                                 React.createElement("button", { onClick: () => setModal("video"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
                                     React.createElement(IconPlus, { size: 15 }),
                                     " Video")),
-                            playerVideos.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Videos verkn\u00FCpft.")) : (React.createElement("div", { className: "grid sm:grid-cols-2 gap-4" }, playerVideos.map((v) => {
+                            playerVideos.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Videos verkn\u00FCpft.")) : (React.createElement("div", { className: "space-y-2" }, playerVideos.map((v) => {
                                 const embedUrl = getEmbedUrl(v.url);
+                                const isOpen = expandedVideos.has(v.id);
                                 return (React.createElement("div", { key: v.id, className: "bg-white rounded-lg border border-stone-200 overflow-hidden shadow-sm" },
-                                    embedUrl ? (React.createElement("div", { className: "relative w-full bg-black", style: { paddingBottom: "56.25%" } },
-                                        React.createElement("iframe", { src: embedUrl, className: "absolute inset-0 w-full h-full", frameBorder: "0", allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture", allowFullScreen: true, title: v.description || v.type }))) : (React.createElement("a", { href: v.url, target: "_blank", rel: "noopener noreferrer", className: "flex flex-col items-center justify-center gap-1.5 h-36 bg-stone-50 text-slate-400 hover:text-[#eb1e23] hover:bg-stone-100 transition" },
-                                        React.createElement(IconVideo, { size: 22 }),
-                                        React.createElement("span", { className: "text-xs font-medium" }, "Keine Vorschau, Link \u00F6ffnen"))),
-                                    React.createElement("div", { className: "p-3" },
-                                        React.createElement("div", { className: "flex items-center justify-between gap-2" },
-                                            React.createElement("div", { className: "flex items-center gap-2 min-w-0" },
-                                                React.createElement("span", { className: "text-xs font-semibold px-2 py-0.5 rounded-full bg-stone-100 text-slate-600 shrink-0" }, v.type),
-                                                React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, fmtDate(v.date))),
-                                            React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
-                                                React.createElement("a", { href: v.url, target: "_blank", rel: "noopener noreferrer", className: "text-slate-400 hover:text-[#eb1e23]", "aria-label": "In neuem Tab \u00F6ffnen" },
-                                                    React.createElement(IconExternal, { size: 14 })),
-                                                React.createElement("button", { onClick: () => deleteItem("videos", v.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Video l\u00F6schen" },
-                                                    React.createElement(IconTrash, { size: 14 })))),
-                                        v.description && React.createElement("p", { className: "text-sm text-slate-700 mt-1.5" }, v.description))));
+                                    React.createElement("div", { className: "w-full flex items-center gap-3 px-3 py-2.5" },
+                                        React.createElement("button", { onClick: () => (embedUrl ? toggleVideo(v.id) : window.open(v.url, "_blank", "noopener,noreferrer")), className: "flex items-center gap-3 min-w-0 flex-1 text-left hover:opacity-80 transition" },
+                                            React.createElement("span", { className: `shrink-0 w-8 h-8 rounded-full flex items-center justify-center ${embedUrl ? "bg-red-50 text-[#eb1e23]" : "bg-stone-100 text-slate-400"}` },
+                                                React.createElement(IconVideo, { size: 15 })),
+                                            React.createElement("span", { className: "min-w-0 flex-1" },
+                                                React.createElement("span", { className: "flex items-center gap-2" },
+                                                    React.createElement("span", { className: "text-xs font-semibold px-2 py-0.5 rounded-full bg-stone-100 text-slate-600 shrink-0" }, v.type),
+                                                    React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, fmtDate(v.date))),
+                                                v.description && React.createElement("span", { className: "block text-sm text-slate-700 mt-0.5 truncate" }, v.description))),
+                                        React.createElement("div", { className: "shrink-0 flex items-center gap-2" },
+                                            React.createElement("a", { href: v.url, target: "_blank", rel: "noopener noreferrer", className: "text-slate-400 hover:text-[#eb1e23]", "aria-label": "In neuem Tab \u00F6ffnen" },
+                                                React.createElement(IconExternal, { size: 14 })),
+                                            React.createElement("button", { onClick: () => deleteItem("videos", v.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Video l\u00F6schen" },
+                                                React.createElement(IconTrash, { size: 14 })),
+                                            embedUrl && (React.createElement("button", { onClick: () => toggleVideo(v.id), "aria-label": isOpen ? "Einklappen" : "Ausklappen" },
+                                                React.createElement(IconArrowDown, { size: 14, className: `text-slate-400 transition-transform ${isOpen ? "rotate-180" : ""}` }))))),
+                                    embedUrl && isOpen && (React.createElement("div", { className: "relative w-full bg-black", style: { paddingBottom: "56.25%" } },
+                                        React.createElement("iframe", { src: embedUrl, className: "absolute inset-0 w-full h-full", frameBorder: "0", allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture", allowFullScreen: true, title: v.description || v.type })))));
                             }))))),
                         activeTab === "notiz" && (React.createElement("div", null,
                             React.createElement("div", { className: "flex justify-end mb-3" },
