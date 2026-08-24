@@ -1498,6 +1498,15 @@ function getPlayerVisibleEvents(events, player) {
         return (matchesTeam && !isExcluded) || matchesInvite;
     });
 }
+function getPlayerVisibleTeamNotes(teamNotes, player) {
+    if (!player)
+        return [];
+    return teamNotes.filter((n) => {
+        const matchesTeamAll = n.teamId === player.teamId && n.sharedWithAll;
+        const matchesIndiv = (n.sharedWithPlayerIds || []).includes(player.id);
+        return matchesTeamAll || matchesIndiv;
+    });
+}
 function CalendarView({ events, isTrainer, team, teams, teamPlayers, allPlayers, contextLabel, onAdd, onEdit, onDelete }) {
     const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
     const [selectedDate, setSelectedDate] = useState(null);
@@ -3017,26 +3026,50 @@ function SpielerAkte() {
                                     embedUrl && isOpen && (React.createElement("div", { className: "relative w-full bg-black", style: { paddingBottom: "56.25%" } },
                                         React.createElement("iframe", { src: embedUrl, className: "absolute inset-0 w-full h-full", frameBorder: "0", allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture", allowFullScreen: true, title: v.description || v.type })))));
                             }))))),
-                        activeTab === "notiz" && isTrainer && (React.createElement("div", null,
-                            React.createElement("div", { className: "flex justify-end mb-3" },
-                                React.createElement("button", { onClick: () => setModal("note"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
-                                    React.createElement(IconPlus, { size: 15 }),
-                                    " Notiz")),
-                            playerNotes.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Notizen erfasst.")) : (React.createElement("div", { className: "space-y-2" }, playerNotes.map((n) => (React.createElement("div", { key: n.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
-                                React.createElement("div", { className: "flex items-center justify-between gap-2" },
-                                    React.createElement("div", { className: "flex items-center gap-2" },
-                                        React.createElement("span", { className: `text-xs font-semibold px-2 py-0.5 rounded-full border ${CATEGORY_STYLES[n.category]}` }, NOTE_CATEGORIES.find((c) => c.value === n.category)?.label),
-                                        React.createElement("span", { className: "text-xs text-slate-400" },
-                                            fmtDate(n.date),
-                                            " \u00B7 ",
-                                            n.author)),
-                                    React.createElement("button", { onClick: () => deleteItem("notes", n.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Notiz l\u00F6schen" },
-                                        React.createElement(IconTrash, { size: 14 }))),
-                                React.createElement("p", { className: "text-sm text-slate-700 mt-2" }, n.text),
-                                n.attachmentUrl && (React.createElement("a", { href: n.attachmentUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 mt-2 text-xs font-medium text-[#eb1e23] hover:text-[#be2228] bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-full transition" },
-                                    React.createElement(IconPaperclip, { size: 13 }),
-                                    " ",
-                                    n.attachmentName || "Anhang öffnen"))))))))),
+                        activeTab === "notiz" && isTrainer && (() => {
+                            const relevantTeamNotes = sortByDateDesc(getPlayerVisibleTeamNotes(teamNotes, selectedPlayer));
+                            return (React.createElement("div", { className: "space-y-5" },
+                                React.createElement("div", null,
+                                    React.createElement("div", { className: "flex items-center justify-between mb-2" },
+                                        React.createElement(SectionLabel, null, "Team-Notizen (auch f\u00FCr Spieler sichtbar)"),
+                                        React.createElement("button", { onClick: () => setModal("teamNoteDashboard"), className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" },
+                                            React.createElement(IconPlus, { size: 13 }),
+                                            " Team-Notiz")),
+                                    relevantTeamNotes.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Keine Team-Notizen f\u00FCr diesen Spieler freigegeben.")) : (React.createElement("div", { className: "space-y-2" }, relevantTeamNotes.map((n) => (React.createElement("div", { key: n.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
+                                        React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                                            React.createElement("div", { className: "flex items-center gap-2" },
+                                                React.createElement("span", { className: "text-xs font-semibold px-2 py-0.5 rounded-full bg-sky-50 text-sky-700 border border-sky-200" }, n.sharedWithAll ? "Ganzes Team" : "Diesem Spieler"),
+                                                React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, n.title),
+                                                React.createElement("span", { className: "text-xs text-slate-400" }, fmtDate(n.date))),
+                                            React.createElement("button", { onClick: () => deleteTeamNote(n.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Notiz l\u00F6schen" },
+                                                React.createElement(IconTrash, { size: 14 }))),
+                                        n.text && React.createElement("p", { className: "text-sm text-slate-700 mt-2" }, n.text),
+                                        n.attachmentUrl && (React.createElement("a", { href: n.attachmentUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 mt-2 text-xs font-medium text-[#0a96d4] hover:text-[#4178a0] bg-sky-50 hover:bg-sky-100 px-2.5 py-1 rounded-full transition" },
+                                            React.createElement(IconPaperclip, { size: 13 }),
+                                            " ",
+                                            n.attachmentName || "Anhang öffnen")))))))),
+                                React.createElement("div", null,
+                                    React.createElement("div", { className: "flex items-center justify-between mb-2" },
+                                        React.createElement(SectionLabel, null, "Private Notizen (nur f\u00FCr Trainer)"),
+                                        React.createElement("button", { onClick: () => setModal("note"), className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" },
+                                            React.createElement(IconPlus, { size: 13 }),
+                                            " Notiz")),
+                                    playerNotes.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Notizen erfasst.")) : (React.createElement("div", { className: "space-y-2" }, playerNotes.map((n) => (React.createElement("div", { key: n.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
+                                        React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                                            React.createElement("div", { className: "flex items-center gap-2" },
+                                                React.createElement("span", { className: `text-xs font-semibold px-2 py-0.5 rounded-full border ${CATEGORY_STYLES[n.category]}` }, NOTE_CATEGORIES.find((c) => c.value === n.category)?.label),
+                                                React.createElement("span", { className: "text-xs text-slate-400" },
+                                                    fmtDate(n.date),
+                                                    " \u00B7 ",
+                                                    n.author)),
+                                            React.createElement("button", { onClick: () => deleteItem("notes", n.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Notiz l\u00F6schen" },
+                                                React.createElement(IconTrash, { size: 14 }))),
+                                        React.createElement("p", { className: "text-sm text-slate-700 mt-2" }, n.text),
+                                        n.attachmentUrl && (React.createElement("a", { href: n.attachmentUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 mt-2 text-xs font-medium text-[#eb1e23] hover:text-[#be2228] bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-full transition" },
+                                            React.createElement(IconPaperclip, { size: 13 }),
+                                            " ",
+                                            n.attachmentName || "Anhang öffnen"))))))))));
+                        })(),
                         activeTab === "notiz" && !isTrainer && (React.createElement("div", null, teamNotes.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Notizen f\u00FCr dich freigegeben.")) : (React.createElement("div", { className: "space-y-2" }, sortByDateDesc(teamNotes).map((n) => (React.createElement("div", { key: n.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
                             React.createElement("div", { className: "flex items-center justify-between gap-2" },
                                 React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, n.title),
@@ -3069,7 +3102,7 @@ function SpielerAkte() {
         modal === "accounts" && (React.createElement(Modal, { title: "Zug\u00E4nge verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onDelete: deleteAccount, onClose: () => setModal(null) }))),
         modal === "teamNoteDashboard" && (React.createElement(Modal, { title: "Notiz/Datei f\u00FCr Spieler", onClose: () => setModal(null), wide: true },
-            React.createElement(TeamNoteForm, { teams: teams, players: players, onSubmit: addTeamNote, onClose: () => setModal(null) }))),
+            React.createElement(TeamNoteForm, { teams: teams, players: players, defaultTeamId: selectedPlayer?.teamId, onSubmit: addTeamNote, onClose: () => setModal(null) }))),
         modal === "importAttendance" && (React.createElement(Modal, { title: "Anwesenheit aus CSV importieren", onClose: () => setModal(null), wide: true },
             React.createElement(AttendanceImportModal, { players: players, teams: teams, onConfirm: handleImportAttendance, onClose: () => setModal(null) }))),
         modal === "importHabits" && (React.createElement(Modal, { title: "Habit-Stats aus CSV importieren", onClose: () => setModal(null), wide: true },
