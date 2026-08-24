@@ -175,6 +175,8 @@ const IconArrowDown = (p) => React.createElement(Icon, { ...p },
 const IconArrowLeft = (p) => React.createElement(Icon, { ...p },
     React.createElement("line", { x1: "19", y1: "12", x2: "5", y2: "12" }),
     React.createElement("polyline", { points: "12 19 5 12 12 5" }));
+const IconCheck = (p) => React.createElement(Icon, { ...p },
+    React.createElement("polyline", { points: "20 6 9 17 4 12" }));
 const IconFile = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z" }),
     React.createElement("polyline", { points: "14 2 14 8 20 8" }));
@@ -1004,6 +1006,62 @@ function NoteForm({ onSubmit, onClose }) {
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", disabled: uploading, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, uploading ? "Wird hochgeladen…" : "Notiz speichern")));
 }
+function TeamNoteForm({ teamId, teamPlayers, onSubmit, onClose }) {
+    const [date, setDate] = useState(today());
+    const [title, setTitle] = useState("");
+    const [text, setText] = useState("");
+    const [file, setFile] = useState(null);
+    const [sharedWithPlayerIds, setSharedWithPlayerIds] = useState([]);
+    const [uploading, setUploading] = useState(false);
+    const [error, setError] = useState("");
+    function toggleShare(id) {
+        setSharedWithPlayerIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]));
+    }
+    async function handleSubmit(e) {
+        e.preventDefault();
+        if (!title.trim()) {
+            setError("Bitte einen Titel angeben.");
+            return;
+        }
+        const entry = { teamId, date, title: title.trim(), text: text.trim(), sharedWithPlayerIds };
+        if (file) {
+            setUploading(true);
+            try {
+                const result = await uploadToCloudinary(file);
+                entry.attachmentUrl = result.url;
+                entry.attachmentName = file.name;
+            }
+            catch (err) {
+                setUploading(false);
+                setError("Datei-Upload fehlgeschlagen. Bitte nochmal versuchen (oder ohne Anhang speichern).");
+                return;
+            }
+            setUploading(false);
+        }
+        onSubmit(entry);
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Titel" },
+                React.createElement("input", { className: inputClass, value: title, onChange: (e) => { setTitle(e.target.value); setError(""); }, placeholder: "z. B. Hallenzeiten Herbst" })),
+            React.createElement(Field, { label: "Datum" },
+                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) }))),
+        React.createElement(Field, { label: "Text (optional)" },
+            React.createElement("textarea", { className: inputClass, rows: 3, value: text, onChange: (e) => setText(e.target.value), placeholder: "Kurzer Hinweistext, falls hilfreich" })),
+        React.createElement(Field, { label: "PDF oder Datei anh\u00E4ngen (optional)" },
+            React.createElement("input", { type: "file", accept: "application/pdf,image/*", onChange: (e) => setFile(e.target.files[0] || null), className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }),
+            file && React.createElement("p", { className: "text-xs text-slate-500 mt-1" },
+                "Ausgew\u00E4hlt: ",
+                file.name)),
+        React.createElement("div", { className: "bg-stone-50 rounded-xl p-3" },
+            React.createElement("p", { className: "text-xs font-semibold text-slate-500 mb-2" }, "Sichtbar f\u00FCr Spieler/Eltern (optional \u2013 ohne Auswahl nur f\u00FCr Trainer)"),
+            React.createElement("div", { className: "space-y-1 max-h-40 overflow-y-auto" }, teamPlayers.map((p) => (React.createElement("label", { key: p.id, className: "flex items-center gap-2 text-sm text-slate-700" },
+                React.createElement("input", { type: "checkbox", className: "rounded", checked: sharedWithPlayerIds.includes(p.id), onChange: () => toggleShare(p.id) }),
+                p.name))))),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("button", { type: "submit", disabled: uploading, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, uploading ? "Wird hochgeladen…" : "Team-Notiz speichern")));
+}
 function AttendanceImportModal({ players, teams, onConfirm, onClose }) {
     const [stage, setStage] = useState("upload");
     const [parseError, setParseError] = useState("");
@@ -1772,7 +1830,8 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
                     item.label));
             }))))));
 }
-function TrainerDashboard({ events, teams, players, onSelectTeam }) {
+function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelectPlayer, onAddTask, onToggleTask, onDeleteTask }) {
+    const [newTask, setNewTask] = useState("");
     const days = [];
     const d0 = new Date();
     d0.setHours(0, 0, 0, 0);
@@ -1782,6 +1841,16 @@ function TrainerDashboard({ events, teams, players, onSelectTeam }) {
         days.push(d);
     }
     const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
+    const outPlayers = players.filter((p) => p.status === "verletzt" || p.status === "reha");
+    const openTasks = tasks.filter((t) => !t.done);
+    const doneTasks = tasks.filter((t) => t.done);
+    function submitTask(e) {
+        e.preventDefault();
+        if (!newTask.trim())
+            return;
+        onAddTask(newTask.trim());
+        setNewTask("");
+    }
     return (React.createElement("div", { className: "space-y-5" },
         React.createElement("div", null,
             React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, "Willkommen zur\u00FCck"),
@@ -1808,6 +1877,26 @@ function TrainerDashboard({ events, teams, players, onSelectTeam }) {
                             React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(e.teamId) || "Individuell")))))));
                 }),
                 days.every((d) => events.filter((e) => e.date === isoDate(d)).length === 0) && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Keine Termine in den n\u00E4chsten 7 Tagen.")))),
+        React.createElement("div", { className: "grid md:grid-cols-2 gap-5" },
+            React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
+                React.createElement(SectionLabel, null, "Verletzt / Reha"),
+                React.createElement("div", { className: "mt-2 space-y-1.5" }, outPlayers.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Aktuell niemand verletzt oder in Reha.")) : (outPlayers.map((p) => (React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition" },
+                    React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-400"}` }),
+                    React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, p.name),
+                    React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(p.teamId)))))))),
+            React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
+                React.createElement(SectionLabel, null, "Aufgaben"),
+                React.createElement("form", { onSubmit: submitTask, className: "flex gap-2 mt-2 mb-2" },
+                    React.createElement("input", { className: inputClass, value: newTask, onChange: (e) => setNewTask(e.target.value), placeholder: "Neue Aufgabe\u2026" }),
+                    React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-3 text-sm font-medium" },
+                        React.createElement(IconPlus, { size: 15 }))),
+                React.createElement("div", { className: "space-y-1 max-h-56 overflow-y-auto" },
+                    tasks.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-3" }, "Keine Aufgaben eingetragen."),
+                    [...openTasks, ...doneTasks].map((t) => (React.createElement("div", { key: t.id, className: "flex items-center gap-2.5 px-1 py-1.5 group" },
+                        React.createElement("button", { onClick: () => onToggleTask(t.id), className: `w-4 h-4 rounded border shrink-0 flex items-center justify-center ${t.done ? "bg-[#eb1e23] border-[#eb1e23]" : "border-slate-300"}` }, t.done && React.createElement(IconCheck, { size: 11, className: "text-white" })),
+                        React.createElement("span", { className: `text-sm flex-1 truncate ${t.done ? "text-slate-400 line-through" : "text-slate-700"}` }, t.text),
+                        React.createElement("button", { onClick: () => onDeleteTask(t.id), className: "text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition shrink-0" },
+                            React.createElement(IconTrash, { size: 13 })))))))),
         React.createElement("div", null,
             React.createElement(SectionLabel, null, "Teams"),
             React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-3 gap-3 mt-1.5" }, teams.map((t) => (React.createElement("button", { key: t.id, onClick: () => onSelectTeam(t.id), className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 text-left hover:shadow-md transition" },
@@ -1876,7 +1965,7 @@ const TABS = [
     { key: "video", label: "Videos", icon: IconVideo },
     { key: "notiz", label: "Notizen", icon: IconNote },
 ];
-const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "video"];
+const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "video", "notiz"];
 function SpielerAkte() {
     const [loading, setLoading] = useState(true);
     const [saveError, setSaveError] = useState(false);
@@ -1918,6 +2007,7 @@ function SpielerAkte() {
     const [players, setPlayers] = useState([]);
     const [privateData, setPrivateData] = useState({}); // { [playerId]: { notes, tests, attendance } }, nur für Trainer geladen
     const [calendarEvents, setCalendarEvents] = useState([]);
+    const [teamNotes, setTeamNotes] = useState([]);
     const [loginEmail, setLoginEmail] = useState("");
     const [loginPassword, setLoginPassword] = useState("");
     const [loginError, setLoginError] = useState("");
@@ -1957,7 +2047,7 @@ function SpielerAkte() {
         async function loadData() {
             try {
                 const metaSnap = await db.collection("club").doc("meta").get();
-                const metaDefaults = { teams: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES };
+                const metaDefaults = { teams: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES, tasks: [] };
                 if (!cancelled)
                     setMeta(metaSnap.exists ? { ...metaDefaults, ...metaSnap.data() } : metaDefaults);
                 let loadedPlayerTeamId = null;
@@ -1976,6 +2066,9 @@ function SpielerAkte() {
                     const evSnap = await db.collection("calendarEvents").get();
                     if (!cancelled)
                         setCalendarEvents(evSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+                    const tnSnap = await db.collection("teamNotes").get();
+                    if (!cancelled)
+                        setTeamNotes(tnSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
                 }
                 else if (account.role === "player" && account.playerId) {
                     const pSnap = await db.collection("players").doc(account.playerId).get();
@@ -1992,6 +2085,9 @@ function SpielerAkte() {
                     ownEvSnap.docs.forEach((d) => { byId[d.id] = { id: d.id, ...d.data() }; });
                     if (!cancelled)
                         setCalendarEvents(Object.values(byId));
+                    const tnSnap = await db.collection("teamNotes").where("sharedWithPlayerIds", "array-contains", account.playerId).get();
+                    if (!cancelled)
+                        setTeamNotes(tnSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
                 }
                 if (!cancelled)
                     setLoading(false);
@@ -2117,6 +2213,19 @@ function SpielerAkte() {
     async function deleteCalendarEvent(id) {
         setCalendarEvents((prev) => prev.filter((e) => e.id !== id));
         await db.collection("calendarEvents").doc(id).delete();
+    }
+    async function addTeamNote(note) {
+        const newNote = {
+            teamId: note.teamId, date: note.date, title: note.title, text: note.text || "",
+            attachmentUrl: note.attachmentUrl || "", attachmentName: note.attachmentName || "",
+            sharedWithPlayerIds: note.sharedWithPlayerIds || [],
+        };
+        const ref = await db.collection("teamNotes").add(newNote);
+        setTeamNotes((prev) => [...prev, { id: ref.id, ...newNote }]);
+    }
+    async function deleteTeamNote(id) {
+        setTeamNotes((prev) => prev.filter((n) => n.id !== id));
+        await db.collection("teamNotes").doc(id).delete();
     }
     if (firebaseUser === undefined || (firebaseUser && loading)) {
         return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50" },
@@ -2460,6 +2569,16 @@ function SpielerAkte() {
         [types[i], types[j]] = [types[j], types[i]];
         persistMeta({ testTypes: types });
     }
+    const tasks = meta.tasks || [];
+    function addTask(text) {
+        persistMeta({ tasks: [...tasks, { id: uid(), text, done: false, createdAt: today() }] });
+    }
+    function toggleTask(id) {
+        persistMeta({ tasks: tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) });
+    }
+    function deleteTask(id) {
+        persistMeta({ tasks: tasks.filter((t) => t.id !== id) });
+    }
     return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex flex-col" },
         React.createElement("header", { className: "bg-black text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3 shadow-[0_2px_16px_rgba(0,0,0,0.25)] relative z-10" },
             React.createElement("div", { className: "flex items-center gap-3" },
@@ -2539,13 +2658,34 @@ function SpielerAkte() {
                     const teamPlayers = players.filter((p) => p.teamId === selectedTeamId);
                     const teamPlayerIds = teamPlayers.map((p) => p.id);
                     const events = calendarEvents.filter((e) => e.teamId === selectedTeamId || (e.includedPlayerIds || []).some((pid) => teamPlayerIds.includes(pid)));
+                    const notesForTeam = sortByDateDesc(teamNotes.filter((n) => n.teamId === selectedTeamId));
                     return (React.createElement("div", null,
                         React.createElement("div", { className: "flex items-center justify-between mb-3" },
                             React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, team?.name),
                             React.createElement("button", { onClick: () => setShowTeamCalendar(false), className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
                                 React.createElement(IconUsers, { size: 14 }),
                                 " Spieler-\u00DCbersicht")),
-                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent })));
+                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent }),
+                        React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 mt-4" },
+                            React.createElement("div", { className: "flex items-center justify-between mb-2" },
+                                React.createElement(SectionLabel, null, "Team-Notizen"),
+                                React.createElement("button", { onClick: () => setModal("teamNote"), className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" },
+                                    React.createElement(IconPlus, { size: 13 }),
+                                    " Notiz")),
+                            notesForTeam.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Team-Notizen.")) : (React.createElement("div", { className: "space-y-2" }, notesForTeam.map((n) => (React.createElement("div", { key: n.id, className: "flex items-center gap-3 bg-stone-50 rounded-xl p-3" },
+                                React.createElement("div", { className: "min-w-0 flex-1" },
+                                    React.createElement("div", { className: "flex items-center gap-2" },
+                                        React.createElement("span", { className: "text-sm font-semibold text-slate-800 truncate" }, n.title),
+                                        React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, fmtDate(n.date))),
+                                    n.text && React.createElement("p", { className: "text-xs text-slate-500 mt-0.5 truncate" }, n.text),
+                                    React.createElement("p", { className: "text-[11px] text-slate-400 mt-0.5" }, n.sharedWithPlayerIds?.length > 0 ? `Sichtbar für ${n.sharedWithPlayerIds.length} Spieler` : "Nur für Trainer")),
+                                n.attachmentUrl && (React.createElement("a", { href: n.attachmentUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 text-xs font-medium text-[#0a96d4] hover:text-[#4178a0] bg-sky-50 hover:bg-sky-100 px-2.5 py-1 rounded-full transition shrink-0" },
+                                    React.createElement(IconFile, { size: 13 }),
+                                    " Datei")),
+                                React.createElement("button", { onClick: () => deleteTeamNote(n.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "L\u00F6schen" },
+                                    React.createElement(IconTrash, { size: 14 })))))))),
+                        modal === "teamNote" && (React.createElement(Modal, { title: "Team-Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
+                            React.createElement(TeamNoteForm, { teamId: selectedTeamId, teamPlayers: teamPlayers, onSubmit: addTeamNote, onClose: () => setModal(null) })))));
                 })(),
                 !selectedPlayer && selectedTeamId !== "all" && !showTeamCalendar && (React.createElement("div", null,
                     React.createElement("div", { className: "flex justify-end mb-3" },
@@ -2553,7 +2693,7 @@ function SpielerAkte() {
                             React.createElement(IconCalendar, { size: 14 }),
                             " Team-Kalender")),
                     React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: players.filter((p) => p.teamId === selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer }))),
-                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, onSelectTeam: goToTeamCalendar })),
+                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, tasks: tasks, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddTask: addTask, onToggleTask: toggleTask, onDeleteTask: deleteTask })),
                 !selectedPlayer && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
@@ -2766,7 +2906,7 @@ function SpielerAkte() {
                                     embedUrl && isOpen && (React.createElement("div", { className: "relative w-full bg-black", style: { paddingBottom: "56.25%" } },
                                         React.createElement("iframe", { src: embedUrl, className: "absolute inset-0 w-full h-full", frameBorder: "0", allow: "accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture", allowFullScreen: true, title: v.description || v.type })))));
                             }))))),
-                        activeTab === "notiz" && (React.createElement("div", null,
+                        activeTab === "notiz" && isTrainer && (React.createElement("div", null,
                             React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("note"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
                                     React.createElement(IconPlus, { size: 15 }),
@@ -2785,7 +2925,16 @@ function SpielerAkte() {
                                 n.attachmentUrl && (React.createElement("a", { href: n.attachmentUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 mt-2 text-xs font-medium text-[#eb1e23] hover:text-[#be2228] bg-red-50 hover:bg-red-100 px-2.5 py-1 rounded-full transition" },
                                     React.createElement(IconPaperclip, { size: 13 }),
                                     " ",
-                                    n.attachmentName || "Anhang öffnen")))))))))))))),
+                                    n.attachmentName || "Anhang öffnen"))))))))),
+                        activeTab === "notiz" && !isTrainer && (React.createElement("div", null, teamNotes.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Notizen f\u00FCr dich freigegeben.")) : (React.createElement("div", { className: "space-y-2" }, sortByDateDesc(teamNotes).map((n) => (React.createElement("div", { key: n.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
+                            React.createElement("div", { className: "flex items-center justify-between gap-2" },
+                                React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, n.title),
+                                React.createElement("span", { className: "text-xs text-slate-400" }, fmtDate(n.date))),
+                            n.text && React.createElement("p", { className: "text-sm text-slate-700 mt-1.5" }, n.text),
+                            n.attachmentUrl && (React.createElement("a", { href: n.attachmentUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 mt-2 text-xs font-medium text-[#0a96d4] hover:text-[#4178a0] bg-sky-50 hover:bg-sky-100 px-2.5 py-1 rounded-full transition" },
+                                React.createElement(IconPaperclip, { size: 13 }),
+                                " ",
+                                n.attachmentName || "Anhang öffnen")))))))))))))),
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
         modal === "player" && (React.createElement(Modal, { title: "Spieler anlegen", onClose: () => setModal(null) },
