@@ -1498,7 +1498,7 @@ function getPlayerVisibleEvents(events, player) {
         return (matchesTeam && !isExcluded) || matchesInvite;
     });
 }
-function CalendarView({ events, isTrainer, team, teamPlayers, allPlayers, contextLabel, onAdd, onEdit, onDelete }) {
+function CalendarView({ events, isTrainer, team, teams, teamPlayers, allPlayers, contextLabel, onAdd, onEdit, onDelete }) {
     const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
     const [selectedDate, setSelectedDate] = useState(null);
     const [editingEvent, setEditingEvent] = useState(null);
@@ -1567,19 +1567,23 @@ function CalendarView({ events, isTrainer, team, teamPlayers, allPlayers, contex
                     React.createElement("button", { onClick: () => onDelete(e.id), className: "text-slate-300 hover:text-red-500", "aria-label": "L\u00F6schen" },
                         React.createElement(IconTrash, { size: 14 }))))))))))),
         showForm && (React.createElement(Modal, { title: editingEvent ? "Termin bearbeiten" : "Termin anlegen", onClose: () => setShowForm(false), wide: true },
-            React.createElement(EventForm, { initialEvent: editingEvent, defaultDate: selectedDate, defaultTeamId: team?.id, team: team, teamPlayers: teamPlayers, allPlayers: allPlayers, onSubmit: (vals) => { editingEvent ? onEdit(editingEvent.id, vals) : onAdd(vals); setShowForm(false); }, onClose: () => setShowForm(false) })))));
+            React.createElement(EventForm, { initialEvent: editingEvent, defaultDate: selectedDate, defaultTeamId: team?.id, teams: teams || (team ? [team] : []), allPlayers: allPlayers, onSubmit: (vals) => { editingEvent ? onEdit(editingEvent.id, vals) : onAdd(vals); setShowForm(false); }, onClose: () => setShowForm(false) })))));
 }
-function EventForm({ initialEvent, defaultDate, defaultTeamId, team, teamPlayers, allPlayers, onSubmit, onClose }) {
+function EventForm({ initialEvent, defaultDate, defaultTeamId, teams, allPlayers, onSubmit, onClose }) {
     const [title, setTitle] = useState(initialEvent?.title || "");
     const [date, setDate] = useState(initialEvent?.date || defaultDate || today());
     const [time, setTime] = useState(initialEvent?.time || "");
     const [location, setLocation] = useState(initialEvent?.location || "");
     const [type, setType] = useState(initialEvent?.type || "training");
+    const [selectedTeamId, setSelectedTeamId] = useState(initialEvent?.teamId || defaultTeamId || "");
     const [isTeamEvent, setIsTeamEvent] = useState(initialEvent ? !!initialEvent.teamId : true);
     const [excludedPlayerIds, setExcludedPlayerIds] = useState(initialEvent?.excludedPlayerIds || []);
     const [includedPlayerIds, setIncludedPlayerIds] = useState(initialEvent?.includedPlayerIds || []);
     const [showExceptions, setShowExceptions] = useState(false);
     const [error, setError] = useState("");
+    const team = teams.find((t) => t.id === selectedTeamId) || null;
+    const teamPlayers = (allPlayers || []).filter((p) => p.teamId === selectedTeamId);
+    const otherPlayers = (allPlayers || []).filter((p) => p.teamId !== selectedTeamId);
     function toggleId(list, setList, id) {
         setList(list.includes(id) ? list.filter((x) => x !== id) : [...list, id]);
     }
@@ -1593,18 +1597,21 @@ function EventForm({ initialEvent, defaultDate, defaultTeamId, team, teamPlayers
             setError("Bitte ein Datum angeben.");
             return;
         }
+        if (isTeamEvent && !selectedTeamId) {
+            setError("Bitte ein Team auswählen.");
+            return;
+        }
         if (!isTeamEvent && includedPlayerIds.length === 0) {
             setError("Bitte mindestens einen Spieler auswählen.");
             return;
         }
         onSubmit({
             title: title.trim(), date, time, location, type,
-            teamId: isTeamEvent ? defaultTeamId : null,
+            teamId: isTeamEvent ? selectedTeamId : null,
             excludedPlayerIds: isTeamEvent ? excludedPlayerIds : [],
             includedPlayerIds,
         });
     }
-    const otherPlayers = (allPlayers || []).filter((p) => !(teamPlayers || []).some((tp) => tp.id === p.id));
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
         React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: "Titel" },
@@ -1618,12 +1625,13 @@ function EventForm({ initialEvent, defaultDate, defaultTeamId, team, teamPlayers
                 React.createElement("input", { type: "time", className: inputClass, value: time, onChange: (e) => setTime(e.target.value) })),
             React.createElement(Field, { label: "Ort (optional)" },
                 React.createElement("input", { className: inputClass, value: location, onChange: (e) => setLocation(e.target.value), placeholder: "z. B. Sporthalle 1" }))),
-        team && (React.createElement("div", { className: "flex items-center gap-2" },
+        React.createElement("div", { className: "flex items-center gap-2" },
             React.createElement("input", { type: "checkbox", id: "isTeamEvent", checked: isTeamEvent, onChange: (e) => setIsTeamEvent(e.target.checked), className: "rounded" }),
-            React.createElement("label", { htmlFor: "isTeamEvent", className: "text-sm text-slate-700" },
-                "F\u00FCr das ganze Team ",
-                team.name,
-                " (statt nur einzelne Spieler)"))),
+            React.createElement("label", { htmlFor: "isTeamEvent", className: "text-sm text-slate-700" }, "F\u00FCr ein ganzes Team (statt nur einzelne Spieler)")),
+        isTeamEvent && (React.createElement(Field, { label: "Team" },
+            React.createElement("select", { className: inputClass, value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setExcludedPlayerIds([]); setError(""); } },
+                React.createElement("option", { value: "" }, "\u2013 ausw\u00E4hlen \u2013"),
+                teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))))),
         isTeamEvent && team ? (React.createElement("div", null,
             React.createElement("button", { type: "button", onClick: () => setShowExceptions((v) => !v), className: "text-xs font-medium text-[#0a96d4] hover:underline" }, showExceptions ? "Ausnahmen ausblenden" : "Ausnahmen bearbeiten (Spieler aus-/einblenden)"),
             showExceptions && (React.createElement("div", { className: "grid grid-cols-2 gap-3 mt-2" },
@@ -1639,11 +1647,11 @@ function EventForm({ initialEvent, defaultDate, defaultTeamId, team, teamPlayers
                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 mb-2" }, "Zus\u00E4tzlich sichtbar f\u00FCr (andere Teams)"),
                     React.createElement("div", { className: "space-y-1 max-h-32 overflow-y-auto" }, otherPlayers.map((p) => (React.createElement("label", { key: p.id, className: "flex items-center gap-2 text-sm text-slate-700" },
                         React.createElement("input", { type: "checkbox", className: "rounded", checked: includedPlayerIds.includes(p.id), onChange: () => toggleId(includedPlayerIds, setIncludedPlayerIds, p.id) }),
-                        p.name))))))))) : (React.createElement("div", { className: "bg-stone-50 rounded-xl p-3" },
+                        p.name))))))))) : (!isTeamEvent && (React.createElement("div", { className: "bg-stone-50 rounded-xl p-3" },
             React.createElement("p", { className: "text-xs font-semibold text-slate-500 mb-2" }, "Sichtbar f\u00FCr"),
             React.createElement("div", { className: "space-y-1 max-h-40 overflow-y-auto" }, (allPlayers || []).map((p) => (React.createElement("label", { key: p.id, className: "flex items-center gap-2 text-sm text-slate-700" },
                 React.createElement("input", { type: "checkbox", className: "rounded", checked: includedPlayerIds.includes(p.id), onChange: () => toggleId(includedPlayerIds, setIncludedPlayerIds, p.id) }),
-                p.name)))))),
+                p.name))))))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-[#eb1e23] hover:bg-[#be2228] text-white rounded-lg py-2.5 text-sm font-semibold transition" }, initialEvent ? "Änderungen speichern" : "Termin anlegen")));
 }
@@ -1890,21 +1898,11 @@ function TaskRow({ task, onToggle, onDelete, onEdit }) {
         React.createElement("button", { onClick: () => onDelete(task.id), className: "text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition shrink-0" },
             React.createElement(IconTrash, { size: 13 }))));
 }
-function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelectPlayer, onAddTask, onToggleTask, onDeleteTask, onEditTask, onAddEvent, onOpenNoteForm }) {
+function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelectPlayer, onAddTask, onToggleTask, onDeleteTask, onEditTask, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm }) {
     const [newTask, setNewTask] = useState("");
     const [newTaskDate, setNewTaskDate] = useState("");
-    const [quickEvent, setQuickEvent] = useState({ teamId: "", title: "", date: today(), time: "", location: "" });
-    const [quickEventOpen, setQuickEventOpen] = useState(false);
-    function submitQuickEvent(e) {
-        e.preventDefault();
-        if (!quickEvent.teamId || !quickEvent.title.trim() || !quickEvent.date)
-            return;
-        onAddEvent({
-            title: quickEvent.title.trim(), date: quickEvent.date, time: quickEvent.time, location: quickEvent.location,
-            type: "training", teamId: quickEvent.teamId, excludedPlayerIds: [], includedPlayerIds: [],
-        });
-        setQuickEvent({ teamId: quickEvent.teamId, title: "", date: today(), time: "", location: "" });
-    }
+    const [showEventForm, setShowEventForm] = useState(false);
+    const [editingEvent, setEditingEvent] = useState(null);
     const days = [];
     const d0 = new Date();
     d0.setHours(0, 0, 0, 0);
@@ -1925,6 +1923,14 @@ function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelec
         setNewTask("");
         setNewTaskDate("");
     }
+    function openNewEvent() {
+        setEditingEvent(null);
+        setShowEventForm(true);
+    }
+    function openEditEvent(e) {
+        setEditingEvent(e);
+        setShowEventForm(true);
+    }
     return (React.createElement("div", { className: "space-y-5" },
         React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-3" },
             React.createElement("div", null,
@@ -1940,20 +1946,9 @@ function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelec
         React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
             React.createElement("div", { className: "flex items-center justify-between" },
                 React.createElement(SectionLabel, null, "N\u00E4chste Termine"),
-                React.createElement("button", { onClick: () => setQuickEventOpen((v) => !v), className: "flex items-center gap-1 text-xs font-medium text-[#0a96d4] hover:text-[#4178a0]" },
+                React.createElement("button", { onClick: openNewEvent, className: "flex items-center gap-1 text-xs font-medium text-[#0a96d4] hover:text-[#4178a0]" },
                     React.createElement(IconPlus, { size: 13 }),
                     " Termin")),
-            quickEventOpen && (React.createElement("form", { onSubmit: submitQuickEvent, className: "grid grid-cols-2 md:grid-cols-5 gap-2 bg-stone-50 rounded-xl p-3 mt-2" },
-                React.createElement("select", { className: inputClass + " md:col-span-1", value: quickEvent.teamId, onChange: (e) => setQuickEvent({ ...quickEvent, teamId: e.target.value }) },
-                    React.createElement("option", { value: "" }, "Team w\u00E4hlen"),
-                    teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
-                React.createElement("input", { className: inputClass + " md:col-span-1", placeholder: "Titel", value: quickEvent.title, onChange: (e) => setQuickEvent({ ...quickEvent, title: e.target.value }) }),
-                React.createElement("input", { type: "date", className: inputClass + " md:col-span-1", value: quickEvent.date, onChange: (e) => setQuickEvent({ ...quickEvent, date: e.target.value }) }),
-                React.createElement("input", { type: "time", className: inputClass + " md:col-span-1", value: quickEvent.time, onChange: (e) => setQuickEvent({ ...quickEvent, time: e.target.value }) }),
-                React.createElement("div", { className: "flex gap-2 md:col-span-1" },
-                    React.createElement("input", { className: inputClass, placeholder: "Ort", value: quickEvent.location, onChange: (e) => setQuickEvent({ ...quickEvent, location: e.target.value }) }),
-                    React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-3 text-sm font-medium" },
-                        React.createElement(IconCheck, { size: 15 }))))),
             React.createElement("div", { className: "mt-2 space-y-3" },
                 days.map((d) => {
                     const iso = isoDate(d);
@@ -1963,13 +1958,20 @@ function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelec
                     const isToday = iso === isoDate(d0);
                     return (React.createElement("div", { key: iso },
                         React.createElement("p", { className: `text-xs font-semibold uppercase tracking-wide mb-1.5 ${isToday ? "text-[#eb1e23]" : "text-slate-400"}` }, isToday ? "Heute" : d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" })),
-                        React.createElement("div", { className: "space-y-1.5" }, dayEvents.map((e) => (React.createElement("div", { key: e.id, className: "flex items-center gap-3 bg-stone-50 rounded-xl px-3 py-2" },
+                        React.createElement("div", { className: "space-y-1.5" }, dayEvents.map((e) => (React.createElement("div", { key: e.id, className: "flex items-center gap-3 bg-stone-50 rounded-xl px-3 py-2 group" },
                             React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${EVENT_TYPE_STYLES[e.type]?.dot || "bg-slate-400"}` }),
                             React.createElement("span", { className: "text-sm font-semibold text-slate-800 shrink-0" }, e.time || "–"),
                             React.createElement("span", { className: "text-sm text-slate-700 truncate flex-1" }, e.title),
-                            React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(e.teamId) || "Individuell")))))));
+                            React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(e.teamId) || "Individuell"),
+                            React.createElement("div", { className: "hidden group-hover:flex items-center gap-1.5 shrink-0" },
+                                React.createElement("button", { onClick: () => openEditEvent(e), className: "text-slate-400 hover:text-[#0a96d4]", "aria-label": "Bearbeiten" },
+                                    React.createElement(IconEdit, { size: 13 })),
+                                React.createElement("button", { onClick: () => onDeleteEvent(e.id), className: "text-slate-400 hover:text-red-500", "aria-label": "L\u00F6schen" },
+                                    React.createElement(IconTrash, { size: 13 })))))))));
                 }),
                 days.every((d) => events.filter((e) => e.date === isoDate(d)).length === 0) && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Keine Termine in den n\u00E4chsten 7 Tagen.")))),
+        showEventForm && (React.createElement(Modal, { title: editingEvent ? "Termin bearbeiten" : "Termin anlegen", onClose: () => setShowEventForm(false), wide: true },
+            React.createElement(EventForm, { initialEvent: editingEvent, teams: teams, allPlayers: players, onSubmit: (vals) => { editingEvent ? onEditEvent(editingEvent.id, vals) : onAddEvent(vals); setShowEventForm(false); }, onClose: () => setShowEventForm(false) }))),
         React.createElement("div", { className: "grid md:grid-cols-2 gap-5" },
             React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
                 React.createElement(SectionLabel, null, "Verletzt / Reha"),
@@ -2317,6 +2319,7 @@ function SpielerAkte() {
         const newNote = {
             teamId: note.teamId, date: note.date, title: note.title, text: note.text || "",
             attachmentUrl: note.attachmentUrl || "", attachmentName: note.attachmentName || "",
+            sharedWithAll: !!note.sharedWithAll,
             sharedWithPlayerIds: note.sharedWithPlayerIds || [],
         };
         const ref = await db.collection("teamNotes").add(newNote);
@@ -2773,7 +2776,7 @@ function SpielerAkte() {
                             React.createElement("button", { onClick: () => setShowTeamCalendar(false), className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
                                 React.createElement(IconUsers, { size: 14 }),
                                 " Spieler-\u00DCbersicht")),
-                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent }),
+                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teams: teams, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent }),
                         React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 mt-4" },
                             React.createElement("div", { className: "flex items-center justify-between mb-2" },
                                 React.createElement(SectionLabel, null, "Team-Notizen"),
@@ -2801,7 +2804,7 @@ function SpielerAkte() {
                             React.createElement(IconCalendar, { size: 14 }),
                             " Team-Kalender")),
                     React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: players.filter((p) => p.teamId === selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer }))),
-                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, tasks: tasks, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddTask: addTask, onToggleTask: toggleTask, onDeleteTask: deleteTask, onEditTask: editTask, onAddEvent: addCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
+                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, tasks: tasks, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddTask: addTask, onToggleTask: toggleTask, onDeleteTask: deleteTask, onEditTask: editTask, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
                 !selectedPlayer && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
@@ -2907,7 +2910,7 @@ function SpielerAkte() {
                                 React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzte Notiz"),
                                     playerNotes[0] ? (React.createElement("p", { className: "text-sm text-slate-700 line-clamp-2" }, playerNotes[0].text)) : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Notizen erfasst."))))),
-                        activeTab === "kalender" && (React.createElement(CalendarView, { events: getPlayerVisibleEvents(calendarEvents, selectedPlayer), isTrainer: isTrainer, team: selectedTeam, teamPlayers: players.filter((p) => p.teamId === selectedPlayer.teamId), allPlayers: players, contextLabel: selectedPlayer.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent })),
+                        activeTab === "kalender" && (React.createElement(CalendarView, { events: getPlayerVisibleEvents(calendarEvents, selectedPlayer), isTrainer: isTrainer, team: selectedTeam, teams: teams, teamPlayers: players.filter((p) => p.teamId === selectedPlayer.teamId), allPlayers: players, contextLabel: selectedPlayer.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent })),
                         activeTab === "statistik" && (React.createElement("div", null,
                             React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("stat"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
