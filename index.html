@@ -1589,6 +1589,8 @@ function EventForm({ initialEvent, defaultDate, defaultTeamId, teams, allPlayers
     const [excludedPlayerIds, setExcludedPlayerIds] = useState(initialEvent?.excludedPlayerIds || []);
     const [includedPlayerIds, setIncludedPlayerIds] = useState(initialEvent?.includedPlayerIds || []);
     const [showExceptions, setShowExceptions] = useState(false);
+    const [repeatWeekly, setRepeatWeekly] = useState(false);
+    const [repeatUntil, setRepeatUntil] = useState("");
     const [error, setError] = useState("");
     const team = teams.find((t) => t.id === selectedTeamId) || null;
     const teamPlayers = (allPlayers || []).filter((p) => p.teamId === selectedTeamId);
@@ -1614,11 +1616,20 @@ function EventForm({ initialEvent, defaultDate, defaultTeamId, teams, allPlayers
             setError("Bitte mindestens einen Spieler auswählen.");
             return;
         }
+        if (repeatWeekly && !repeatUntil) {
+            setError("Bitte ein Enddatum für die Wiederholung angeben.");
+            return;
+        }
+        if (repeatWeekly && repeatUntil < date) {
+            setError("Das Enddatum muss nach dem Startdatum liegen.");
+            return;
+        }
         onSubmit({
             title: title.trim(), date, time, location, type,
             teamId: isTeamEvent ? selectedTeamId : null,
             excludedPlayerIds: isTeamEvent ? excludedPlayerIds : [],
             includedPlayerIds,
+            repeatUntil: repeatWeekly ? repeatUntil : null,
         });
     }
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
@@ -1634,6 +1645,12 @@ function EventForm({ initialEvent, defaultDate, defaultTeamId, teams, allPlayers
                 React.createElement("input", { type: "time", className: inputClass, value: time, onChange: (e) => setTime(e.target.value) })),
             React.createElement(Field, { label: "Ort (optional)" },
                 React.createElement("input", { className: inputClass, value: location, onChange: (e) => setLocation(e.target.value), placeholder: "z. B. Sporthalle 1" }))),
+        !initialEvent && (React.createElement("div", { className: "bg-stone-50 rounded-xl p-3 space-y-2" },
+            React.createElement("label", { className: "flex items-center gap-2 text-sm font-medium text-slate-700" },
+                React.createElement("input", { type: "checkbox", className: "rounded", checked: repeatWeekly, onChange: (e) => setRepeatWeekly(e.target.checked) }),
+                "W\u00F6chentlich wiederholen (legt f\u00FCr jede Woche einen eigenen, einzeln anpassbaren Termin an)"),
+            repeatWeekly && (React.createElement(Field, { label: "Wiederholen bis einschlie\u00DFlich" },
+                React.createElement("input", { type: "date", className: inputClass, value: repeatUntil, onChange: (e) => { setRepeatUntil(e.target.value); setError(""); }, min: date }))))),
         React.createElement("div", { className: "flex items-center gap-2" },
             React.createElement("input", { type: "checkbox", id: "isTeamEvent", checked: isTeamEvent, onChange: (e) => setIsTeamEvent(e.target.checked), className: "rounded" }),
             React.createElement("label", { htmlFor: "isTeamEvent", className: "text-sm text-slate-700" }, "F\u00FCr ein ganzes Team (statt nur einzelne Spieler)")),
@@ -2308,11 +2325,31 @@ function SpielerAkte() {
         setAccounts((prev) => prev.filter((a) => a.uid !== uid));
     }
     async function addCalendarEvent(event) {
-        const newEvent = {
-            title: event.title, date: event.date, time: event.time || "", location: event.location || "",
+        const base = {
+            title: event.title, time: event.time || "", location: event.location || "",
             type: event.type, teamId: event.teamId || null, notes: event.notes || "",
             excludedPlayerIds: event.excludedPlayerIds || [], includedPlayerIds: event.includedPlayerIds || [],
         };
+        if (event.repeatUntil) {
+            const dates = [];
+            let d = new Date(event.date + "T00:00:00");
+            const end = new Date(event.repeatUntil + "T00:00:00");
+            while (d <= end && dates.length < 104) {
+                dates.push(isoDate(d));
+                d.setDate(d.getDate() + 7);
+            }
+            const batch = db.batch();
+            const newEvents = dates.map((date) => {
+                const ref = db.collection("calendarEvents").doc();
+                const ev = { ...base, date };
+                batch.set(ref, ev);
+                return { id: ref.id, ...ev };
+            });
+            await batch.commit();
+            setCalendarEvents((prev) => [...prev, ...newEvents]);
+            return;
+        }
+        const newEvent = { ...base, date: event.date };
         const ref = await db.collection("calendarEvents").add(newEvent);
         setCalendarEvents((prev) => [...prev, { id: ref.id, ...newEvent }]);
     }
