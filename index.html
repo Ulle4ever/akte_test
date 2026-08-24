@@ -1408,7 +1408,7 @@ function getPlayerVisibleEvents(events, player) {
         return (matchesTeam && !isExcluded) || matchesInvite;
     });
 }
-function CalendarView({ events, isTrainer, team, teamPlayers, allPlayers, onAdd, onEdit, onDelete }) {
+function CalendarView({ events, isTrainer, team, teamPlayers, allPlayers, contextLabel, onAdd, onEdit, onDelete }) {
     const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
     const [selectedDate, setSelectedDate] = useState(null);
     const [editingEvent, setEditingEvent] = useState(null);
@@ -1441,7 +1441,7 @@ function CalendarView({ events, isTrainer, team, teamPlayers, allPlayers, onAdd,
                     React.createElement(IconArrowLeft, { size: 16 })),
                 React.createElement("p", { className: "text-sm font-semibold text-slate-800 capitalize" },
                     monthLabel,
-                    team ? ` · ${team.name}` : ""),
+                    contextLabel ? ` · ${contextLabel}` : ""),
                 React.createElement("button", { onClick: () => setViewMonth((m) => new Date(m.getFullYear(), m.getMonth() + 1, 1)), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500" },
                     React.createElement(IconArrowLeft, { size: 16, className: "rotate-180" }))),
             React.createElement("div", { className: "grid grid-cols-7 gap-1 mb-0.5" }, ["Mo", "Di", "Mi", "Do", "Fr", "Sa", "So"].map((d) => (React.createElement("div", { key: d, className: "text-center text-[10px] font-semibold text-slate-400 uppercase py-0.5" }, d)))),
@@ -1814,7 +1814,10 @@ function TrainerDashboard({ events, teams, players, onSelectTeam }) {
                 React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, t.name),
                 React.createElement("p", { className: "text-xs text-slate-400 mt-0.5" },
                     players.filter((p) => p.teamId === t.id).length,
-                    " Spieler"))))))));
+                    " Spieler"),
+                React.createElement("p", { className: "text-xs text-[#0a96d4] mt-1.5 flex items-center gap-1" },
+                    React.createElement(IconCalendar, { size: 11 }),
+                    " Kalender \u00F6ffnen"))))))));
 }
 function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
@@ -1878,6 +1881,7 @@ function SpielerAkte() {
     const [loading, setLoading] = useState(true);
     const [saveError, setSaveError] = useState(false);
     const [selectedTeamId, setSelectedTeamId] = useState("all");
+    const [showTeamCalendar, setShowTeamCalendar] = useState(false);
     const [selectedPlayerId, setSelectedPlayerId] = useState(null);
     const [activeTab, setActiveTab] = useState("uebersicht");
     const [expandedCats, setExpandedCats] = useState(() => new Set());
@@ -2165,6 +2169,18 @@ function SpielerAkte() {
         setSelectedPlayerId(id);
         setActiveTab("uebersicht");
         setConfirmDeletePlayer(false);
+        setShowTeamCalendar(false);
+    }
+    function goHome() {
+        setSelectedPlayerId(null);
+        setSelectedTeamId("all");
+        setShowTeamCalendar(false);
+        setConfirmDeletePlayer(false);
+    }
+    function goToTeamCalendar(teamId) {
+        setSelectedPlayerId(null);
+        setSelectedTeamId(teamId);
+        setShowTeamCalendar(true);
     }
     function handleAddTeam(team) {
         const newTeam = { id: uid(), ...team };
@@ -2447,13 +2463,21 @@ function SpielerAkte() {
     return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex flex-col" },
         React.createElement("header", { className: "bg-black text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3 shadow-[0_2px_16px_rgba(0,0,0,0.25)] relative z-10" },
             React.createElement("div", { className: "flex items-center gap-3" },
-                React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars K\u00F6ln", className: "h-11 w-11 object-contain shrink-0" }),
-                React.createElement("div", null,
-                    React.createElement("div", { className: "flex items-center gap-2 mb-0.5" },
-                        React.createElement("span", { className: "h-[2px] w-5 bg-[#eb1e23]" }),
-                        React.createElement("h1", { className: "font-display text-xl tracking-wide leading-none" }, "SPIELER-AKTE"),
-                        React.createElement("span", { className: "h-[2px] w-5 bg-[#0a96d4]" })),
-                    React.createElement("p", { className: "text-xs text-[#e6e7ea]" }, "Rheinstars K\u00F6ln \u00B7 interne \u00DCbersicht")),
+                isTrainer ? (React.createElement("button", { onClick: goHome, className: "flex items-center gap-3 hover:opacity-80 transition text-left", title: "Zur Startseite" },
+                    React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars K\u00F6ln", className: "h-11 w-11 object-contain shrink-0" }),
+                    React.createElement("div", null,
+                        React.createElement("div", { className: "flex items-center gap-2 mb-0.5" },
+                            React.createElement("span", { className: "h-[2px] w-5 bg-[#eb1e23]" }),
+                            React.createElement("h1", { className: "font-display text-xl tracking-wide leading-none" }, "SPIELER-AKTE"),
+                            React.createElement("span", { className: "h-[2px] w-5 bg-[#0a96d4]" })),
+                        React.createElement("p", { className: "text-xs text-[#e6e7ea]" }, "Rheinstars K\u00F6ln \u00B7 interne \u00DCbersicht")))) : (React.createElement("div", { className: "flex items-center gap-3" },
+                    React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars K\u00F6ln", className: "h-11 w-11 object-contain shrink-0" }),
+                    React.createElement("div", null,
+                        React.createElement("div", { className: "flex items-center gap-2 mb-0.5" },
+                            React.createElement("span", { className: "h-[2px] w-5 bg-[#eb1e23]" }),
+                            React.createElement("h1", { className: "font-display text-xl tracking-wide leading-none" }, "SPIELER-AKTE"),
+                            React.createElement("span", { className: "h-[2px] w-5 bg-[#0a96d4]" })),
+                        React.createElement("p", { className: "text-xs text-[#e6e7ea]" }, "Rheinstars K\u00F6ln \u00B7 interne \u00DCbersicht")))),
                 React.createElement("div", { className: "hidden md:flex items-center gap-4 ml-4 pl-4 border-l border-white/15" },
                     React.createElement("div", null,
                         React.createElement("p", { className: "text-lg font-bold leading-none" }, teams.length),
@@ -2489,7 +2513,7 @@ function SpielerAkte() {
         React.createElement("div", { className: "flex flex-col md:flex-row flex-1" },
             isTrainer && (React.createElement("aside", { className: "w-full md:w-80 border-b md:border-b-0 md:border-r border-stone-200 bg-white p-4 flex flex-col gap-3" },
                 React.createElement("div", { className: "flex gap-2" },
-                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => setSelectedTeamId(e.target.value) },
+                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); } },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
                         teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
                     React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
@@ -2510,8 +2534,26 @@ function SpielerAkte() {
                             React.createElement("span", { className: "block text-xs truncate text-slate-500" }, p.position)),
                         React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` }))))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-6" },
-                !selectedPlayer && selectedTeamId !== "all" && (React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: players.filter((p) => p.teamId === selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer })),
-                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, onSelectTeam: setSelectedTeamId })),
+                !selectedPlayer && selectedTeamId !== "all" && showTeamCalendar && (() => {
+                    const team = teams.find((t) => t.id === selectedTeamId);
+                    const teamPlayers = players.filter((p) => p.teamId === selectedTeamId);
+                    const teamPlayerIds = teamPlayers.map((p) => p.id);
+                    const events = calendarEvents.filter((e) => e.teamId === selectedTeamId || (e.includedPlayerIds || []).some((pid) => teamPlayerIds.includes(pid)));
+                    return (React.createElement("div", null,
+                        React.createElement("div", { className: "flex items-center justify-between mb-3" },
+                            React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, team?.name),
+                            React.createElement("button", { onClick: () => setShowTeamCalendar(false), className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
+                                React.createElement(IconUsers, { size: 14 }),
+                                " Spieler-\u00DCbersicht")),
+                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent })));
+                })(),
+                !selectedPlayer && selectedTeamId !== "all" && !showTeamCalendar && (React.createElement("div", null,
+                    React.createElement("div", { className: "flex justify-end mb-3" },
+                        React.createElement("button", { onClick: () => setShowTeamCalendar(true), className: "flex items-center gap-1.5 text-sm font-medium text-[#0a96d4] hover:text-[#4178a0] bg-sky-50 hover:bg-sky-100 rounded-lg px-3 py-1.5" },
+                            React.createElement(IconCalendar, { size: 14 }),
+                            " Team-Kalender")),
+                    React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: players.filter((p) => p.teamId === selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer }))),
+                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, onSelectTeam: goToTeamCalendar })),
                 !selectedPlayer && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
@@ -2617,7 +2659,7 @@ function SpielerAkte() {
                                 React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzte Notiz"),
                                     playerNotes[0] ? (React.createElement("p", { className: "text-sm text-slate-700 line-clamp-2" }, playerNotes[0].text)) : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Notizen erfasst."))))),
-                        activeTab === "kalender" && (React.createElement(CalendarView, { events: getPlayerVisibleEvents(calendarEvents, selectedPlayer), isTrainer: isTrainer, team: selectedTeam, teamPlayers: players.filter((p) => p.teamId === selectedPlayer.teamId), allPlayers: players, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent })),
+                        activeTab === "kalender" && (React.createElement(CalendarView, { events: getPlayerVisibleEvents(calendarEvents, selectedPlayer), isTrainer: isTrainer, team: selectedTeam, teamPlayers: players.filter((p) => p.teamId === selectedPlayer.teamId), allPlayers: players, contextLabel: selectedPlayer.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent })),
                         activeTab === "statistik" && (React.createElement("div", null,
                             React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("stat"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
