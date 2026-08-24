@@ -2131,9 +2131,19 @@ function SpielerAkte() {
     const [loginPassword, setLoginPassword] = useState("");
     const [loginError, setLoginError] = useState("");
     const [loginBusy, setLoginBusy] = useState(false);
+    const prevUidRef = useRef(undefined);
+    useEffect(() => {
+        if (firebaseUser?.uid !== prevUidRef.current) {
+            prevUidRef.current = firebaseUser?.uid;
+            setSelectedPlayerId(null);
+            setSelectedTeamId("all");
+            setShowTeamCalendar(false);
+            setActiveTab("uebersicht");
+            setConfirmDeletePlayer(false);
+        }
+    }, [firebaseUser]);
     useEffect(() => {
         const unsub = auth.onAuthStateChanged(async (user) => {
-            console.log("[DEBUG] onAuthStateChanged fired, uid:", user?.uid || null);
             setFirebaseUser(user);
             setLoadError(null);
             if (!user) {
@@ -2151,7 +2161,6 @@ function SpielerAkte() {
                     setLoading(false);
                     return;
                 }
-                console.log("[DEBUG] account doc loaded:", accSnap.data());
                 setAccount(accSnap.data());
             }
             catch (e) {
@@ -2232,9 +2241,7 @@ function SpielerAkte() {
         return () => { cancelled = true; };
     }, [account]);
     useEffect(() => {
-        console.log("[DEBUG auto-select]", { role: account?.role, playerId: account?.playerId, selectedPlayerId });
         if (account?.role === "player" && account.playerId && !selectedPlayerId) {
-            console.log("[DEBUG auto-select] -> setting selectedPlayerId to", account.playerId);
             setSelectedPlayerId(account.playerId);
         }
     }, [account, selectedPlayerId]);
@@ -2253,7 +2260,6 @@ function SpielerAkte() {
         }
     }
     function handleLogout() {
-        console.log("[DEBUG] handleLogout called, resetting selectedPlayerId etc.");
         setSelectedPlayerId(null);
         setSelectedTeamId("all");
         setShowTeamCalendar(false);
