@@ -1907,9 +1907,9 @@ function TaskRow({ task, onToggle, onDelete, onEdit }) {
         setEditing(false);
     }
     if (editing) {
-        return (React.createElement("div", { className: "flex items-center gap-2 px-1 py-1.5" },
-            React.createElement("input", { className: inputClass + " text-sm", value: text, onChange: (e) => setText(e.target.value), autoFocus: true }),
-            React.createElement("input", { type: "date", className: inputClass + " w-36 shrink-0 text-sm", value: date, onChange: (e) => setDate(e.target.value) }),
+        return (React.createElement("div", { className: "flex flex-wrap items-center gap-2 px-1 py-1.5" },
+            React.createElement("input", { className: inputClass + " flex-1 min-w-[100px] text-sm", value: text, onChange: (e) => setText(e.target.value), autoFocus: true }),
+            React.createElement("input", { type: "date", className: inputClass + " w-[130px] shrink-0 text-sm", value: date, onChange: (e) => setDate(e.target.value) }),
             React.createElement("button", { onClick: save, className: "shrink-0 text-emerald-600 hover:text-emerald-700" },
                 React.createElement(IconCheck, { size: 16 })),
             React.createElement("button", { onClick: () => setEditing(false), className: "shrink-0 text-slate-400 hover:text-slate-600" },
@@ -2007,9 +2007,9 @@ function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelec
                     React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(p.teamId)))))))),
             React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
                 React.createElement(SectionLabel, null, "Aufgaben"),
-                React.createElement("form", { onSubmit: submitTask, className: "flex gap-2 mt-2 mb-2" },
-                    React.createElement("input", { className: inputClass, value: newTask, onChange: (e) => setNewTask(e.target.value), placeholder: "Neue Aufgabe\u2026" }),
-                    React.createElement("input", { type: "date", className: inputClass + " w-36 shrink-0", value: newTaskDate, onChange: (e) => setNewTaskDate(e.target.value) }),
+                React.createElement("form", { onSubmit: submitTask, className: "flex flex-wrap gap-2 mt-2 mb-2" },
+                    React.createElement("input", { className: inputClass + " flex-1 min-w-[100px]", value: newTask, onChange: (e) => setNewTask(e.target.value), placeholder: "Neue Aufgabe\u2026" }),
+                    React.createElement("input", { type: "date", className: inputClass + " w-[130px] shrink-0", value: newTaskDate, onChange: (e) => setNewTaskDate(e.target.value) }),
                     React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-3 text-sm font-medium" },
                         React.createElement(IconPlus, { size: 15 }))),
                 React.createElement("div", { className: "space-y-1 max-h-56 overflow-y-auto" },
