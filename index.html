@@ -2249,6 +2249,11 @@ function SpielerAkte() {
         }
     }
     function handleLogout() {
+        setSelectedPlayerId(null);
+        setSelectedTeamId("all");
+        setShowTeamCalendar(false);
+        setActiveTab("uebersicht");
+        setConfirmDeletePlayer(false);
         auth.signOut();
     }
     async function persistPlayerFields(playerId, changes) {
