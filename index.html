@@ -2794,7 +2794,7 @@ function SpielerAkte() {
             db.collection("devPlanCombined").doc(id).delete().catch(() => {}),
         ]);
     }
-    const devPlanTemplates = meta.devPlanTemplates || DEFAULT_DEVPLAN_TEMPLATES;
+    const devPlanTemplates = meta?.devPlanTemplates || DEFAULT_DEVPLAN_TEMPLATES;
     function saveDevPlanTemplates(templates) {
         persistMeta({ devPlanTemplates: templates });
     }
