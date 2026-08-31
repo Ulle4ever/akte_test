@@ -40,6 +40,7 @@
 <body>
 <div id="root"></div>
 <script>
+
 "use strict";
 /* ============================================================
    FIREBASE-KONFIGURATION
@@ -1006,6 +1007,264 @@ function NoteForm({ onSubmit, onClose }) {
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", disabled: uploading, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, uploading ? "Wird hochgeladen…" : "Notiz speichern")));
 }
+function RotationPlanForm({ team, teamPlayers, onSubmit, onClose }) {
+    const [date, setDate] = useState(today());
+    const [opponent, setOpponent] = useState("");
+    const [quarters, setQuarters] = useState(() => Array.from({ length: 4 }, () => []));
+    const [error, setError] = useState("");
+    function togglePlayerInQuarter(qIdx, playerId) {
+        setQuarters((prev) => prev.map((q, i) => {
+            if (i !== qIdx)
+                return q;
+            if (q.includes(playerId))
+                return q.filter((id) => id !== playerId);
+            if (q.length >= 5)
+                return q;
+            return [...q, playerId];
+        }));
+    }
+    const playedQuarters = {};
+    teamPlayers.forEach((p) => { playedQuarters[p.id] = quarters.filter((q) => q.includes(p.id)).length; });
+    function handleSubmit(e) {
+        e.preventDefault();
+        if (!date) {
+            setError("Bitte ein Datum angeben.");
+            return;
+        }
+        onSubmit({ teamId: team.id, date, opponent: opponent.trim(), quarters });
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Datum" },
+                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
+            React.createElement(Field, { label: "Gegner (optional)" },
+                React.createElement("input", { className: inputClass, value: opponent, onChange: (e) => setOpponent(e.target.value), placeholder: "z. B. TSV Nord" }))),
+        React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3" }, quarters.map((q, qIdx) => (React.createElement("div", { key: qIdx, className: "bg-stone-50 rounded-xl p-3" },
+            React.createElement("p", { className: "text-xs font-semibold text-slate-600 mb-2" },
+                "Viertel ",
+                qIdx + 1,
+                " ",
+                React.createElement("span", { className: "text-slate-400" },
+                    "(",
+                    q.length,
+                    "/5)")),
+            React.createElement("div", { className: "space-y-1 max-h-48 overflow-y-auto" }, teamPlayers.map((p) => (React.createElement("label", { key: p.id, className: `flex items-center gap-2 text-xs ${q.includes(p.id) ? "text-slate-800 font-medium" : "text-slate-500"}` },
+                React.createElement("input", { type: "checkbox", className: "rounded", checked: q.includes(p.id), disabled: !q.includes(p.id) && q.length >= 5, onChange: () => togglePlayerInQuarter(qIdx, p.id) }),
+                p.name)))))))),
+        React.createElement("div", { className: "bg-stone-50 rounded-xl p-3" },
+            React.createElement("p", { className: "text-xs font-semibold text-slate-500 mb-2" }, "Geplante Eins\u00E4tze pro Spieler"),
+            React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-3 gap-1.5" }, teamPlayers.map((p) => (React.createElement("div", { key: p.id, className: "flex items-center justify-between text-xs bg-white rounded-lg px-2 py-1" },
+                React.createElement("span", { className: "truncate" }, p.name),
+                React.createElement("span", { className: `font-semibold ${playedQuarters[p.id] === 0 ? "text-[#eb1e23]" : "text-slate-700"}` },
+                    playedQuarters[p.id],
+                    "/",
+                    quarters.length)))))),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Rotationsplan speichern")));
+}
+"use strict";
+function DevPlanThemeHeader({ n, label }) {
+    return (React.createElement("div", { className: "flex items-center gap-2 mb-2" },
+        React.createElement("span", { className: "w-5 h-5 rounded-full bg-[#eb1e23] text-white text-[10px] font-bold flex items-center justify-center shrink-0" }, n),
+        React.createElement("p", { className: "text-xs font-bold text-slate-500 uppercase tracking-wide" }, label)));
+}
+function DPField({ label, hint, value, onChange, readOnly, rows = 2 }) {
+    return (React.createElement("div", { className: "mb-3" },
+        React.createElement("p", { className: "text-sm font-semibold text-slate-700" }, label),
+        hint && React.createElement("p", { className: "text-xs text-slate-400 mb-1" }, hint),
+        readOnly ? (React.createElement("p", { className: "text-sm text-slate-800 bg-stone-50 rounded-lg p-2.5 mt-1 whitespace-pre-wrap min-h-[2.5rem]" }, value || "–")) : (React.createElement("textarea", { className: inputClass + " mt-1", rows: rows, value: value || "", onChange: (e) => onChange(e.target.value) }))));
+}
+function DPSituationPair({ label, offValue, offVideo, defValue, defVideo, onChange, readOnly }) {
+    return (React.createElement("div", { className: "grid grid-cols-2 gap-3 mb-3" }, ["off", "def"].map((side) => (React.createElement("div", { key: side, className: "bg-stone-50 rounded-xl p-2.5" },
+        React.createElement("p", { className: "text-xs font-bold text-slate-500 uppercase mb-1" },
+            side === "off" ? "Offensiv" : "Defensiv",
+            " ",
+            label),
+        readOnly ? (React.createElement(React.Fragment, null,
+            React.createElement("p", { className: "text-xs text-slate-800 whitespace-pre-wrap mb-1" }, (side === "off" ? offValue : defValue) || "–"),
+            React.createElement("p", { className: "text-[11px] text-slate-400" },
+                "Videostelle: ",
+                (side === "off" ? offVideo : defVideo) || "–"))) : (React.createElement(React.Fragment, null,
+            React.createElement("textarea", { className: inputClass + " text-xs mb-1", rows: 2, value: (side === "off" ? offValue : defValue) || "", onChange: (e) => onChange(side, "text", e.target.value) }),
+            React.createElement("input", { className: inputClass + " text-xs", placeholder: "Videostelle (Min:Sek)", value: (side === "off" ? offVideo : defVideo) || "", onChange: (e) => onChange(side, "video", e.target.value) }))))))));
+}
+function DevPlanPlayerForm({ data, onSave, readOnly, onRelease }) {
+    const [form, setForm] = useState(() => ({
+        longTermGoals: "", seasonGoals: "", school: "", injuryHistory: "", athleticGoals: "",
+        selfPerception: "", perceivedByOthers: "",
+        off1: "", off1Video: "", off2: "", off2Video: "", def1: "", def1Video: "", def2: "", def2Video: "",
+        topSkills: "",
+        ...data,
+    }));
+    const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+    return (React.createElement("div", { className: "space-y-5" },
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 1, label: "Meine Ziele" }),
+            React.createElement(DPField, { label: "Langfristige Ziele", hint: "Welche Liga willst du irgendwann erreichen? Auf welcher Position siehst du dich langfristig?", value: form.longTermGoals, onChange: set("longTermGoals"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Ziele f\u00FCr diese Saison", hint: "Punkte/Assists/Rebounds/Steals im Schnitt, Position, deine Rolle im Team", value: form.seasonGoals, onChange: set("seasonGoals"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Schule", hint: "Schulische Ziele f\u00FCr dieses Jahr, Zeugnis einreichen?", value: form.school, onChange: set("school"), readOnly: readOnly })),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 2, label: "Mein K\u00F6rper" }),
+            React.createElement(DPField, { label: "Verletzungshistorie", value: form.injuryHistory, onChange: set("injuryHistory"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Meine athletischen Ziele", hint: "z. B. dunking, Sprintgeschwindigkeit, Ausdauer, Kraft, Sprungh\u00F6he", value: form.athleticGoals, onChange: set("athleticGoals"), readOnly: readOnly })),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 3, label: "Mein Verhalten im Team" }),
+            React.createElement(DPField, { label: "Wie nimmst du dich auf dem Spielfeld wahr?", value: form.selfPerception, onChange: set("selfPerception"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Wie glaubst du, nehmen dich die anderen Spieler wahr?", value: form.perceivedByOthers, onChange: set("perceivedByOthers"), readOnly: readOnly })),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 4, label: "H\u00E4ufige Situationen & NOCH nicht h\u00E4ufige Situationen" }),
+            React.createElement("p", { className: "text-xs text-slate-400 mb-2" }, "Schau dir 2 Testspiele an, nur Szenen in denen du auf dem Feld bist. 2 offensive und 2 defensive Situationen, in denen du dich h\u00E4ufig befindest."),
+            React.createElement(DPSituationPair, { label: "1", offValue: form.off1, offVideo: form.off1Video, defValue: form.def1, defVideo: form.def1Video, readOnly: readOnly, onChange: (side, kind, v) => setForm((f) => ({ ...f, [`${side === "off" ? "off1" : "def1"}${kind === "video" ? "Video" : ""}`]: v })) }),
+            React.createElement(DPSituationPair, { label: "2", offValue: form.off2, offVideo: form.off2Video, defValue: form.def2, defVideo: form.def2Video, readOnly: readOnly, onChange: (side, kind, v) => setForm((f) => ({ ...f, [`${side === "off" ? "off2" : "def2"}${kind === "video" ? "Video" : ""}`]: v })) }),
+            React.createElement(DPField, { label: "Was sind die 1-2 F\u00E4higkeiten, die dein Spiel \u00FCberragend machen w\u00FCrden?", value: form.topSkills, onChange: set("topSkills"), readOnly: readOnly })),
+        !readOnly && (React.createElement("div", { className: "flex gap-2 sticky bottom-0 bg-white pt-3 border-t border-stone-100" },
+            React.createElement("button", { onClick: () => onSave(form), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold" }, "Speichern (Entwurf)"),
+            React.createElement("button", { onClick: () => { onSave(form); onRelease(); }, className: "flex-1 bg-[#eb1e23] hover:bg-[#be2228] text-white rounded-lg py-2.5 text-sm font-semibold" }, "Speichern & Freigeben")))));
+}
+function DevPlanTrainerForm({ data, onSave, readOnly, onRelease }) {
+    const [form, setForm] = useState(() => ({
+        physicalCapability: "", athleticGoals: "", athleticTrainerComment: "", testValues: "", testDate: "",
+        perceptionField: "", perceptionSelfAwareness: "",
+        off1: "", off1Video: "", off2: "", off2Video: "", def1: "", def1Video: "", def2: "", def2Video: "",
+        topSkills: "", interventionsKGT: ["", "", "", ""], teachingPointsTT: ["", "", "", ""], nextCheckIn: "",
+        ...data,
+    }));
+    const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+    function setListItem(key, idx, v) {
+        setForm((f) => { const arr = [...f[key]]; arr[idx] = v; return { ...f, [key]: arr }; });
+    }
+    return (React.createElement("div", { className: "space-y-5" },
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 1, label: "K\u00F6rper" }),
+            React.createElement(DPField, { label: "Spielt der Spieler physisch in seinen M\u00F6glichkeiten?", value: form.physicalCapability, onChange: set("physicalCapability"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Athletische Ziele des Spielers", value: form.athleticGoals, onChange: set("athleticGoals"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Kommentar Athletiktrainer", value: form.athleticTrainerComment, onChange: set("athleticTrainerComment"), readOnly: readOnly }),
+            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                React.createElement(DPField, { label: "Werte nach Athletiktestung", value: form.testValues, onChange: set("testValues"), readOnly: readOnly }),
+                React.createElement(Field, { label: "Datum der Testung" }, readOnly ? React.createElement("p", { className: "text-sm text-slate-800" }, form.testDate ? fmtDate(form.testDate) : "–") : React.createElement("input", { type: "date", className: inputClass, value: form.testDate, onChange: (e) => set("testDate")(e.target.value) })))),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 2, label: "Verhalten im Team" }),
+            React.createElement(DPField, { label: "Wir nehmen dich auf dem Spielfeld wie folgt wahr", value: form.perceptionField, onChange: set("perceptionField"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Wir haben die Wahrnehmung, dass du dich wie folgt auf dem Feld wahrnimmst", value: form.perceptionSelfAwareness, onChange: set("perceptionSelfAwareness"), readOnly: readOnly })),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 3, label: "H\u00E4ufige Situationen & NOCH nicht h\u00E4ufige Situationen" }),
+            React.createElement(DPSituationPair, { label: "1", offValue: form.off1, offVideo: form.off1Video, defValue: form.def1, defVideo: form.def1Video, readOnly: readOnly, onChange: (side, kind, v) => setForm((f) => ({ ...f, [`${side === "off" ? "off1" : "def1"}${kind === "video" ? "Video" : ""}`]: v })) }),
+            React.createElement(DPSituationPair, { label: "2", offValue: form.off2, offVideo: form.off2Video, defValue: form.def2, defVideo: form.def2Video, readOnly: readOnly, onChange: (side, kind, v) => setForm((f) => ({ ...f, [`${side === "off" ? "off2" : "def2"}${kind === "video" ? "Video" : ""}`]: v })) }),
+            React.createElement(DPField, { label: "Was sind die 1-2 F\u00E4higkeiten, die sein Spiel \u00FCberragend machen w\u00FCrden?", value: form.topSkills, onChange: set("topSkills"), readOnly: readOnly })),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 4, label: "Interventionen & Teaching Points (nur Trainer)" }),
+            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                React.createElement("div", null,
+                    React.createElement("p", { className: "text-xs font-semibold text-slate-500 mb-1.5" }, "Interventionen im KGT"),
+                    form.interventionsKGT.map((v, i) => (readOnly
+                        ? React.createElement("p", { key: i, className: "text-xs text-slate-800 bg-stone-50 rounded-lg p-2 mb-1" }, v || "–")
+                        : React.createElement("input", { key: i, className: inputClass + " text-xs mb-1.5", value: v, onChange: (e) => setListItem("interventionsKGT", i, e.target.value), placeholder: `${i + 1}.` })))),
+                React.createElement("div", null,
+                    React.createElement("p", { className: "text-xs font-semibold text-slate-500 mb-1.5" }, "Teaching Points im TT"),
+                    form.teachingPointsTT.map((v, i) => (readOnly
+                        ? React.createElement("p", { key: i, className: "text-xs text-slate-800 bg-stone-50 rounded-lg p-2 mb-1" }, v || "–")
+                        : React.createElement("input", { key: i, className: inputClass + " text-xs mb-1.5", value: v, onChange: (e) => setListItem("teachingPointsTT", i, e.target.value), placeholder: `${i + 1}.` }))))),
+            React.createElement(Field, { label: "N\u00E4chster Check-In" }, readOnly ? React.createElement("p", { className: "text-sm text-slate-800 mt-1" }, form.nextCheckIn ? fmtDate(form.nextCheckIn) : "–") : React.createElement("input", { type: "date", className: inputClass + " mt-1", value: form.nextCheckIn, onChange: (e) => set("nextCheckIn")(e.target.value) }))),
+        !readOnly && (React.createElement("div", { className: "flex gap-2 sticky bottom-0 bg-white pt-3 border-t border-stone-100" },
+            React.createElement("button", { onClick: () => onSave(form), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold" }, "Speichern (Entwurf)"),
+            React.createElement("button", { onClick: () => { onSave(form); onRelease(); }, className: "flex-1 bg-[#eb1e23] hover:bg-[#be2228] text-white rounded-lg py-2.5 text-sm font-semibold" }, "Speichern & Freigeben")))));
+}
+function DevelopmentPlanPanel({ player, isTrainer, cycles, onCreateCycle, onSavePlayer, onReleasePlayer, onSaveTrainer, onReleaseTrainer, onSaveCombined }) {
+    const [openCycleId, setOpenCycleId] = useState(null);
+    const [view, setView] = useState(null); // "player" | "trainer" | "combined"
+    const sorted = sortByDateDesc(cycles);
+    const openCycle = sorted.find((c) => c.id === openCycleId);
+    if (openCycle && view) {
+        const playerDoc = openCycle.player || {};
+        const trainerDoc = openCycle.trainer || {};
+        const combinedDoc = openCycle.combined || {};
+        const bothReleased = playerDoc.released && trainerDoc.released;
+        return (React.createElement("div", null,
+            React.createElement("button", { onClick: () => setView(null), className: "flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 mb-3" },
+                React.createElement(IconArrowLeft, { size: 13 }),
+                " Zur\u00FCck zur \u00DCbersicht"),
+            view === "player" && (React.createElement(DevPlanPlayerForm, { data: playerDoc, readOnly: isTrainer ? true : !!playerDoc.released && false, onSave: (vals) => onSavePlayer(openCycle.id, vals), onRelease: () => onReleasePlayer(openCycle.id) })),
+            view === "trainer" && (React.createElement(DevPlanTrainerForm, { data: trainerDoc, readOnly: !isTrainer, onSave: (vals) => onSaveTrainer(openCycle.id, vals), onRelease: () => onReleaseTrainer(openCycle.id) })),
+            view === "combined" && (React.createElement(DevPlanCombinedForm, { data: combinedDoc, readOnly: !isTrainer, onSave: (vals) => onSaveCombined(openCycle.id, vals) }))));
+    }
+    if (openCycle) {
+        const playerDoc = openCycle.player || {};
+        const trainerDoc = openCycle.trainer || {};
+        const bothReleased = playerDoc.released && trainerDoc.released;
+        return (React.createElement("div", null,
+            React.createElement("button", { onClick: () => setOpenCycleId(null), className: "flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 mb-3" },
+                React.createElement(IconArrowLeft, { size: 13 }),
+                " Zur\u00FCck zur \u00DCbersicht"),
+            React.createElement("p", { className: "text-sm font-semibold text-slate-800 mb-3" }, fmtDate(openCycle.date)),
+            React.createElement("div", { className: "grid grid-cols-1 md:grid-cols-3 gap-3" },
+                React.createElement("button", { onClick: () => setView("player"), className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 text-left hover:shadow-md transition" },
+                    React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, "Spieler-Bogen"),
+                    React.createElement("p", { className: `text-xs mt-1 ${playerDoc.released ? "text-emerald-600" : "text-slate-400"}` }, playerDoc.released ? "Freigegeben" : "Entwurf")),
+                (isTrainer || trainerDoc?.released) && (React.createElement("button", { onClick: () => setView("trainer"), className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 text-left hover:shadow-md transition" },
+                    React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, "Trainer-Bogen"),
+                    React.createElement("p", { className: `text-xs mt-1 ${trainerDoc.released ? "text-emerald-600" : "text-slate-400"}` }, trainerDoc.released ? "Freigegeben" : "Entwurf"))),
+                (isTrainer || bothReleased) && (React.createElement("button", { onClick: () => setView("combined"), className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 text-left hover:shadow-md transition" },
+                    React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, "Zusammengefasst"),
+                    React.createElement("p", { className: "text-xs mt-1 text-slate-400" }, bothReleased ? "Bereit fürs Meeting" : "Beide Bögen erst freigeben"))))));
+    }
+    return (React.createElement("div", null,
+        isTrainer && (React.createElement("div", { className: "flex justify-end mb-3" },
+            React.createElement("button", { onClick: onCreateCycle, className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
+                React.createElement(IconPlus, { size: 15 }),
+                " Neuer Development-Plan"))),
+        sorted.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch kein Development Plan angelegt.")) : (React.createElement("div", { className: "space-y-2" }, sorted.map((c) => {
+            const pRel = c.player?.released;
+            const tRel = c.trainer?.released;
+            return (React.createElement("button", { key: c.id, onClick: () => setOpenCycleId(c.id), className: "w-full flex items-center justify-between bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3.5 text-left hover:shadow-md transition" },
+                React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, fmtDate(c.date)),
+                React.createElement("span", { className: "flex items-center gap-1.5 text-xs" },
+                    React.createElement("span", { className: `px-2 py-0.5 rounded-full ${pRel ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-slate-500"}` },
+                        "Spieler ",
+                        pRel ? "✓" : "…"),
+                    React.createElement("span", { className: `px-2 py-0.5 rounded-full ${tRel ? "bg-emerald-50 text-emerald-700" : "bg-stone-100 text-slate-500"}` },
+                        "Trainer ",
+                        tRel ? "✓" : "…"))));
+        })))));
+}
+function DevPlanCombinedForm({ data, onSave, readOnly }) {
+    const [form, setForm] = useState(() => ({
+        longRangeGoals: "", nextSeasonGoals: "", school: "", injuryHistory: "", athleticGoals: "",
+        athleticTrainerComment: "", testValues: "", testDate: "",
+        selfPerceptionField: "", teamPerceptionField: "",
+        off1: "", off1Video: "", off2: "", off2Video: "", def1: "", def1Video: "", def2: "", def2Video: "",
+        topSkills: "", nextCheckIn: "",
+        ...data,
+    }));
+    const set = (k) => (v) => setForm((f) => ({ ...f, [k]: v }));
+    return (React.createElement("div", { className: "space-y-5" },
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 1, label: "Selbstbild & Ziele" }),
+            React.createElement(DPField, { label: "Long Range Goals", value: form.longRangeGoals, onChange: set("longRangeGoals"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Next Season Goals", value: form.nextSeasonGoals, onChange: set("nextSeasonGoals"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Schule", value: form.school, onChange: set("school"), readOnly: readOnly })),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 2, label: "K\u00F6rper" }),
+            React.createElement(DPField, { label: "Verletzungshistorie", value: form.injuryHistory, onChange: set("injuryHistory"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Athletische Ziele", value: form.athleticGoals, onChange: set("athleticGoals"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "Kommentar Athletiktrainer", value: form.athleticTrainerComment, onChange: set("athleticTrainerComment"), readOnly: readOnly }),
+            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                React.createElement(DPField, { label: "Werte nach Athletiktestung", value: form.testValues, onChange: set("testValues"), readOnly: readOnly }),
+                React.createElement(Field, { label: "Datum der Testung" }, readOnly ? React.createElement("p", { className: "text-sm text-slate-800" }, form.testDate ? fmtDate(form.testDate) : "–") : React.createElement("input", { type: "date", className: inputClass, value: form.testDate, onChange: (e) => set("testDate")(e.target.value) })))),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 3, label: "Verhalten im Team" }),
+            React.createElement(DPField, { label: "So nimmt der Spieler sich selbst auf dem Feld wahr", value: form.selfPerceptionField, onChange: set("selfPerceptionField"), readOnly: readOnly }),
+            React.createElement(DPField, { label: "So nehmen wir als Trainerteam ihn auf dem Feld wahr", value: form.teamPerceptionField, onChange: set("teamPerceptionField"), readOnly: readOnly })),
+        React.createElement("div", null,
+            React.createElement(DevPlanThemeHeader, { n: 4, label: "H\u00E4ufige Situationen & NOCH nicht h\u00E4ufige Situationen" }),
+            React.createElement(DPSituationPair, { label: "1", offValue: form.off1, offVideo: form.off1Video, defValue: form.def1, defVideo: form.def1Video, readOnly: readOnly, onChange: (side, kind, v) => setForm((f) => ({ ...f, [`${side === "off" ? "off1" : "def1"}${kind === "video" ? "Video" : ""}`]: v })) }),
+            React.createElement(DPSituationPair, { label: "2", offValue: form.off2, offVideo: form.off2Video, defValue: form.def2, defVideo: form.def2Video, readOnly: readOnly, onChange: (side, kind, v) => setForm((f) => ({ ...f, [`${side === "off" ? "off2" : "def2"}${kind === "video" ? "Video" : ""}`]: v })) }),
+            React.createElement(DPField, { label: "Was sind die 1-2 F\u00E4higkeiten, die dein Spiel \u00FCberragend machen w\u00FCrden?", value: form.topSkills, onChange: set("topSkills"), readOnly: readOnly })),
+        React.createElement(Field, { label: "N\u00E4chster Check-In" }, readOnly ? React.createElement("p", { className: "text-sm text-slate-800 mt-1" }, form.nextCheckIn ? fmtDate(form.nextCheckIn) : "–") : React.createElement("input", { type: "date", className: inputClass + " mt-1", value: form.nextCheckIn, onChange: (e) => set("nextCheckIn")(e.target.value) })),
+        !readOnly && (React.createElement("div", { className: "sticky bottom-0 bg-white pt-3 border-t border-stone-100" },
+            React.createElement("button", { onClick: () => onSave(form), className: "w-full bg-[#eb1e23] hover:bg-[#be2228] text-white rounded-lg py-2.5 text-sm font-semibold" }, "Zusammengefasste Version speichern")))));
+}
+
 function TeamNoteForm({ teams, players, defaultTeamId, onSubmit, onClose }) {
     const [teamId, setTeamId] = useState(defaultTeamId || "");
     const [date, setDate] = useState(today());
@@ -2082,8 +2341,9 @@ const TABS = [
     { key: "anwesenheit", label: "Anwesenheit", icon: IconCalendar },
     { key: "video", label: "Videos", icon: IconVideo },
     { key: "notiz", label: "Notizen", icon: IconNote },
+    { key: "entwicklung", label: "Development Plan", icon: IconClipboard },
 ];
-const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "video", "notiz"];
+const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "video", "notiz", "entwicklung"];
 function SpielerAkte() {
     const [loading, setLoading] = useState(true);
     const [saveError, setSaveError] = useState(false);
@@ -2127,6 +2387,7 @@ function SpielerAkte() {
     const [privateData, setPrivateData] = useState({}); // { [playerId]: { notes, tests, attendance } }, nur für Trainer geladen
     const [calendarEvents, setCalendarEvents] = useState([]);
     const [teamNotes, setTeamNotes] = useState([]);
+    const [rotationPlans, setRotationPlans] = useState([]);
     const [loginEmail, setLoginEmail] = useState("");
     const [loginPassword, setLoginPassword] = useState("");
     const [loginError, setLoginError] = useState("");
@@ -2199,6 +2460,9 @@ function SpielerAkte() {
                     const tnSnap = await db.collection("teamNotes").get();
                     if (!cancelled)
                         setTeamNotes(tnSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+                    const rpSnap = await db.collection("rotationPlans").get();
+                    if (!cancelled)
+                        setRotationPlans(rpSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
                 }
                 else if (account.role === "player" && account.playerId) {
                     const pSnap = await db.collection("players").doc(account.playerId).get();
@@ -2391,6 +2655,74 @@ function SpielerAkte() {
         setTeamNotes((prev) => prev.filter((n) => n.id !== id));
         await db.collection("teamNotes").doc(id).delete();
     }
+    async function addRotationPlan(plan) {
+        const ref = await db.collection("rotationPlans").add(plan);
+        setRotationPlans((prev) => [...prev, { id: ref.id, ...plan }]);
+    }
+    async function deleteRotationPlan(id) {
+        setRotationPlans((prev) => prev.filter((p) => p.id !== id));
+        await db.collection("rotationPlans").doc(id).delete();
+    }
+
+    const [devPlanCycles, setDevPlanCycles] = useState([]);
+    const [devPlanLoading, setDevPlanLoading] = useState(false);
+    useEffect(() => {
+        if (activeTab !== "entwicklung" || !selectedPlayer) return;
+        let cancelled = false;
+        async function loadDevPlans() {
+            setDevPlanLoading(true);
+            try {
+                const [pSnap, tSnap, cSnap] = await Promise.all([
+                    db.collection("devPlanPlayer").where("playerId", "==", selectedPlayer.id).get(),
+                    db.collection("devPlanTrainer").where("playerId", "==", selectedPlayer.id).get(),
+                    db.collection("devPlanCombined").where("playerId", "==", selectedPlayer.id).get(),
+                ]);
+                const byId = {};
+                pSnap.docs.forEach((d) => { byId[d.id] = byId[d.id] || { id: d.id }; byId[d.id].player = d.data(); byId[d.id].date = d.data().date; });
+                tSnap.docs.forEach((d) => { byId[d.id] = byId[d.id] || { id: d.id }; byId[d.id].trainer = d.data(); byId[d.id].date = byId[d.id].date || d.data().date; });
+                cSnap.docs.forEach((d) => { byId[d.id] = byId[d.id] || { id: d.id }; byId[d.id].combined = d.data(); byId[d.id].date = byId[d.id].date || d.data().date; });
+                if (!cancelled) setDevPlanCycles(Object.values(byId));
+            } catch (e) {
+                console.error("devPlan load error", e);
+            } finally {
+                if (!cancelled) setDevPlanLoading(false);
+            }
+        }
+        loadDevPlans();
+        return () => { cancelled = true; };
+    }, [activeTab, selectedPlayer && selectedPlayer.id]);
+
+    async function createDevPlanCycle() {
+        const id = uid();
+        const date = today();
+        const base = { playerId: selectedPlayer.id, date, released: false };
+        await Promise.all([
+            db.collection("devPlanPlayer").doc(id).set(base),
+            db.collection("devPlanTrainer").doc(id).set(base),
+        ]);
+        setDevPlanCycles((prev) => [...prev, { id, date, player: { ...base }, trainer: { ...base } }]);
+    }
+    async function saveDevPlanPlayer(id, vals) {
+        await db.collection("devPlanPlayer").doc(id).set({ ...vals, playerId: selectedPlayer.id }, { merge: true });
+        setDevPlanCycles((prev) => prev.map((c) => (c.id === id ? { ...c, player: { ...c.player, ...vals } } : c)));
+    }
+    async function releaseDevPlanPlayer(id) {
+        await db.collection("devPlanPlayer").doc(id).set({ released: true }, { merge: true });
+        setDevPlanCycles((prev) => prev.map((c) => (c.id === id ? { ...c, player: { ...c.player, released: true } } : c)));
+    }
+    async function saveDevPlanTrainer(id, vals) {
+        await db.collection("devPlanTrainer").doc(id).set({ ...vals, playerId: selectedPlayer.id }, { merge: true });
+        setDevPlanCycles((prev) => prev.map((c) => (c.id === id ? { ...c, trainer: { ...c.trainer, ...vals } } : c)));
+    }
+    async function releaseDevPlanTrainer(id) {
+        await db.collection("devPlanTrainer").doc(id).set({ released: true }, { merge: true });
+        setDevPlanCycles((prev) => prev.map((c) => (c.id === id ? { ...c, trainer: { ...c.trainer, released: true } } : c)));
+    }
+    async function saveDevPlanCombined(id, vals) {
+        await db.collection("devPlanCombined").doc(id).set({ ...vals, playerId: selectedPlayer.id }, { merge: true });
+        setDevPlanCycles((prev) => prev.map((c) => (c.id === id ? { ...c, combined: { ...c.combined, ...vals } } : c)));
+    }
+
     if (firebaseUser === undefined || (firebaseUser && loading)) {
         return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50" },
             React.createElement(IconLoader, { className: "animate-spin text-slate-400", size: 28 })));
@@ -2857,8 +3189,33 @@ function SpielerAkte() {
                                     " Datei")),
                                 React.createElement("button", { onClick: () => deleteTeamNote(n.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "L\u00F6schen" },
                                     React.createElement(IconTrash, { size: 14 })))))))),
+                        React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 mt-4" },
+                            React.createElement("div", { className: "flex items-center justify-between mb-2" },
+                                React.createElement(SectionLabel, null, "Rotationspl\u00E4ne"),
+                                React.createElement("button", { onClick: () => setModal("rotationPlan"), className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" },
+                                    React.createElement(IconPlus, { size: 13 }),
+                                    " Rotationsplan")),
+                            (() => {
+                                const plansForTeam = sortByDateDesc(rotationPlans.filter((p) => p.teamId === selectedTeamId));
+                                if (plansForTeam.length === 0)
+                                    return React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Rotationspl\u00E4ne.");
+                                return (React.createElement("div", { className: "space-y-2" }, plansForTeam.map((p) => (React.createElement("div", { key: p.id, className: "bg-stone-50 rounded-xl p-3" },
+                                    React.createElement("div", { className: "flex items-center justify-between gap-2 mb-2" },
+                                        React.createElement("span", { className: "text-sm font-semibold text-slate-800" },
+                                            fmtDate(p.date),
+                                            p.opponent ? ` vs. ${p.opponent}` : ""),
+                                        React.createElement("button", { onClick: () => deleteRotationPlan(p.id), className: "text-slate-300 hover:text-red-500", "aria-label": "L\u00F6schen" },
+                                            React.createElement(IconTrash, { size: 14 }))),
+                                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-2" }, p.quarters.map((q, qIdx) => (React.createElement("div", { key: qIdx, className: "bg-white rounded-lg p-2" },
+                                        React.createElement("p", { className: "text-[10px] font-semibold text-slate-400 uppercase mb-1" },
+                                            "Viertel ",
+                                            qIdx + 1),
+                                        q.map((pid) => (React.createElement("p", { key: pid, className: "text-xs text-slate-700 truncate" }, teamPlayers.find((tp) => tp.id === pid)?.name || "?"))))))))))));
+                            })()),
                         modal === "teamNote" && (React.createElement(Modal, { title: "Team-Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
-                            React.createElement(TeamNoteForm, { teams: teams, players: players, defaultTeamId: selectedTeamId, onSubmit: addTeamNote, onClose: () => setModal(null) })))));
+                            React.createElement(TeamNoteForm, { teams: teams, players: players, defaultTeamId: selectedTeamId, onSubmit: addTeamNote, onClose: () => setModal(null) }))),
+                        modal === "rotationPlan" && (React.createElement(Modal, { title: "Rotationsplan erstellen", onClose: () => setModal(null), wide: true },
+                            React.createElement(RotationPlanForm, { team: team, teamPlayers: teamPlayers, onSubmit: addRotationPlan, onClose: () => setModal(null) })))));
                 })(),
                 !selectedPlayer && selectedTeamId !== "all" && !showTeamCalendar && (React.createElement("div", null,
                     React.createElement("div", { className: "flex justify-end mb-3" },
@@ -3132,6 +3489,7 @@ function SpielerAkte() {
                                 React.createElement(IconPaperclip, { size: 13 }),
                                 " ",
                                 n.attachmentName || "Anhang öffnen")))))))))))))),
+        activeTab === "entwicklung" && (React.createElement(DevelopmentPlanPanel, { player: selectedPlayer, isTrainer: isTrainer, cycles: devPlanCycles, onCreateCycle: createDevPlanCycle, onSavePlayer: saveDevPlanPlayer, onReleasePlayer: releaseDevPlanPlayer, onSaveTrainer: saveDevPlanTrainer, onReleaseTrainer: releaseDevPlanTrainer, onSaveCombined: saveDevPlanCombined })),
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
         modal === "player" && (React.createElement(Modal, { title: "Spieler anlegen", onClose: () => setModal(null) },
