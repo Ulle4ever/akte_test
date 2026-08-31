@@ -1064,6 +1064,7 @@ function RotationPlanForm({ team, teamPlayers, onSubmit, onClose }) {
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Rotationsplan speichern")));
 }
 "use strict";
+"use strict";
 function DevPlanThemeHeader({ n, label }) {
     return (React.createElement("div", { className: "flex items-center gap-2 mb-2" },
         React.createElement("span", { className: "w-5 h-5 rounded-full bg-[#eb1e23] text-white text-[10px] font-bold flex items-center justify-center shrink-0" }, n),
@@ -1180,7 +1181,7 @@ function DevelopmentPlanPanel({ player, isTrainer, cycles, onCreateCycle, onSave
         const trainerDoc = openCycle.trainer || {};
         const combinedDoc = openCycle.combined || {};
         const bothReleased = playerDoc.released && trainerDoc.released;
-        return (React.createElement("div", null,
+        return (React.createElement("div", { className: "p-4 md:p-6 max-w-3xl mx-auto" },
             React.createElement("button", { onClick: () => setView(null), className: "flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 mb-3" },
                 React.createElement(IconArrowLeft, { size: 13 }),
                 " Zur\u00FCck zur \u00DCbersicht"),
@@ -1192,7 +1193,7 @@ function DevelopmentPlanPanel({ player, isTrainer, cycles, onCreateCycle, onSave
         const playerDoc = openCycle.player || {};
         const trainerDoc = openCycle.trainer || {};
         const bothReleased = playerDoc.released && trainerDoc.released;
-        return (React.createElement("div", null,
+        return (React.createElement("div", { className: "p-4 md:p-6 max-w-3xl mx-auto" },
             React.createElement("button", { onClick: () => setOpenCycleId(null), className: "flex items-center gap-1.5 text-xs font-medium text-slate-500 hover:text-slate-800 mb-3" },
                 React.createElement(IconArrowLeft, { size: 13 }),
                 " Zur\u00FCck zur \u00DCbersicht"),
@@ -1208,7 +1209,7 @@ function DevelopmentPlanPanel({ player, isTrainer, cycles, onCreateCycle, onSave
                     React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, "Zusammengefasst"),
                     React.createElement("p", { className: "text-xs mt-1 text-slate-400" }, bothReleased ? "Bereit fürs Meeting" : "Beide Bögen erst freigeben"))))));
     }
-    return (React.createElement("div", null,
+    return (React.createElement("div", { className: "p-4 md:p-6 max-w-3xl mx-auto" },
         isTrainer && (React.createElement("div", { className: "flex justify-end mb-3" },
             React.createElement("button", { onClick: onCreateCycle, className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
                 React.createElement(IconPlus, { size: 15 }),
@@ -1264,7 +1265,6 @@ function DevPlanCombinedForm({ data, onSave, readOnly }) {
         !readOnly && (React.createElement("div", { className: "sticky bottom-0 bg-white pt-3 border-t border-stone-100" },
             React.createElement("button", { onClick: () => onSave(form), className: "w-full bg-[#eb1e23] hover:bg-[#be2228] text-white rounded-lg py-2.5 text-sm font-semibold" }, "Zusammengefasste Version speichern")))));
 }
-
 function TeamNoteForm({ teams, players, defaultTeamId, onSubmit, onClose }) {
     const [teamId, setTeamId] = useState(defaultTeamId || "");
     const [date, setDate] = useState(today());
