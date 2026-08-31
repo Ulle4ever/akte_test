@@ -2667,15 +2667,16 @@ function SpielerAkte() {
     const [devPlanCycles, setDevPlanCycles] = useState([]);
     const [devPlanLoading, setDevPlanLoading] = useState(false);
     useEffect(() => {
-        if (activeTab !== "entwicklung" || !selectedPlayer) return;
+        const activePlayer = players.find((p) => p.id === selectedPlayerId) || null;
+        if (activeTab !== "entwicklung" || !activePlayer) return;
         let cancelled = false;
         async function loadDevPlans() {
             setDevPlanLoading(true);
             try {
                 const [pSnap, tSnap, cSnap] = await Promise.all([
-                    db.collection("devPlanPlayer").where("playerId", "==", selectedPlayer.id).get(),
-                    db.collection("devPlanTrainer").where("playerId", "==", selectedPlayer.id).get(),
-                    db.collection("devPlanCombined").where("playerId", "==", selectedPlayer.id).get(),
+                    db.collection("devPlanPlayer").where("playerId", "==", activePlayer.id).get(),
+                    db.collection("devPlanTrainer").where("playerId", "==", activePlayer.id).get(),
+                    db.collection("devPlanCombined").where("playerId", "==", activePlayer.id).get(),
                 ]);
                 const byId = {};
                 pSnap.docs.forEach((d) => { byId[d.id] = byId[d.id] || { id: d.id }; byId[d.id].player = d.data(); byId[d.id].date = d.data().date; });
@@ -2690,7 +2691,7 @@ function SpielerAkte() {
         }
         loadDevPlans();
         return () => { cancelled = true; };
-    }, [activeTab, selectedPlayer && selectedPlayer.id]);
+    }, [activeTab, selectedPlayerId, players]);
 
     async function createDevPlanCycle() {
         const id = uid();
