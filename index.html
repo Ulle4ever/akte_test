@@ -30,6 +30,53 @@
   }
   html, body { overflow-x: hidden; max-width: 100vw; }
   body { font-family: "Montserrat", ui-sans-serif, system-ui, sans-serif; }
+
+  /* ============================================================
+     GLOBALES POLISH
+     ============================================================ */
+  * { -webkit-tap-highlight-color: transparent; }
+  html { scroll-behavior: smooth; }
+  body { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+  ::selection { background: rgba(235, 30, 35, 0.18); }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(15, 23, 42, 0.16); border-radius: 999px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(15, 23, 42, 0.3); }
+
+  @keyframes rsk-fade-in {
+    from { opacity: 0; transform: translateY(6px); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes rsk-modal-in {
+    from { opacity: 0; transform: scale(.97) translateY(10px); }
+    to { opacity: 1; transform: scale(1) translateY(0); }
+  }
+  @keyframes rsk-sheet-in {
+    from { opacity: 0; transform: translateY(100%); }
+    to { opacity: 1; transform: translateY(0); }
+  }
+  @keyframes rsk-backdrop-in {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+  @keyframes rsk-pop-in {
+    from { opacity: 0; transform: scale(.9); }
+    to { opacity: 1; transform: scale(1); }
+  }
+  .rsk-fade-in { animation: rsk-fade-in .28s ease-out both; }
+  .rsk-modal-in { animation: rsk-modal-in .22s cubic-bezier(.16,1,.3,1) both; }
+  .rsk-sheet-in { animation: rsk-sheet-in .28s cubic-bezier(.16,1,.3,1) both; }
+  .rsk-backdrop-in { animation: rsk-backdrop-in .18s ease-out both; }
+  .rsk-pop-in { animation: rsk-pop-in .18s cubic-bezier(.34,1.56,.64,1) both; }
+  @media (min-width: 640px) {
+    .rsk-sheet-in { animation: rsk-modal-in .22s cubic-bezier(.16,1,.3,1) both; }
+  }
+
+  .pt-safe { padding-top: env(safe-area-inset-top, 0px); }
+  .pb-safe { padding-bottom: env(safe-area-inset-bottom, 0px); }
+  .pl-safe { padding-left: env(safe-area-inset-left, 0px); }
+
+  button, a, [role="button"] { -webkit-tap-highlight-color: transparent; }
 </style>
 <script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
 <script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
@@ -96,6 +143,10 @@ function Icon({ children, size = 16, className = "" }) {
 const IconPlus = (p) => React.createElement(Icon, { ...p },
     React.createElement("line", { x1: "12", y1: "5", x2: "12", y2: "19" }),
     React.createElement("line", { x1: "5", y1: "12", x2: "19", y2: "12" }));
+const IconMenu = (p) => React.createElement(Icon, { ...p },
+    React.createElement("line", { x1: "3", y1: "6", x2: "21", y2: "6" }),
+    React.createElement("line", { x1: "3", y1: "12", x2: "21", y2: "12" }),
+    React.createElement("line", { x1: "3", y1: "18", x2: "21", y2: "18" }));
 const IconSearch = (p) => React.createElement(Icon, { ...p },
     React.createElement("circle", { cx: "11", cy: "11", r: "7" }),
     React.createElement("line", { x1: "21", y1: "21", x2: "16.65", y2: "16.65" }));
@@ -619,14 +670,20 @@ function parseAdvancedStatsCsv(text) {
     }
     return { rows, error: rows.length === 0 ? "Keine Spielerzeilen gefunden." : null };
 }
-const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#eb1e23] focus:border-[#eb1e23]";
+const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2.5 sm:py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#eb1e23] focus:border-[#eb1e23] transition";
 const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
+const shadowClass = "shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)]";
+const cardClass = `bg-white rounded-2xl ${shadowClass}`;
+const btnPrimaryClass = `inline-flex items-center justify-center gap-1.5 bg-[#eb1e23] hover:bg-[#be2228] active:scale-[0.97] disabled:bg-stone-200 disabled:text-slate-400 disabled:active:scale-100 text-white rounded-xl font-semibold transition-all ${shadowClass}`;
+const btnSecondaryClass = "inline-flex items-center justify-center gap-1.5 bg-stone-100 hover:bg-stone-200 active:scale-[0.97] text-slate-700 rounded-xl font-semibold transition-all";
 function Modal({ title, onClose, children, wide }) {
-    return (React.createElement("div", { className: "fixed inset-0 bg-slate-900/50 flex items-center justify-center z-50 p-4", onClick: onClose },
-        React.createElement("div", { className: `bg-white rounded-xl shadow-xl w-full ${wide ? "max-w-xl" : "max-w-md"} max-h-[90vh] overflow-y-auto`, onClick: (e) => e.stopPropagation() },
-            React.createElement("div", { className: "flex items-center justify-between px-5 py-4 border-b border-stone-200" },
+    return (React.createElement("div", { className: "fixed inset-0 bg-slate-900/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center z-50 sm:p-4 rsk-backdrop-in", onClick: onClose },
+        React.createElement("div", { className: `bg-white rounded-t-3xl sm:rounded-2xl shadow-2xl w-full ${wide ? "sm:max-w-xl" : "sm:max-w-md"} max-h-[92vh] sm:max-h-[90vh] overflow-y-auto rsk-sheet-in pb-safe`, onClick: (e) => e.stopPropagation() },
+            React.createElement("div", { className: "sm:hidden flex justify-center pt-2.5 pb-1 sticky top-0 bg-white" },
+                React.createElement("span", { className: "h-1 w-10 rounded-full bg-stone-300" })),
+            React.createElement("div", { className: "flex items-center justify-between px-5 py-3.5 sm:py-4 border-b border-stone-200 sticky top-0 bg-white/95 backdrop-blur z-10" },
                 React.createElement("h3", { className: "text-base font-bold text-slate-900" }, title),
-                React.createElement("button", { onClick: onClose, className: "text-slate-400 hover:text-slate-600", "aria-label": "Schlie\u00DFen" },
+                React.createElement("button", { onClick: onClose, className: "text-slate-400 hover:text-slate-600 hover:bg-stone-100 rounded-full p-1.5 -mr-1.5 transition", "aria-label": "Schlie\u00DFen" },
                     React.createElement(IconX, { size: 18 }))),
             React.createElement("div", { className: "p-5" }, children))));
 }
@@ -2418,6 +2475,7 @@ function SpielerAkte() {
     const [expandedCats, setExpandedCats] = useState(() => new Set());
     const [expandedVideos, setExpandedVideos] = useState(() => new Set());
     const [openHeaderMenu, setOpenHeaderMenu] = useState(null);
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [editingStat, setEditingStat] = useState(null);
     function toggleVideo(id) {
         setExpandedVideos((prev) => {
@@ -2800,32 +2858,43 @@ function SpielerAkte() {
     }
 
     if (firebaseUser === undefined || (firebaseUser && loading)) {
-        return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50" },
-            React.createElement(IconLoader, { className: "animate-spin text-slate-400", size: 28 })));
+        return (React.createElement("div", { className: "min-h-[100dvh] flex flex-col items-center justify-center gap-3 bg-stone-50 rsk-fade-in" },
+            React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars Koeln", className: "h-12 w-12 object-contain opacity-90" }),
+            React.createElement(IconLoader, { className: "animate-spin text-[#eb1e23]", size: 22 })));
     }
     if (loadError) {
-        return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50 p-6" },
-            React.createElement("div", { className: "max-w-md text-center" },
+        return (React.createElement("div", { className: "min-h-[100dvh] flex items-center justify-center bg-stone-50 p-6" },
+            React.createElement("div", { className: `max-w-md w-full text-center ${cardClass} p-6 rsk-fade-in` },
                 React.createElement(IconAlert, { size: 26, className: "mx-auto text-red-500 mb-2" }),
                 React.createElement("p", { className: "text-sm font-semibold text-slate-900 mb-1" }, "Verbindung zur Datenbank fehlgeschlagen"),
                 React.createElement("p", { className: "text-xs text-slate-500" }, loadError),
                 React.createElement("button", { onClick: handleLogout, className: "mt-4 text-xs text-slate-500 underline" }, "Abmelden und erneut versuchen"))));
     }
     if (!firebaseUser) {
-        return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex items-center justify-center p-6" },
-            React.createElement("div", { className: "w-full max-w-sm bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-6" },
+        return (React.createElement("div", { className: "min-h-[100dvh] bg-stone-50 relative overflow-hidden flex items-center justify-center p-6" },
+            React.createElement("div", { className: "pointer-events-none absolute -top-24 -right-24 w-72 h-72 rounded-full bg-[#eb1e23]/10 blur-3xl" }),
+            React.createElement("div", { className: "pointer-events-none absolute -bottom-28 -left-24 w-72 h-72 rounded-full bg-[#0a96d4]/10 blur-3xl" }),
+            React.createElement("div", { className: "relative w-full max-w-sm rsk-fade-in" },
+            React.createElement("div", { className: "flex flex-col items-center mb-6" },
+                React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars Koeln", className: "h-16 w-16 object-contain mb-3" }),
+                React.createElement("div", { className: "flex items-center gap-2" },
+                    React.createElement("span", { className: "h-[2px] w-5 bg-[#eb1e23]" }),
+                    React.createElement("h1", { className: "font-display text-lg tracking-wide text-slate-900" }, "SPIELER-AKTE"),
+                    React.createElement("span", { className: "h-[2px] w-5 bg-[#0a96d4]" }))),
+            React.createElement("div", { className: `${cardClass} p-6` },
                 React.createElement("div", { className: "flex items-center gap-2 mb-1" },
                     React.createElement(IconLock, { size: 18, className: "text-[#eb1e23]" }),
                     React.createElement("h2", { className: "text-base font-bold text-slate-900" }, "Anmelden")),
                 React.createElement("p", { className: "text-sm text-slate-500 mb-4" }, "Gib deinen pers\u00F6nlichen Code ein."),
                 React.createElement("form", { onSubmit: handleLogin, className: "space-y-3" },
-                    React.createElement("input", { className: inputClass + " tracking-wide", type: "text", placeholder: "Code", value: loginEmail, onChange: (e) => { setLoginEmail(e.target.value); setLoginError(""); }, autoFocus: true, autoCapitalize: "none", autoCorrect: "off" }),
-                    loginError && React.createElement("p", { className: "text-xs text-red-600" }, loginError),
-                    React.createElement("button", { type: "submit", disabled: loginBusy, className: "w-full bg-[#eb1e23] hover:bg-[#be2228] disabled:opacity-60 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, loginBusy ? "Wird geprüft…" : "Anmelden")))));
+                    React.createElement("input", { className: inputClass + " tracking-wide text-center text-base py-3", type: "text", placeholder: "Code", value: loginEmail, onChange: (e) => { setLoginEmail(e.target.value); setLoginError(""); }, autoFocus: true, autoCapitalize: "none", autoCorrect: "off" }),
+                    loginError && React.createElement("p", { className: "text-xs text-red-600 text-center rsk-fade-in" }, loginError),
+                    React.createElement("button", { type: "submit", disabled: loginBusy, className: btnPrimaryClass + " w-full py-3 text-sm" }, loginBusy && React.createElement(IconLoader, { size: 15 }), loginBusy ? "Wird geprüft…" : "Anmelden"))))));
     }
     if (!account || !meta) {
-        return (React.createElement("div", { className: "min-h-[400px] flex items-center justify-center bg-stone-50" },
-            React.createElement(IconLoader, { className: "animate-spin text-slate-400", size: 28 })));
+        return (React.createElement("div", { className: "min-h-[100dvh] flex flex-col items-center justify-center gap-3 bg-stone-50 rsk-fade-in" },
+            React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars Koeln", className: "h-12 w-12 object-contain opacity-90" }),
+            React.createElement(IconLoader, { className: "animate-spin text-[#eb1e23]", size: 22 })));
     }
     const isTrainer = account.role === "trainer";
     const teams = meta.teams;
@@ -2851,17 +2920,20 @@ function SpielerAkte() {
         setActiveTab("uebersicht");
         setConfirmDeletePlayer(false);
         setShowTeamCalendar(false);
+        setMobileSidebarOpen(false);
     }
     function goHome() {
         setSelectedPlayerId(null);
         setSelectedTeamId("all");
         setShowTeamCalendar(false);
         setConfirmDeletePlayer(false);
+        setMobileSidebarOpen(false);
     }
     function goToTeamCalendar(teamId) {
         setSelectedPlayerId(null);
         setSelectedTeamId(teamId);
         setShowTeamCalendar(true);
+        setMobileSidebarOpen(false);
     }
     function handleAddTeam(team) {
         const newTeam = { id: uid(), ...team };
@@ -3154,9 +3226,11 @@ function SpielerAkte() {
     function deleteTask(id) {
         persistMeta({ tasks: tasks.filter((t) => t.id !== id) });
     }
-    return (React.createElement("div", { className: "min-h-[600px] bg-stone-50 flex flex-col" },
-        React.createElement("header", { className: "bg-black text-white px-6 py-4 flex items-center justify-between flex-wrap gap-3 shadow-[0_2px_16px_rgba(0,0,0,0.25)] relative z-10" },
-            React.createElement("div", { className: "flex items-center gap-3" },
+    return (React.createElement("div", { className: "min-h-[100dvh] bg-stone-50 flex flex-col" },
+        React.createElement("header", { className: "bg-black text-white px-4 sm:px-6 py-3.5 sm:py-4 pt-safe flex items-center justify-between flex-wrap gap-3 shadow-[0_2px_16px_rgba(0,0,0,0.25)] sticky top-0 z-10" },
+            React.createElement("div", { className: "flex items-center gap-2 sm:gap-3" },
+                isTrainer && (React.createElement("button", { onClick: () => setMobileSidebarOpen(true), className: "md:hidden p-2 -ml-1 rounded-lg hover:bg-white/10 shrink-0", "aria-label": "Menü öffnen" },
+                    React.createElement(IconMenu, { size: 20 }))),
                 isTrainer ? (React.createElement("button", { onClick: goHome, className: "flex items-center gap-3 hover:opacity-80 transition text-left", title: "Zur Startseite" },
                     React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars K\u00F6ln", className: "h-11 w-11 object-contain shrink-0" }),
                     React.createElement("div", null,
@@ -3205,8 +3279,13 @@ function SpielerAkte() {
                 " Angemeldet als ",
                 account.label || (isTrainer ? "Trainer" : "Spieler-Zugang")),
             React.createElement("button", { onClick: handleLogout, className: "underline shrink-0" }, "Abmelden")),
-        React.createElement("div", { className: "flex flex-col md:flex-row flex-1" },
-            isTrainer && (React.createElement("aside", { className: "w-full md:w-80 border-b md:border-b-0 md:border-r border-stone-200 bg-white p-4 flex flex-col gap-3" },
+        React.createElement("div", { className: "flex flex-col md:flex-row flex-1 relative" },
+            isTrainer && mobileSidebarOpen && (React.createElement("div", { className: "fixed inset-0 bg-slate-900/50 backdrop-blur-[2px] z-30 md:hidden rsk-backdrop-in", onClick: () => setMobileSidebarOpen(false) })),
+            isTrainer && (React.createElement("aside", { className: `fixed md:relative inset-y-0 left-0 z-40 md:z-auto w-[85%] max-w-xs md:max-w-none md:w-80 border-b md:border-b-0 md:border-r border-stone-200 bg-white p-4 flex flex-col gap-3 transform md:transform-none transition-transform duration-300 ease-out ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"} overflow-y-auto pb-safe` },
+                React.createElement("div", { className: "flex items-center justify-between md:hidden -mt-1 mb-1" },
+                    React.createElement("span", { className: "text-sm font-bold text-slate-900" }, "Menü"),
+                    React.createElement("button", { onClick: () => setMobileSidebarOpen(false), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Schließen" },
+                        React.createElement(IconX, { size: 18 }))),
                 React.createElement("div", { className: "flex gap-2" },
                     React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); } },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
