@@ -308,12 +308,91 @@ const STATUS_STYLES = {
 };
 const VIDEO_TYPES = ["Spielszene", "Trainingsdrill", "Analyse", "Wurftechnik"];
 const RADAR_SKILLS = [
-    { id: "wurf", label: "Wurf" },
-    { id: "verteidigung", label: "Verteidigung" },
-    { id: "athletik", label: "Athletik" },
-    { id: "spielintelligenz", label: "Spielintelligenz" },
-    { id: "teamplay", label: "Teamplay" },
+    { id: "wurf", label: "Wurf", autoCapable: true, defaultMode: "auto" },
+    { id: "verteidigung", label: "Verteidigung", autoCapable: true, defaultMode: "manual" },
+    { id: "athletik", label: "Athletik", autoCapable: true, defaultMode: "auto" },
+    { id: "spielintelligenz", label: "Spielintelligenz", autoCapable: false, defaultMode: "manual" },
+    { id: "teamplay", label: "Teamplay", autoCapable: false, defaultMode: "manual" },
 ];
+// Welche Test-Richtung "besser" bedeutet, fürs automatische Athletik-Achse (nur Standard-Testarten,
+// eigene/umbenannte Testarten werden für die Automatik ignoriert).
+const TEST_DIRECTION = { sprint20: "lower", laneAgility: "lower", cmj: "higher", beepTest: "higher", bench1rm: "higher" };
+function normalizeMinMax(value, min, max) {
+    if (min === max)
+        return 5;
+    const t = (value - min) / (max - min);
+    return Math.round((1 + t * 9) * 10) / 10;
+}
+function computeAutoRadar(teamPlayers, statCategories, privateData, isTrainer) {
+    const hasField = (id) => statCategories.some((c) => c.fields.some((f) => f.id === id));
+    const shootingFieldIds = ["fg", "tp", "ft"].filter(hasField);
+    const hasSteals = hasField("steals");
+    const hasBlocks = hasField("blocks");
+    const wurfRaw = {}, defRaw = {}, athRawByType = {};
+    teamPlayers.forEach((p) => {
+        const stats = p.stats || [];
+        if (shootingFieldIds.length && stats.length) {
+            let pctSum = 0, pctCount = 0;
+            shootingFieldIds.forEach((fid) => {
+                const made = stats.reduce((s, e) => s + (Number(e[`${fid}_m`]) || 0), 0);
+                const att = stats.reduce((s, e) => s + (Number(e[`${fid}_a`]) || 0), 0);
+                if (att > 0) {
+                    pctSum += (made / att) * 100;
+                    pctCount++;
+                }
+            });
+            if (pctCount > 0)
+                wurfRaw[p.id] = pctSum / pctCount;
+        }
+        if ((hasSteals || hasBlocks) && stats.length) {
+            const stealsAvg = hasSteals ? stats.reduce((s, e) => s + (Number(e.steals) || 0), 0) / stats.length : 0;
+            const blocksAvg = hasBlocks ? stats.reduce((s, e) => s + (Number(e.blocks) || 0), 0) / stats.length : 0;
+            defRaw[p.id] = stealsAvg + blocksAvg;
+        }
+        if (isTrainer) {
+            const tests = (privateData[p.id]?.tests) || [];
+            const latestByType = {};
+            tests.forEach((t) => { if (!latestByType[t.testType] || t.date > latestByType[t.testType].date)
+                latestByType[t.testType] = t; });
+            Object.entries(latestByType).forEach(([typeId, t]) => {
+                if (!TEST_DIRECTION[typeId])
+                    return;
+                const val = Number(t.result);
+                if (isNaN(val))
+                    return;
+                athRawByType[typeId] = athRawByType[typeId] || {};
+                athRawByType[typeId][p.id] = val;
+            });
+        }
+    });
+    const wurfVals = Object.values(wurfRaw);
+    const wurfMin = Math.min(...wurfVals), wurfMax = Math.max(...wurfVals);
+    const defVals = Object.values(defRaw);
+    const defMin = Math.min(...defVals), defMax = Math.max(...defVals);
+    const athNormByPlayer = {};
+    Object.entries(athRawByType).forEach(([typeId, byPlayer]) => {
+        const vals = Object.values(byPlayer);
+        const min = Math.min(...vals), max = Math.max(...vals);
+        const invert = TEST_DIRECTION[typeId] === "lower";
+        Object.entries(byPlayer).forEach(([pid, val]) => {
+            let t = min === max ? 0.5 : (val - min) / (max - min);
+            if (invert)
+                t = 1 - t;
+            athNormByPlayer[pid] = athNormByPlayer[pid] || [];
+            athNormByPlayer[pid].push(t);
+        });
+    });
+    const result = {};
+    teamPlayers.forEach((p) => {
+        const athScores = athNormByPlayer[p.id];
+        result[p.id] = {
+            wurf: wurfRaw[p.id] !== undefined ? normalizeMinMax(wurfRaw[p.id], wurfMin, wurfMax) : null,
+            verteidigung: defRaw[p.id] !== undefined ? normalizeMinMax(defRaw[p.id], defMin, defMax) : null,
+            athletik: athScores && athScores.length ? Math.round((1 + (athScores.reduce((a, b) => a + b, 0) / athScores.length) * 9) * 10) / 10 : null,
+        };
+    });
+    return result;
+}
 const HANDEDNESS_LABELS = { rechts: "Rechts", links: "Links", beidhaendig: "Beidhändig" };
 const NOTE_CATEGORIES = [
     { value: "technisch", label: "Technisch" },
@@ -2487,11 +2566,27 @@ function RadarChart({ values, size }) {
         dots,
         labels);
 }
-function RadarEditor({ values, onChange }) {
-    return React.createElement("div", { className: "space-y-3" }, RADAR_SKILLS.map((skill) => React.createElement("div", { key: skill.id, className: "flex items-center gap-3" },
-        React.createElement("span", { className: "text-xs font-medium text-slate-600 w-28 shrink-0" }, skill.label),
-        React.createElement("input", { type: "range", min: 1, max: 10, value: values[skill.id] || 5, onChange: (e) => onChange(skill.id, Number(e.target.value)), className: "flex-1 accent-[#eb1e23]" }),
-        React.createElement("span", { className: "text-xs font-bold text-slate-900 w-5 text-right" }, values[skill.id] || 5))));
+function RadarEditor({ values, onChange, modes, onModeChange, autoValues }) {
+    const rows = RADAR_SKILLS.map((skill) => {
+        const mode = modes[skill.id];
+        const isAuto = skill.autoCapable && mode === "auto";
+        const autoVal = autoValues[skill.id];
+        const modeToggle = skill.autoCapable && React.createElement("div", { className: "flex gap-1 bg-stone-100 rounded-full p-0.5 shrink-0" },
+            React.createElement("button", { type: "button", onClick: () => onModeChange(skill.id, "auto"), className: `px-2 py-0.5 rounded-full text-[10px] font-semibold transition ${mode === "auto" ? "bg-white text-[#eb1e23] shadow-sm" : "text-slate-400"}` }, "Auto"),
+            React.createElement("button", { type: "button", onClick: () => onModeChange(skill.id, "manual"), className: `px-2 py-0.5 rounded-full text-[10px] font-semibold transition ${mode !== "auto" ? "bg-white text-slate-900 shadow-sm" : "text-slate-400"}` }, "Manuell"));
+        const control = isAuto
+            ? (autoVal !== null && autoVal !== undefined
+                ? React.createElement("span", { className: "flex-1 text-xs text-slate-500" }, "Automatisch berechnet: ", React.createElement("span", { className: "font-bold text-slate-900" }, autoVal), " / 10")
+                : React.createElement("span", { className: "flex-1 text-xs text-amber-600" }, "Noch zu wenig Daten – Fallback-Wert wird genutzt."))
+            : React.createElement(React.Fragment, null,
+                React.createElement("input", { type: "range", min: 1, max: 10, value: values[skill.id] || 5, onChange: (e) => onChange(skill.id, Number(e.target.value)), className: "flex-1 accent-[#eb1e23]" }),
+                React.createElement("span", { className: "text-xs font-bold text-slate-900 w-5 text-right" }, values[skill.id] || 5));
+        return React.createElement("div", { key: skill.id, className: "flex items-center gap-3" },
+            React.createElement("span", { className: "text-xs font-medium text-slate-600 w-28 shrink-0" }, skill.label),
+            modeToggle,
+            control);
+    });
+    return React.createElement("div", { className: "space-y-3" }, rows);
 }
 const WELLNESS_SCALE_COLORS = { 1: "bg-red-500", 2: "bg-orange-500", 3: "bg-amber-400", 4: "bg-lime-500", 5: "bg-emerald-500" };
 const TEAM_COLORS = ["from-[#eb1e23] to-[#8f1418]", "from-[#0a96d4] to-[#0a5a80]", "from-emerald-500 to-emerald-800", "from-violet-500 to-violet-800", "from-amber-500 to-amber-800", "from-slate-600 to-slate-900"];
@@ -2605,6 +2700,7 @@ function TeamOverviewTable({ team, players, privateData, statCategories, onSelec
 }
 const TABS = [
     { key: "uebersicht", label: "Übersicht", icon: IconUsers },
+    { key: "steckbrief", label: "Steckbrief", icon: IconFile },
     { key: "kalender", label: "Kalender", icon: IconCalendar },
     { key: "statistik", label: "Statistiken", icon: IconActivity },
     { key: "test", label: "Athletik-Tests", icon: IconClipboard },
@@ -2613,7 +2709,6 @@ const TABS = [
     { key: "video", label: "Videos", icon: IconVideo },
     { key: "notiz", label: "Notizen", icon: IconNote },
     { key: "entwicklung", label: "Development Plan", icon: IconClipboard },
-    { key: "steckbrief", label: "Steckbrief", icon: IconFile },
 ];
 const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "video", "notiz", "entwicklung", "steckbrief"];
 function SpielerAkte() {
@@ -3851,10 +3946,24 @@ function SpielerAkte() {
                                 n.attachmentName || "Anhang öffnen")))))))))))))),
         activeTab === "entwicklung" && (React.createElement(DevelopmentPlanPanel, { player: selectedPlayer, isTrainer: isTrainer, cycles: devPlanCycles, templates: devPlanTemplates, onCreateCycle: createDevPlanCycle, onSavePlayer: saveDevPlanPlayer, onReleasePlayer: releaseDevPlanPlayer, onSaveTrainer: saveDevPlanTrainer, onReleaseTrainer: releaseDevPlanTrainer, onSaveCombined: saveDevPlanCombined, onDeleteCycle: deleteDevPlanCycle })),
         activeTab === "steckbrief" && selectedPlayer && (() => {
-            const radarValues = { wurf: 5, verteidigung: 5, athletik: 5, spielintelligenz: 5, teamplay: 5, ...(selectedPlayer.radarRatings || {}) };
+            const manualRatings = { wurf: 5, verteidigung: 5, athletik: 5, spielintelligenz: 5, teamplay: 5, ...(selectedPlayer.radarRatings || {}) };
             function setRadarValue(skillId, val) {
-                persistPlayerFields(selectedPlayer.id, { radarRatings: { ...radarValues, [skillId]: val } });
+                persistPlayerFields(selectedPlayer.id, { radarRatings: { ...manualRatings, [skillId]: val } });
             }
+            const radarModes = {};
+            RADAR_SKILLS.forEach((s) => { radarModes[s.id] = (selectedPlayer.radarModes && selectedPlayer.radarModes[s.id]) || s.defaultMode; });
+            function setRadarMode(skillId, mode) {
+                persistPlayerFields(selectedPlayer.id, { radarModes: { ...radarModes, [skillId]: mode } });
+            }
+            const teamPlayers = players.filter((p) => p.teamId === selectedPlayer.teamId);
+            const autoRadarAll = computeAutoRadar(teamPlayers.length ? teamPlayers : [selectedPlayer], statCategories, privateData, isTrainer);
+            const autoValues = autoRadarAll[selectedPlayer.id] || { wurf: null, verteidigung: null, athletik: null };
+            const radarValues = {};
+            RADAR_SKILLS.forEach((s) => {
+                radarValues[s.id] = s.autoCapable && radarModes[s.id] === "auto" && autoValues[s.id] !== null && autoValues[s.id] !== undefined
+                    ? autoValues[s.id]
+                    : manualRatings[s.id];
+            });
             const bioItems = [
                 { label: "Geburtsdatum", value: fmtDate(selectedPlayer.birthdate) },
                 { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "–" },
@@ -3878,7 +3987,8 @@ function SpielerAkte() {
                     React.createElement("button", { onClick: () => exportSteckbriefPdf(selectedPlayer.name), disabled: pdfBusy, className: btnPrimaryClass + " text-sm px-3.5 py-2" },
                         React.createElement(IconDownload, { size: 14 }),
                         pdfBusy ? "Wird erstellt…" : "Als PDF exportieren")),
-                React.createElement("div", { ref: steckbriefRef, className: "bg-white rounded-2xl p-6 space-y-5 border border-stone-200" },
+                React.createElement("div", { ref: steckbriefRef, className: "bg-white rounded-2xl p-6 space-y-5 border border-stone-200 relative overflow-hidden" },
+                    React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[#eb1e23] via-slate-800 to-[#0a96d4]" }),
                     React.createElement("div", { className: "flex items-center gap-4 pb-4 border-b border-stone-100" },
                         React.createElement("div", { className: "w-16 h-16 rounded-2xl bg-gradient-to-br from-[#eb1e23] to-[#be2228] text-white flex items-center justify-center text-2xl font-black shrink-0" }, selectedPlayer.number !== "" && selectedPlayer.number !== undefined ? selectedPlayer.number : "?"),
                         React.createElement("div", null,
@@ -3895,15 +4005,13 @@ function SpielerAkte() {
                                 React.createElement(IconVideo, { size: 14 }),
                                 fmtDate(wurfVideo.date))
                             : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch kein Wurftechnik-Video hinterlegt."))),
-                isTrainer && React.createElement("div", { className: `${cardClass} p-4` },
+                isTrainer && React.createElement("div", { className: `${cardClass} p-4 space-y-4` },
                     React.createElement("div", { className: "flex items-center justify-between" },
-                        React.createElement(SectionLabel, null, "Wurftechnik-Video hinzufügen"),
-                        React.createElement("button", { onClick: () => { setVideoDefaultType("Wurftechnik"); setModal("video"); }, className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" },
+                        React.createElement(SectionLabel, null, "Skill-Bewertung"),
+                        React.createElement("button", { onClick: () => { setVideoDefaultType("Wurftechnik"); setModal("video"); }, className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800 shrink-0" },
                             React.createElement(IconUpload, { size: 13 }),
-                            " Video"))),
-                isTrainer && React.createElement("div", { className: `${cardClass} p-4` },
-                    React.createElement(SectionLabel, null, "Skill-Bewertung (erscheint im Steckbrief oben)"),
-                    React.createElement("div", { className: "mt-3" }, React.createElement(RadarEditor, { values: radarValues, onChange: setRadarValue }))));
+                            " Wurftechnik-Video")),
+                    React.createElement(RadarEditor, { values: manualRatings, onChange: setRadarValue, modes: radarModes, onModeChange: setRadarMode, autoValues: autoValues })));
         })(),
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
