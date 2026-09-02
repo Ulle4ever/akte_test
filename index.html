@@ -186,6 +186,9 @@ const IconTrophy = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M17 5h3a3 3 0 0 1-3 6" }));
 const IconHeart = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" }));
+const IconHome = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" }),
+    React.createElement("path", { d: "M9 22V12h6v10" }));
 const IconUsers = (p) => React.createElement(Icon, { ...p },
     React.createElement("circle", { cx: "9", cy: "8", r: "3.5" }),
     React.createElement("path", { d: "M3.5 20a5.5 5.5 0 0 1 11 0" }),
@@ -2488,6 +2491,7 @@ function SpielerAkte() {
     const [selectedTeamId, setSelectedTeamId] = useState("all");
     const [showPlayerList, setShowPlayerList] = useState(false);
     const [showTeamCalendar, setShowTeamCalendar] = useState(false);
+    const [showGlobalCalendar, setShowGlobalCalendar] = useState(false);
     const [selectedPlayerId, setSelectedPlayerId] = useState(null);
     const [activeTab, setActiveTab] = useState("uebersicht");
     const [expandedCats, setExpandedCats] = useState(() => new Set());
@@ -2939,6 +2943,29 @@ function SpielerAkte() {
         .sort((a, b) => a.name.localeCompare(b.name));
     const selectedPlayer = players.find((p) => p.id === selectedPlayerId) || null;
     const selectedTeam = selectedPlayer ? teams.find((t) => t.id === selectedPlayer.teamId) : null;
+    const breadcrumbItems = [];
+    if (isTrainer) {
+        breadcrumbItems.push({ label: "Dashboard", onClick: goHome });
+        if (showGlobalCalendar) {
+            breadcrumbItems.push({ label: "Kalender (alle Teams)", onClick: null });
+        }
+        else if (selectedPlayer) {
+            if (selectedTeam)
+                breadcrumbItems.push({ label: selectedTeam.name, onClick: () => { setSelectedPlayerId(null); setSelectedTeamId(selectedTeam.id); setShowTeamCalendar(false); setShowGlobalCalendar(false); } });
+            breadcrumbItems.push({ label: selectedPlayer.name, onClick: null });
+            const tabLabel = TABS.find((t) => t.key === activeTab)?.label;
+            if (tabLabel)
+                breadcrumbItems.push({ label: tabLabel, onClick: null });
+        }
+        else if (selectedTeamId !== "all") {
+            const currentTeam = teams.find((tm) => tm.id === selectedTeamId);
+            if (currentTeam) {
+                breadcrumbItems.push({ label: currentTeam.name, onClick: showTeamCalendar ? () => setShowTeamCalendar(false) : null });
+                if (showTeamCalendar)
+                    breadcrumbItems.push({ label: "Kalender", onClick: null });
+            }
+        }
+    }
     const playerStats = selectedPlayer ? sortByDateDesc(selectedPlayer.stats || []) : [];
     const playerTests = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.tests || []) : [];
     const playerVideos = selectedPlayer ? sortByDateDesc(selectedPlayer.videos || []) : [];
@@ -2956,12 +2983,14 @@ function SpielerAkte() {
         setActiveTab("uebersicht");
         setConfirmDeletePlayer(false);
         setShowTeamCalendar(false);
+        setShowGlobalCalendar(false);
         setMobileSidebarOpen(false);
     }
     function goHome() {
         setSelectedPlayerId(null);
         setSelectedTeamId("all");
         setShowTeamCalendar(false);
+        setShowGlobalCalendar(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -2969,6 +2998,15 @@ function SpielerAkte() {
         setSelectedPlayerId(null);
         setSelectedTeamId(teamId);
         setShowTeamCalendar(true);
+        setShowGlobalCalendar(false);
+        setMobileSidebarOpen(false);
+    }
+    function goGlobalCalendar() {
+        setSelectedPlayerId(null);
+        setSelectedTeamId("all");
+        setShowTeamCalendar(false);
+        setShowGlobalCalendar(true);
+        setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
     function handleAddTeam(team) {
@@ -3309,8 +3347,15 @@ function SpielerAkte() {
                     React.createElement("span", { className: "text-sm font-bold text-slate-900" }, "Menü"),
                     React.createElement("button", { onClick: () => setMobileSidebarOpen(false), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Schließen" },
                         React.createElement(IconX, { size: 18 }))),
+                React.createElement("div", { className: "flex flex-col gap-1 pb-3 mb-1 border-b border-stone-200" }, [
+                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !selectedPlayerId && selectedTeamId === "all" },
+                    { key: "calendar", label: "Kalender (alle Teams)", icon: IconCalendar, onClick: goGlobalCalendar, active: showGlobalCalendar },
+                    { key: "verwaltung", label: "Verwaltung", icon: IconSettings, onClick: () => { setShowGlobalCalendar(false); setModal("accounts"); setMobileSidebarOpen(false); }, active: false },
+                ].map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#eb1e23]/10 to-[#0a96d4]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
+                    React.createElement(item.icon, { size: 16, className: item.active ? "text-[#eb1e23]" : "text-slate-400" }),
+                    item.label))),
                 React.createElement("div", { className: "flex gap-2" },
-                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); } },
+                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); } },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
                         teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
                     React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
@@ -3337,6 +3382,11 @@ function SpielerAkte() {
                                 React.createElement("span", { className: "block text-xs truncate text-slate-500" }, p.position)),
                             React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` }))))))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-6" },
+                breadcrumbItems.length > 1 && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs text-slate-500 mb-4 flex-wrap" }, breadcrumbItems.map((b, i) => React.createElement(React.Fragment, { key: i },
+                    i > 0 && React.createElement(IconArrowDown, { size: 10, className: "-rotate-90 text-slate-300 shrink-0" }),
+                    b.onClick
+                        ? React.createElement("button", { onClick: b.onClick, className: "hover:text-[#eb1e23] transition font-medium" }, b.label)
+                        : React.createElement("span", { className: i === breadcrumbItems.length - 1 ? "text-slate-800 font-semibold" : "" }, b.label))))),
                 !selectedPlayer && selectedTeamId !== "all" && showTeamCalendar && (() => {
                     const team = teams.find((t) => t.id === selectedTeamId);
                     const teamPlayers = players.filter((p) => p.teamId === selectedTeamId);
@@ -3377,8 +3427,15 @@ function SpielerAkte() {
                             React.createElement(IconCalendar, { size: 14 }),
                             " Team-Kalender")),
                     React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: players.filter((p) => p.teamId === selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer }))),
-                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
-                !selectedPlayer && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
+                !selectedPlayer && showGlobalCalendar && (React.createElement("div", null,
+                    React.createElement("div", { className: "flex items-center justify-between mb-3" },
+                        React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, "Kalender – alle Teams"),
+                        React.createElement("button", { onClick: goHome, className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
+                            React.createElement(IconUsers, { size: 14 }),
+                            " Dashboard")),
+                    React.createElement(CalendarView, { events: calendarEvents, isTrainer: isTrainer, team: null, teams: teams, teamPlayers: [], allPlayers: players, contextLabel: "Alle Teams", onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent }))),
+                !selectedPlayer && !showGlobalCalendar && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
+                !selectedPlayer && !showGlobalCalendar && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
                 selectedPlayer && (React.createElement("div", { className: "rsk-fade-in" },
@@ -3422,12 +3479,11 @@ function SpielerAkte() {
                         React.createElement("div", { className: "flex gap-2" },
                             React.createElement("button", { onClick: () => setConfirmDeletePlayer(false), className: "px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-slate-600 hover:bg-stone-50" }, "Abbrechen"),
                             React.createElement("button", { onClick: handleDeletePlayer, className: "px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700" }, "Endg\u00FCltig l\u00F6schen")))),
-                    React.createElement("div", { className: "flex gap-1 bg-stone-100 rounded-xl p-1 mt-6 overflow-x-auto" }, TABS.filter((t) => isTrainer || PLAYER_ROLE_TABS.includes(t.key)).map((t) => {
+                    React.createElement("div", { className: "flex gap-5 border-b border-stone-200 mt-6 overflow-x-auto" }, TABS.filter((t) => isTrainer || PLAYER_ROLE_TABS.includes(t.key)).map((t) => {
                         const Icon = t.icon;
                         const active = activeTab === t.key;
-                        return (React.createElement("button", { key: t.key, onClick: () => setActiveTab(t.key), className: `flex-1 flex items-center justify-center gap-1.5 px-4 py-2.5 sm:py-2 rounded-lg text-sm font-semibold whitespace-nowrap transition-all active:scale-[0.97] ${active ? "bg-white text-slate-900 shadow-sm" : "text-slate-500 hover:text-slate-700"}` },
+                        return (React.createElement("button", { key: t.key, onClick: () => setActiveTab(t.key), className: `flex items-center gap-1.5 pb-2.5 px-0.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors shrink-0 ${active ? "border-[#eb1e23] text-slate-900" : "border-transparent text-slate-400 hover:text-slate-600"}` },
                             React.createElement(Icon, { size: 15, className: active ? "text-[#eb1e23]" : "" }),
-                            " ",
                             t.label));
                     })),
                     React.createElement("div", { className: "mt-5" },
