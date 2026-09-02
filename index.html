@@ -184,6 +184,8 @@ const IconTrophy = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M7 4h10v5a5 5 0 0 1-10 0V4Z" }),
     React.createElement("path", { d: "M7 5H4a3 3 0 0 0 3 6" }),
     React.createElement("path", { d: "M17 5h3a3 3 0 0 1-3 6" }));
+const IconHeart = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" }));
 const IconUsers = (p) => React.createElement(Icon, { ...p },
     React.createElement("circle", { cx: "9", cy: "8", r: "3.5" }),
     React.createElement("path", { d: "M3.5 20a5.5 5.5 0 0 1 11 0" }),
@@ -308,6 +310,20 @@ const DEFAULT_TEST_TYPES = [
 ];
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const today = () => new Date().toISOString().slice(0, 10);
+function isoWeekKey(dateStr) {
+    const d = new Date((dateStr || today()) + "T00:00:00");
+    const day = (d.getUTCDay() + 6) % 7;
+    d.setUTCDate(d.getUTCDate() - day + 3);
+    const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
+    const week = 1 + Math.round(((d - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
+    return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+const WELLNESS_SCALE_FIELDS = [
+    { id: "sleep", label: "Schlafqualität", lowLabel: "Sehr schlecht", highLabel: "Ausgezeichnet" },
+    { id: "soreness", label: "Muskelkater / Erschöpfung", lowLabel: "Stark erschöpft", highLabel: "Frisch & erholt" },
+    { id: "energy", label: "Energie / Stimmung", lowLabel: "Sehr niedrig", highLabel: "Top drauf" },
+    { id: "stress", label: "Stress (Schule/Alltag)", lowLabel: "Sehr entspannt", highLabel: "Sehr gestresst" },
+];
 const sortByDateDesc = (arr) => [...arr].sort((a, b) => new Date(b.date) - new Date(a.date));
 const fmtDate = (d) => {
     if (!d)
@@ -674,7 +690,7 @@ const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2.5 sm:py-
 const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
 const shadowClass = "shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)]";
 const cardClass = `bg-white rounded-2xl ${shadowClass}`;
-const btnPrimaryClass = `inline-flex items-center justify-center gap-1.5 bg-[#eb1e23] hover:bg-[#be2228] active:scale-[0.97] disabled:bg-stone-200 disabled:text-slate-400 disabled:active:scale-100 text-white rounded-xl font-semibold transition-all ${shadowClass}`;
+const btnPrimaryClass = `inline-flex items-center justify-center gap-1.5 bg-gradient-to-r from-[#eb1e23] to-[#c21c20] hover:from-[#d81a1f] hover:to-[#a8171b] active:scale-[0.97] disabled:bg-none disabled:bg-stone-200 disabled:text-slate-400 disabled:active:scale-100 text-white rounded-xl font-semibold transition-all ${shadowClass}`;
 const btnSecondaryClass = "inline-flex items-center justify-center gap-1.5 bg-stone-100 hover:bg-stone-200 active:scale-[0.97] text-slate-700 rounded-xl font-semibold transition-all";
 function Modal({ title, onClose, children, wide }) {
     return (React.createElement("div", { className: "fixed inset-0 bg-slate-900/50 backdrop-blur-[2px] flex items-end sm:items-center justify-center z-50 sm:p-4 rsk-backdrop-in", onClick: onClose },
@@ -2267,7 +2283,7 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
             React.createElement(IconArrowDown, { size: 11, className: `transition-transform ${isOpen ? "rotate-180" : ""}` })),
         isOpen && (React.createElement(React.Fragment, null,
             React.createElement("div", { className: "fixed inset-0 z-40", onClick: onClose }),
-            React.createElement("div", { className: "absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-stone-200 py-1.5 z-50 overflow-hidden" }, items.map((item) => {
+            React.createElement("div", { className: "absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-stone-200 py-1.5 z-50 overflow-hidden origin-top-right rsk-pop-in" }, items.map((item) => {
                 const ItemIcon = item.icon;
                 return (React.createElement("button", { key: item.label, onClick: () => { item.onClick(); onClose(); }, className: "w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-slate-700 hover:bg-stone-50 transition text-left" },
                     React.createElement("span", { className: "w-7 h-7 rounded-full bg-red-50 text-[#eb1e23] flex items-center justify-center shrink-0" },
@@ -2275,37 +2291,7 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
                     item.label));
             }))))));
 }
-function TaskRow({ task, onToggle, onDelete, onEdit }) {
-    const [editing, setEditing] = useState(false);
-    const [text, setText] = useState(task.text);
-    const [date, setDate] = useState(task.date || "");
-    function save() {
-        if (!text.trim())
-            return;
-        onEdit(task.id, text.trim(), date);
-        setEditing(false);
-    }
-    if (editing) {
-        return (React.createElement("div", { className: "flex flex-wrap items-center gap-2 px-1 py-1.5" },
-            React.createElement("input", { className: inputClass + " flex-1 min-w-[100px] text-sm", value: text, onChange: (e) => setText(e.target.value), autoFocus: true }),
-            React.createElement("input", { type: "date", className: inputClass + " w-[130px] shrink-0 text-sm", value: date, onChange: (e) => setDate(e.target.value) }),
-            React.createElement("button", { onClick: save, className: "shrink-0 text-emerald-600 hover:text-emerald-700" },
-                React.createElement(IconCheck, { size: 16 })),
-            React.createElement("button", { onClick: () => setEditing(false), className: "shrink-0 text-slate-400 hover:text-slate-600" },
-                React.createElement(IconX, { size: 16 }))));
-    }
-    return (React.createElement("div", { className: "flex items-center gap-2.5 px-1 py-1.5 group" },
-        React.createElement("button", { onClick: () => onToggle(task.id), className: `w-4 h-4 rounded border shrink-0 flex items-center justify-center ${task.done ? "bg-[#eb1e23] border-[#eb1e23]" : "border-slate-300"}` }, task.done && React.createElement(IconCheck, { size: 11, className: "text-white" })),
-        React.createElement("span", { className: `text-sm flex-1 truncate ${task.done ? "text-slate-400 line-through" : "text-slate-700"}` }, task.text),
-        task.date && React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, fmtDate(task.date)),
-        React.createElement("button", { onClick: () => setEditing(true), className: "text-slate-300 hover:text-[#0a96d4] opacity-0 group-hover:opacity-100 transition shrink-0" },
-            React.createElement(IconEdit, { size: 13 })),
-        React.createElement("button", { onClick: () => onDelete(task.id), className: "text-slate-300 hover:text-red-500 opacity-0 group-hover:opacity-100 transition shrink-0" },
-            React.createElement(IconTrash, { size: 13 }))));
-}
-function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelectPlayer, onAddTask, onToggleTask, onDeleteTask, onEditTask, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm }) {
-    const [newTask, setNewTask] = useState("");
-    const [newTaskDate, setNewTaskDate] = useState("");
+function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm }) {
     const [showEventForm, setShowEventForm] = useState(false);
     const [editingEvent, setEditingEvent] = useState(null);
     const days = [];
@@ -2318,16 +2304,19 @@ function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelec
     }
     const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
     const outPlayers = players.filter((p) => p.status === "verletzt" || p.status === "reha");
-    const openTasks = tasks.filter((t) => !t.done);
-    const doneTasks = tasks.filter((t) => t.done);
-    function submitTask(e) {
-        e.preventDefault();
-        if (!newTask.trim())
-            return;
-        onAddTask(newTask.trim(), newTaskDate);
-        setNewTask("");
-        setNewTaskDate("");
-    }
+    const currentWeekKey = isoWeekKey(today());
+    const wellnessThisWeek = players.map((p) => ({ player: p, entry: (wellnessData[p.id]?.entries || []).find((e) => e.weekKey === currentWeekKey) || null }));
+    const checkedInWellness = wellnessThisWeek.filter((w) => w.entry);
+    const flaggedWellness = checkedInWellness.filter((w) => Number(w.entry.energy) <= 2 || Number(w.entry.soreness) <= 2 || Number(w.entry.stress) >= 4 || (w.entry.pain && w.entry.pain.trim()));
+    const flaggedWellnessRows = flaggedWellness.map(({ player: p, entry }) => {
+        const hasPain = !!(entry.pain && entry.pain.trim());
+        return React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "w-full flex items-center gap-2.5 bg-red-50 hover:bg-red-100 border-l-2 border-[#eb1e23] rounded-xl px-3 py-2 text-left transition" },
+            React.createElement(IconAlert, { size: 14, className: "text-[#eb1e23] shrink-0" }),
+            React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, p.name),
+            hasPain
+                ? React.createElement("span", { className: "text-xs text-[#eb1e23] font-medium shrink-0 max-w-[45%] truncate" }, entry.pain)
+                : React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(p.teamId)));
+    });
     function openNewEvent() {
         setEditingEvent(null);
         setShowEventForm(true);
@@ -2387,15 +2376,16 @@ function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelec
                     React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, p.name),
                     React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(p.teamId)))))))),
             React.createElement("div", { className: `${cardClass} p-4` },
-                React.createElement(SectionLabel, null, "Aufgaben"),
-                React.createElement("form", { onSubmit: submitTask, className: "flex flex-wrap gap-2 mt-2 mb-2" },
-                    React.createElement("input", { className: inputClass + " flex-1 min-w-[100px]", value: newTask, onChange: (e) => setNewTask(e.target.value), placeholder: "Neue Aufgabe\u2026" }),
-                    React.createElement("input", { type: "date", className: inputClass + " w-[130px] shrink-0", value: newTaskDate, onChange: (e) => setNewTaskDate(e.target.value) }),
-                    React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 hover:bg-slate-800 text-white rounded-lg px-3 text-sm font-medium" },
-                        React.createElement(IconPlus, { size: 15 }))),
-                React.createElement("div", { className: "space-y-1 max-h-56 overflow-y-auto" },
-                    tasks.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-3" }, "Keine Aufgaben eingetragen."),
-                    [...openTasks, ...doneTasks].map((t) => (React.createElement(TaskRow, { key: t.id, task: t, onToggle: onToggleTask, onDelete: onDeleteTask, onEdit: onEditTask })))))),
+                React.createElement("div", { className: "flex items-center justify-between" },
+                    React.createElement(SectionLabel, null, "Team-Wellness diese Woche"),
+                    React.createElement("span", { className: `text-xs font-bold px-2 py-0.5 rounded-full ${checkedInWellness.length === 0 ? "bg-stone-100 text-slate-400" : "bg-gradient-to-r from-[#0a96d4] to-[#4178a0] text-white"}` },
+                        checkedInWellness.length,
+                        " / ",
+                        players.length,
+                        " eingecheckt")),
+                React.createElement("div", { className: "mt-2 space-y-1.5" }, flaggedWellnessRows.length === 0
+                    ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, checkedInWellness.length === 0 ? "Noch keine Check-ins diese Woche." : "Keine Auff\u00e4lligkeiten \u2013 alles im gr\u00fcnen Bereich.")
+                    : flaggedWellnessRows))),
         React.createElement("div", null,
             React.createElement(SectionLabel, null, "Teams"),
             React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-3 gap-3 mt-1.5" }, teams.map((t) => (React.createElement("button", { key: t.id, onClick: () => onSelectTeam(t.id), className: `${cardClass} p-4 text-left hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] active:translate-y-0 transition-all border border-transparent hover:border-[#eb1e23]/20` },
@@ -2408,6 +2398,66 @@ function TrainerDashboard({ events, teams, players, tasks, onSelectTeam, onSelec
                 React.createElement("p", { className: "text-xs text-[#0a96d4] mt-1.5 flex items-center gap-1" },
                     React.createElement(IconCalendar, { size: 11 }),
                     " Kalender \u00F6ffnen"))))))));
+}
+const WELLNESS_SCALE_COLORS = { 1: "bg-red-500", 2: "bg-orange-500", 3: "bg-amber-400", 4: "bg-lime-500", 5: "bg-emerald-500" };
+function WellnessScaleInput({ field, value, onChange }) {
+    const buttons = [1, 2, 3, 4, 5].map((n) => React.createElement("button", { key: n, type: "button", onClick: () => onChange(n), className: `flex-1 h-9 rounded-lg text-sm font-bold transition ${value === n ? WELLNESS_SCALE_COLORS[n] + " text-white shadow-sm scale-105" : "bg-stone-100 text-slate-400 hover:bg-stone-200"}` }, n));
+    return React.createElement("div", { className: "space-y-1.5" },
+        React.createElement("p", { className: "text-sm font-medium text-slate-700" }, field.label),
+        React.createElement("div", { className: "flex items-center gap-1.5" }, buttons),
+        React.createElement("div", { className: "flex items-center justify-between text-[11px] text-slate-400" },
+            React.createElement("span", null, field.lowLabel),
+            React.createElement("span", null, field.highLabel)));
+}
+function WellnessEntryCard({ entry, onDelete, canDelete }) {
+    const pills = WELLNESS_SCALE_FIELDS.map((f) => React.createElement("div", { key: f.id, className: "flex flex-col items-center gap-1" },
+        React.createElement("span", { className: `w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold text-white ${WELLNESS_SCALE_COLORS[entry[f.id]] || "bg-stone-200 text-slate-400"}` }, entry[f.id] || "–"),
+        React.createElement("span", { className: "text-[10px] text-slate-400 text-center leading-tight" }, f.label.split(" ")[0])));
+    return React.createElement("div", { className: `${cardClass} p-3.5` },
+        React.createElement("div", { className: "flex items-center justify-between mb-2.5" },
+            React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, fmtDate(entry.date)),
+            canDelete && React.createElement("button", { onClick: () => onDelete(entry.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag löschen" },
+                React.createElement(IconTrash, { size: 13 }))),
+        React.createElement("div", { className: "flex items-center justify-around" }, pills),
+        entry.pain && React.createElement("p", { className: "mt-2.5 text-sm text-[#eb1e23] bg-red-50 rounded-lg px-2.5 py-1.5" }, "⚠ ", entry.pain),
+        entry.comment && React.createElement("p", { className: "mt-2 text-sm text-slate-600" }, entry.comment));
+}
+function WellnessPanel({ isTrainer, isOwnAccount, entries, onAddEntry, onDeleteEntry }) {
+    const weekKey = isoWeekKey(today());
+    const hasCheckedInThisWeek = entries.some((e) => e.weekKey === weekKey);
+    const [values, setValues] = useState({ sleep: 3, soreness: 3, energy: 3, stress: 3, pain: "", comment: "" });
+    function submit(e) {
+        e.preventDefault();
+        onAddEntry({ sleep: values.sleep, soreness: values.soreness, energy: values.energy, stress: values.stress, pain: values.pain.trim(), comment: values.comment.trim() });
+        setValues({ sleep: 3, soreness: 3, energy: 3, stress: 3, pain: "", comment: "" });
+    }
+    const scaleInputs = WELLNESS_SCALE_FIELDS.map((f) => React.createElement(WellnessScaleInput, { key: f.id, field: f, value: values[f.id], onChange: (n) => setValues((v) => ({ ...v, [f.id]: n })) }));
+    const entryCards = entries.map((e) => React.createElement(WellnessEntryCard, { key: e.id, entry: e, canDelete: isTrainer, onDelete: () => onDeleteEntry(e.id) }));
+    let form = null;
+    if (!isTrainer && isOwnAccount) {
+        form = hasCheckedInThisWeek
+            ? React.createElement("div", { className: `${cardClass} p-4 flex items-center gap-2.5 text-emerald-700 bg-emerald-50 border border-emerald-100` },
+                React.createElement(IconCheck, { size: 16 }),
+                React.createElement("span", { className: "text-sm font-medium" }, "Diese Woche bereits eingecheckt – nächster Check-in ab kommender Woche möglich."))
+            : React.createElement("form", { onSubmit: submit, className: `${cardClass} p-4 space-y-4` },
+                React.createElement(SectionLabel, null, "Wöchentlicher Check-in"),
+                scaleInputs,
+                React.createElement("div", null,
+                    React.createElement("label", { className: labelClass }, "Schmerzen / Beschwerden (optional)"),
+                    React.createElement("input", { className: inputClass, value: values.pain, onChange: (e) => setValues((v) => ({ ...v, pain: e.target.value })), placeholder: "z. B. Knie zieht seit 2 Tagen" })),
+                React.createElement("div", null,
+                    React.createElement("label", { className: labelClass }, "Kommentar (optional)"),
+                    React.createElement("textarea", { className: inputClass, rows: 2, value: values.comment, onChange: (e) => setValues((v) => ({ ...v, comment: e.target.value })) })),
+                React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center" }, "Check-in abschicken"));
+    }
+    const historyBody = entries.length === 0
+        ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Wellness-Check-ins vorhanden.")
+        : entryCards;
+    return React.createElement("div", { className: "space-y-4" },
+        form,
+        React.createElement("div", null,
+            entries.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
+            React.createElement("div", { className: "space-y-2 mt-2" }, historyBody)));
 }
 function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
@@ -2438,10 +2488,12 @@ function TeamOverviewTable({ team, players, privateData, statCategories, onSelec
             React.createElement("p", { className: "text-sm text-slate-500" },
                 players.length,
                 " Spieler \u00B7 Klick auf einen Spieler f\u00FCr die Akte")),
-        players.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Spieler in diesem Team.")) : (React.createElement("div", { className: `${cardClass} overflow-x-auto` },
+        players.length === 0 ? (React.createElement("div", { className: `${cardClass} flex flex-col items-center justify-center gap-2 py-14 text-center` },
+            React.createElement(IconUsers, { size: 28, className: "text-stone-300" }),
+            React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Spieler in diesem Team."))) : (React.createElement("div", { className: `${cardClass} overflow-x-auto` },
             React.createElement("table", { className: "w-full text-sm" },
                 React.createElement("thead", null,
-                    React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
+                    React.createElement("tr", { className: "border-b-2 border-[#eb1e23]/20 bg-stone-50/60 text-slate-500 text-xs uppercase tracking-wide" },
                         React.createElement("th", { className: "text-left px-3 py-2.5" }, "#"),
                         React.createElement("th", { className: "text-left px-3 py-2.5" }, "Name"),
                         React.createElement("th", { className: "text-left px-3 py-2.5" }, "Position"),
@@ -2450,7 +2502,7 @@ function TeamOverviewTable({ team, players, privateData, statCategories, onSelec
                         React.createElement("th", { className: "text-right px-3 py-2.5" }, "Anwesenheit"))),
                 React.createElement("tbody", null, players.map((p) => (React.createElement("tr", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "border-b border-stone-100 last:border-0 odd:bg-stone-50/40 hover:bg-red-50/60 active:bg-red-50 cursor-pointer transition-colors" },
                     React.createElement("td", { className: "px-3 py-2.5" },
-                        React.createElement("span", { className: "w-7 h-7 rounded-full bg-stone-100 text-slate-600 flex items-center justify-center text-xs font-bold" }, p.number !== "" && p.number !== undefined ? p.number : "–")),
+                        React.createElement("span", { className: "w-7 h-7 rounded-full bg-gradient-to-br from-slate-700 to-slate-900 text-white flex items-center justify-center text-xs font-bold" }, p.number !== "" && p.number !== undefined ? p.number : "–")),
                     React.createElement("td", { className: "px-3 py-2.5 font-medium text-slate-800" }, p.name),
                     React.createElement("td", { className: "px-3 py-2.5 text-slate-500" }, p.position),
                     normalFields.map((f) => React.createElement("td", { key: f.id, className: "px-3 py-2.5 text-right" }, avgFor(p.id, f.id))),
@@ -2463,11 +2515,12 @@ const TABS = [
     { key: "statistik", label: "Statistiken", icon: IconActivity },
     { key: "test", label: "Athletik-Tests", icon: IconClipboard },
     { key: "anwesenheit", label: "Anwesenheit", icon: IconCalendar },
+    { key: "wellness", label: "Wellness", icon: IconHeart },
     { key: "video", label: "Videos", icon: IconVideo },
     { key: "notiz", label: "Notizen", icon: IconNote },
     { key: "entwicklung", label: "Development Plan", icon: IconClipboard },
 ];
-const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "video", "notiz", "entwicklung"];
+const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "video", "notiz", "entwicklung"];
 function SpielerAkte() {
     const [loading, setLoading] = useState(true);
     const [saveError, setSaveError] = useState(false);
@@ -2510,6 +2563,7 @@ function SpielerAkte() {
     const [meta, setMeta] = useState(null); // { teams, statCategories, testTypes }
     const [players, setPlayers] = useState([]);
     const [privateData, setPrivateData] = useState({}); // { [playerId]: { notes, tests, attendance } }, nur für Trainer geladen
+    const [wellnessData, setWellnessData] = useState({}); // { [playerId]: { entries: [] } }, Trainer: alle, Spieler: nur eigene
     const [calendarEvents, setCalendarEvents] = useState([]);
     const [teamNotes, setTeamNotes] = useState([]);
     const [rotationPlans, setRotationPlans] = useState([]);
@@ -2537,6 +2591,7 @@ function SpielerAkte() {
                 setMeta(null);
                 setPlayers([]);
                 setPrivateData({});
+                setWellnessData({});
                 setLoading(false);
                 return;
             }
@@ -2563,7 +2618,7 @@ function SpielerAkte() {
         async function loadData() {
             try {
                 const metaSnap = await db.collection("club").doc("meta").get();
-                const metaDefaults = { teams: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES, tasks: [] };
+                const metaDefaults = { teams: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES };
                 if (!cancelled)
                     setMeta(metaSnap.exists ? { ...metaDefaults, ...metaSnap.data() } : metaDefaults);
                 let loadedPlayerTeamId = null;
@@ -2579,6 +2634,12 @@ function SpielerAkte() {
                     }));
                     if (!cancelled)
                         setPrivateData(Object.fromEntries(privEntries));
+                    const wellEntries = await Promise.all(loadedPlayers.map(async (p) => {
+                        const s = await db.collection("playerWellness").doc(p.id).get();
+                        return [p.id, s.exists ? { entries: s.data().entries || [] } : { entries: [] }];
+                    }));
+                    if (!cancelled)
+                        setWellnessData(Object.fromEntries(wellEntries));
                     const evSnap = await db.collection("calendarEvents").get();
                     if (!cancelled)
                         setCalendarEvents(evSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -2595,6 +2656,9 @@ function SpielerAkte() {
                     if (!cancelled)
                         setPlayers(ownPlayer ? [ownPlayer] : []);
                     loadedPlayerTeamId = ownPlayer?.teamId || null;
+                    const ownWellSnap = await db.collection("playerWellness").doc(account.playerId).get();
+                    if (!cancelled)
+                        setWellnessData({ [account.playerId]: { entries: ownWellSnap.exists ? (ownWellSnap.data().entries || []) : [] } });
                     const [teamEvSnap, ownEvSnap] = await Promise.all([
                         loadedPlayerTeamId ? db.collection("calendarEvents").where("teamId", "==", loadedPlayerTeamId).get() : Promise.resolve({ docs: [] }),
                         db.collection("calendarEvents").where("includedPlayerIds", "array-contains", account.playerId).get(),
@@ -2675,6 +2739,24 @@ function SpielerAkte() {
         catch (e) {
             setSaveError(true);
         }
+    }
+    async function persistWellness(playerId, entries) {
+        setWellnessData((prev) => ({ ...prev, [playerId]: { entries } }));
+        try {
+            await db.collection("playerWellness").doc(playerId).set({ entries }, { merge: true });
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+    }
+    function addWellnessEntry(playerId, entry) {
+        const cur = wellnessData[playerId]?.entries || [];
+        persistWellness(playerId, [...cur, { id: uid(), date: today(), weekKey: isoWeekKey(today()), createdAt: today(), ...entry }]);
+    }
+    function deleteWellnessEntry(playerId, id) {
+        const cur = wellnessData[playerId]?.entries || [];
+        persistWellness(playerId, cur.filter((e) => e.id !== id));
     }
     async function persistMeta(changes) {
         setMeta((prev) => ({ ...prev, ...changes }));
@@ -2883,11 +2965,12 @@ function SpielerAkte() {
                 React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars Koeln", className: "h-16 w-16 object-contain mb-3" }),
                 React.createElement("div", { className: "flex items-center gap-2" },
                     React.createElement("span", { className: "h-[2px] w-5 bg-[#eb1e23]" }),
-                    React.createElement("h1", { className: "font-display text-lg tracking-wide text-slate-900" }, "SPIELER-AKTE"),
+                    React.createElement("h1", { className: "font-display text-lg tracking-wide bg-gradient-to-r from-[#eb1e23] via-slate-900 to-[#0a96d4] bg-clip-text text-transparent" }, "SPIELER-AKTE"),
                     React.createElement("span", { className: "h-[2px] w-5 bg-[#0a96d4]" }))),
             React.createElement("div", { className: `${cardClass} p-6` },
-                React.createElement("div", { className: "flex items-center gap-2 mb-1" },
-                    React.createElement(IconLock, { size: 18, className: "text-[#eb1e23]" }),
+                React.createElement("div", { className: "flex items-center gap-2.5 mb-1" },
+                    React.createElement("span", { className: "w-8 h-8 rounded-full bg-gradient-to-br from-[#eb1e23] to-[#8f1418] flex items-center justify-center shrink-0 shadow-[0_2px_8px_rgba(235,30,35,0.35)]" },
+                        React.createElement(IconLock, { size: 15, className: "text-white" })),
                     React.createElement("h2", { className: "text-base font-bold text-slate-900" }, "Anmelden")),
                 React.createElement("p", { className: "text-sm text-slate-500 mb-4" }, "Gib deinen pers\u00F6nlichen Code ein."),
                 React.createElement("form", { onSubmit: handleLogin, className: "space-y-3" },
@@ -2913,6 +2996,7 @@ function SpielerAkte() {
     const playerVideos = selectedPlayer ? sortByDateDesc(selectedPlayer.videos || []) : [];
     const playerNotes = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.notes || []) : [];
     const playerAttendance = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.attendance || []) : [];
+    const playerWellnessEntries = selectedPlayer ? sortByDateDesc(wellnessData[selectedPlayer.id]?.entries || []) : [];
     const avg = (key) => (playerStats.length ? fmtNum(playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length, 1) : "–");
     const totalPct = (madeKey, attKey) => {
         const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
@@ -3217,21 +3301,8 @@ function SpielerAkte() {
         [types[i], types[j]] = [types[j], types[i]];
         persistMeta({ testTypes: types });
     }
-    const tasks = meta.tasks || [];
-    function addTask(text, date) {
-        persistMeta({ tasks: [...tasks, { id: uid(), text, date: date || "", done: false, createdAt: today() }] });
-    }
-    function toggleTask(id) {
-        persistMeta({ tasks: tasks.map((t) => (t.id === id ? { ...t, done: !t.done } : t)) });
-    }
-    function editTask(id, text, date) {
-        persistMeta({ tasks: tasks.map((t) => (t.id === id ? { ...t, text, date: date || "" } : t)) });
-    }
-    function deleteTask(id) {
-        persistMeta({ tasks: tasks.filter((t) => t.id !== id) });
-    }
     return (React.createElement("div", { className: "min-h-[100dvh] bg-stone-50 flex flex-col" },
-        React.createElement("header", { className: "bg-black text-white px-4 sm:px-6 py-3.5 sm:py-4 pt-safe flex items-center justify-between flex-wrap gap-3 shadow-[0_2px_16px_rgba(0,0,0,0.25)] sticky top-0 z-10" },
+        React.createElement("header", { className: "bg-gradient-to-r from-black via-[#1a0506] to-black text-white px-4 sm:px-6 py-3.5 sm:py-4 pt-safe flex items-center justify-between flex-wrap gap-3 shadow-[0_2px_16px_rgba(0,0,0,0.25)] sticky top-0 z-10 border-b border-[#eb1e23]/20" },
             React.createElement("div", { className: "flex items-center gap-2 sm:gap-3" },
                 isTrainer && (React.createElement("button", { onClick: () => setMobileSidebarOpen(true), className: "md:hidden p-2 -ml-1 rounded-lg hover:bg-white/10 shrink-0", "aria-label": "Menü öffnen" },
                     React.createElement(IconMenu, { size: 20 }))),
@@ -3277,12 +3348,11 @@ function SpielerAkte() {
                             { label: "Abmelden", icon: IconExternal, onClick: handleLogout },
                         ]
                         : [{ label: "Abmelden", icon: IconExternal, onClick: handleLogout }] }))),
-        React.createElement("div", { className: "bg-amber-50 border-b border-amber-200 px-6 py-2 flex items-center justify-between gap-2 text-xs text-amber-800" },
-            React.createElement("span", { className: "flex items-center gap-2" },
+        React.createElement("div", { className: "bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-2 flex items-center justify-between gap-2 text-xs text-amber-800" },
+            React.createElement("span", { className: "flex items-center gap-2 min-w-0" },
                 React.createElement(IconInfo, { size: 14, className: "shrink-0" }),
-                " Angemeldet als ",
-                account.label || (isTrainer ? "Trainer" : "Spieler-Zugang")),
-            React.createElement("button", { onClick: handleLogout, className: "underline shrink-0" }, "Abmelden")),
+                React.createElement("span", { className: "truncate" }, "Angemeldet als ", React.createElement("strong", { className: "font-semibold" }, account.label || (isTrainer ? "Trainer" : "Spieler-Zugang")))),
+            React.createElement("button", { onClick: handleLogout, className: "underline shrink-0 hover:text-amber-950 transition" }, "Abmelden")),
         React.createElement("div", { className: "flex flex-col md:flex-row flex-1 relative" },
             isTrainer && mobileSidebarOpen && (React.createElement("div", { className: "fixed inset-0 bg-slate-900/50 backdrop-blur-[2px] z-30 md:hidden rsk-backdrop-in", onClick: () => setMobileSidebarOpen(false) })),
             isTrainer && (React.createElement("aside", { className: `fixed md:relative inset-y-0 left-0 z-40 md:z-auto w-[85%] max-w-xs md:max-w-none md:w-80 border-b md:border-b-0 md:border-r border-stone-200 bg-white p-4 flex flex-col gap-3 transform md:transform-none transition-transform duration-300 ease-out ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"} overflow-y-auto pb-safe` },
@@ -3383,32 +3453,31 @@ function SpielerAkte() {
                             React.createElement(IconCalendar, { size: 14 }),
                             " Team-Kalender")),
                     React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: players.filter((p) => p.teamId === selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer }))),
-                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, tasks: tasks, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddTask: addTask, onToggleTask: toggleTask, onDeleteTask: deleteTask, onEditTask: editTask, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
+                !selectedPlayer && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
                 !selectedPlayer && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
-                selectedPlayer && (React.createElement("div", null,
-                    React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-6" },
+                selectedPlayer && (React.createElement("div", { className: "rsk-fade-in" },
+                    React.createElement("div", { className: `${cardClass} p-6` },
                         React.createElement("div", { className: "flex items-start justify-between flex-wrap gap-4" },
-                            React.createElement("div", null,
-                                React.createElement("div", { className: "flex items-baseline gap-1.5 flex-wrap" },
-                                    splitName(selectedPlayer.name).first && (React.createElement("span", { className: "text-3xl font-normal text-slate-400" }, splitName(selectedPlayer.name).first)),
-                                    React.createElement("span", { className: "text-3xl font-bold text-slate-900" }, splitName(selectedPlayer.name).last),
-                                    selectedPlayer.number !== "" && selectedPlayer.number !== undefined && (React.createElement("span", { className: "text-3xl font-bold text-[#eb1e23] ml-1" }, selectedPlayer.number))),
-                                React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-1" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ") || "Kein Team"),
-                                React.createElement("div", { className: "h-[3px] w-11 bg-[#0a96d4] rounded-full mt-3" })),
+                            React.createElement("div", { className: "flex items-center gap-4" },
+                                React.createElement("div", { className: "w-16 h-16 rounded-2xl bg-gradient-to-br from-[#eb1e23] to-[#be2228] text-white flex items-center justify-center text-2xl font-black shrink-0 shadow-[0_4px_14px_rgba(235,30,35,0.28)]" }, selectedPlayer.number !== "" && selectedPlayer.number !== undefined ? selectedPlayer.number : (splitName(selectedPlayer.name).last || "?").charAt(0)),
+                                React.createElement("div", null,
+                                    React.createElement("div", { className: "flex items-baseline gap-1.5 flex-wrap" },
+                                        splitName(selectedPlayer.name).first && (React.createElement("span", { className: "text-3xl font-normal text-slate-400" }, splitName(selectedPlayer.name).first)),
+                                        React.createElement("span", { className: "text-3xl font-bold text-slate-900" }, splitName(selectedPlayer.name).last)),
+                                    React.createElement("div", { className: "flex items-center gap-2 mt-1 flex-wrap" },
+                                        React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ") || "Kein Team"),
+                                        STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label))))),
                             isTrainer && (React.createElement("div", { className: "flex gap-2" },
                                 React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Bearbeiten" },
                                     React.createElement(IconEdit, { size: 16 })),
                                 React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg hover:bg-red-50 text-red-400", "aria-label": "L\u00F6schen" },
                                     React.createElement(IconTrash, { size: 16 }))))),
-                        React.createElement("div", { className: "flex flex-wrap gap-8 mt-5 pt-4 border-t border-stone-100" },
-                            selectedPlayer.birthdate && (React.createElement("div", null,
-                                React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, "Geburtsdatum"),
-                                React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, fmtDate(selectedPlayer.birthdate)))),
+                        selectedPlayer.birthdate && (React.createElement("div", { className: "flex flex-wrap gap-8 mt-5 pt-4 border-t border-stone-100" },
                             React.createElement("div", null,
-                                React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, "Status"),
-                                React.createElement("p", { className: `text-sm font-semibold ${STATUS_STYLES[selectedPlayer.status]?.text || "text-slate-800"}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label))),
+                                React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, "Geburtsdatum"),
+                                React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, fmtDate(selectedPlayer.birthdate))))),
                         (() => {
                             const todayEvents = getPlayerVisibleEvents(calendarEvents, selectedPlayer).filter((e) => e.date === isoDate(new Date()));
                             if (todayEvents.length === 0)
@@ -3439,11 +3508,13 @@ function SpielerAkte() {
                     React.createElement("div", { className: "mt-5" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
                             React.createElement("div", { className: "flex flex-wrap gap-4" },
-                                React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 text-center w-full md:w-48" },
-                                    React.createElement("p", { className: "text-2xl font-black text-[#eb1e23]" }, playerStats.length),
+                                React.createElement("div", { className: `${cardClass} p-4 text-center w-full md:w-48 hover:shadow-md transition-shadow relative overflow-hidden` },
+                                    React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#eb1e23] to-[#be2228]" }),
+                                    React.createElement("p", { className: "text-2xl font-black text-[#eb1e23] mt-1" }, playerStats.length),
                                     React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Spiele erfasst")),
-                                playerAttendance[0] && (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 text-center w-full md:w-48" },
-                                    React.createElement("p", { className: "text-2xl font-black text-[#0a96d4]" }, playerAttendance[0].einheitenGesamt ? `${Math.round((playerAttendance[0].anwesend / playerAttendance[0].einheitenGesamt) * 1000) / 10}%` : "–"),
+                                playerAttendance[0] && (React.createElement("div", { className: `${cardClass} p-4 text-center w-full md:w-48 hover:shadow-md transition-shadow relative overflow-hidden` },
+                                    React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#0a96d4] to-[#0a6fa0]" }),
+                                    React.createElement("p", { className: "text-2xl font-black text-[#0a96d4] mt-1" }, playerAttendance[0].einheitenGesamt ? `${Math.round((playerAttendance[0].anwesend / playerAttendance[0].einheitenGesamt) * 1000) / 10}%` : "–"),
                                     React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" },
                                         "Anwesenheit (Stand ",
                                         fmtDate(playerAttendance[0].date),
@@ -3451,13 +3522,14 @@ function SpielerAkte() {
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Auf einen Blick"),
                                 React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3 mt-1.5" }, [
-                                    { label: "Punkte", id: "punkte" },
-                                    { label: "Rebounds", id: "rebounds" },
-                                    { label: "Assists", id: "assists" },
-                                    { label: "Turnover", id: "turnovers" },
-                                    { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]) },
-                                ].filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 text-center" },
-                                    React.createElement("p", { className: "text-lg font-bold text-slate-700" }, avg(x.id)),
+                                    { label: "Punkte", id: "punkte", color: "from-[#eb1e23] to-[#be2228]" },
+                                    { label: "Rebounds", id: "rebounds", color: "from-[#0a96d4] to-[#0a6fa0]" },
+                                    { label: "Assists", id: "assists", color: "from-emerald-500 to-emerald-700" },
+                                    { label: "Turnover", id: "turnovers", color: "from-amber-500 to-amber-700" },
+                                    { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]), color: "from-violet-500 to-violet-700" },
+                                ].filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 text-center relative overflow-hidden" },
+                                    React.createElement("span", { className: `absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${x.color}` }),
+                                    React.createElement("p", { className: "text-lg font-bold text-slate-700 mt-1" }, avg(x.id)),
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Details"),
@@ -3568,6 +3640,7 @@ function SpielerAkte() {
                                     React.createElement("td", { className: "px-2 py-2 text-right" },
                                         React.createElement("button", { onClick: () => deleteItem("attendance", a.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                             React.createElement(IconTrash, { size: 14 })))))))))))),
+                        activeTab === "wellness" && (React.createElement(WellnessPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, entries: playerWellnessEntries, onAddEntry: (entry) => addWellnessEntry(selectedPlayer.id, entry), onDeleteEntry: (id) => deleteWellnessEntry(selectedPlayer.id, id) })),
                         activeTab === "video" && (React.createElement("div", null,
                             isTrainer && (React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("video"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
