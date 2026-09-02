@@ -83,6 +83,8 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
 <body>
 <div id="root"></div>
@@ -189,6 +191,10 @@ const IconHeart = (p) => React.createElement(Icon, { ...p },
 const IconHome = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "m3 9 9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2Z" }),
     React.createElement("path", { d: "M9 22V12h6v10" }));
+const IconDownload = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
+    React.createElement("path", { d: "M7 10l5 5 5-5" }),
+    React.createElement("path", { d: "M12 15V3" }));
 const IconUsers = (p) => React.createElement(Icon, { ...p },
     React.createElement("circle", { cx: "9", cy: "8", r: "3.5" }),
     React.createElement("path", { d: "M3.5 20a5.5 5.5 0 0 1 11 0" }),
@@ -260,7 +266,15 @@ const STATUS_STYLES = {
     verletzt: { dot: "bg-[#eb1e23]", badge: "bg-red-50 text-[#be2228] border-red-200", text: "text-[#be2228]" },
     reha: { dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700 border-amber-200", text: "text-amber-700" },
 };
-const VIDEO_TYPES = ["Spielszene", "Trainingsdrill", "Analyse"];
+const VIDEO_TYPES = ["Spielszene", "Trainingsdrill", "Analyse", "Wurftechnik"];
+const RADAR_SKILLS = [
+    { id: "wurf", label: "Wurf" },
+    { id: "verteidigung", label: "Verteidigung" },
+    { id: "athletik", label: "Athletik" },
+    { id: "spielintelligenz", label: "Spielintelligenz" },
+    { id: "teamplay", label: "Teamplay" },
+];
+const HANDEDNESS_LABELS = { rechts: "Rechts", links: "Links", beidhaendig: "Beidhändig" };
 const NOTE_CATEGORIES = [
     { value: "technisch", label: "Technisch" },
     { value: "taktisch", label: "Taktisch" },
@@ -743,6 +757,8 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [number, setNumber] = useState(initial?.number ?? "");
     const [birthdate, setBirthdate] = useState(initial?.birthdate || "");
     const [status, setStatus] = useState(initial?.status || "aktiv");
+    const [handedness, setHandedness] = useState(initial?.handedness || "");
+    const [previousClub, setPreviousClub] = useState(initial?.previousClub || "");
     const [error, setError] = useState("");
     function handleSubmit(e) {
         e.preventDefault();
@@ -761,6 +777,8 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             number: number === "" ? "" : Number(number),
             birthdate,
             status,
+            handedness,
+            previousClub: previousClub.trim(),
         });
         onClose();
     }
@@ -781,6 +799,15 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
                 React.createElement("input", { type: "date", className: inputClass, value: birthdate, onChange: (e) => setBirthdate(e.target.value) })),
             React.createElement(Field, { label: "Status" },
                 React.createElement("select", { className: inputClass, value: status, onChange: (e) => setStatus(e.target.value) }, STATUS_OPTIONS.map((s) => React.createElement("option", { key: s.value, value: s.value }, s.label))))),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Starke Hand" },
+                React.createElement("select", { className: inputClass, value: handedness, onChange: (e) => setHandedness(e.target.value) },
+                    React.createElement("option", { value: "" }, "Unbekannt"),
+                    React.createElement("option", { value: "rechts" }, "Rechts"),
+                    React.createElement("option", { value: "links" }, "Links"),
+                    React.createElement("option", { value: "beidhaendig" }, "Beidhändig"))),
+            React.createElement(Field, { label: "Letzter Verein" },
+                React.createElement("input", { className: inputClass, value: previousClub, onChange: (e) => setPreviousClub(e.target.value), placeholder: "z. B. TSV Nord" }))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Änderungen speichern" : "Spieler anlegen")));
 }
@@ -1008,14 +1035,34 @@ function TestForm({ onSubmit, onClose, testTypes }) {
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Testergebnis speichern")));
 }
-function VideoForm({ onSubmit, onClose }) {
+function VideoForm({ onSubmit, onClose, defaultType }) {
     const [date, setDate] = useState(today());
-    const [type, setType] = useState(VIDEO_TYPES[0]);
+    const [type, setType] = useState(defaultType || VIDEO_TYPES[0]);
+    const [mode, setMode] = useState("link");
     const [url, setUrl] = useState("");
+    const [file, setFile] = useState(null);
+    const [uploading, setUploading] = useState(false);
     const [description, setDescription] = useState("");
     const [error, setError] = useState("");
-    function handleSubmit(e) {
+    async function handleSubmit(e) {
         e.preventDefault();
+        if (mode === "upload") {
+            if (!file) {
+                setError("Bitte eine Videodatei auswählen.");
+                return;
+            }
+            setUploading(true);
+            try {
+                const result = await uploadToCloudinary(file);
+                onSubmit({ date, type, url: result.url, description: description.trim() });
+                onClose();
+            }
+            catch (err) {
+                setUploading(false);
+                setError("Datei-Upload fehlgeschlagen. Bitte nochmal versuchen oder per Link einfügen.");
+            }
+            return;
+        }
         if (!url.trim() || !/^https?:\/\//i.test(url.trim())) {
             setError("Bitte einen gültigen Link (mit http:// oder https://) eingeben.");
             return;
@@ -1029,12 +1076,19 @@ function VideoForm({ onSubmit, onClose }) {
                 React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
             React.createElement(Field, { label: "Typ" },
                 React.createElement("select", { className: inputClass, value: type, onChange: (e) => setType(e.target.value) }, VIDEO_TYPES.map((t) => React.createElement("option", { key: t, value: t }, t))))),
-        React.createElement(Field, { label: "Link (z. B. nicht gelisteter YouTube-Link)" },
-            React.createElement("input", { className: inputClass, value: url, onChange: (e) => { setUrl(e.target.value); setError(""); }, placeholder: "https://..." })),
+        React.createElement("div", { className: "flex gap-1 bg-stone-100 rounded-xl p-1" },
+            React.createElement("button", { type: "button", onClick: () => setMode("link"), className: `flex-1 rounded-lg py-1.5 text-sm font-semibold transition ${mode === "link" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}` }, "Link einf\u00FCgen"),
+            React.createElement("button", { type: "button", onClick: () => setMode("upload"), className: `flex-1 rounded-lg py-1.5 text-sm font-semibold transition ${mode === "upload" ? "bg-white text-slate-900 shadow-sm" : "text-slate-500"}` }, "Datei hochladen")),
+        mode === "link"
+            ? React.createElement(Field, { label: "Link (z. B. nicht gelisteter YouTube-Link)" },
+                React.createElement("input", { className: inputClass, value: url, onChange: (e) => { setUrl(e.target.value); setError(""); }, placeholder: "https://..." }))
+            : React.createElement(Field, { label: "Videodatei" },
+                React.createElement("input", { type: "file", accept: "video/*", onChange: (e) => { setFile(e.target.files[0] || null); setError(""); }, className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }),
+                file && React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Ausgew\u00E4hlt: ", file.name)),
         React.createElement(Field, { label: "Beschreibung" },
             React.createElement("textarea", { className: inputClass, rows: 2, value: description, onChange: (e) => setDescription(e.target.value), placeholder: "Was ist zu sehen?" })),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
-        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Video verkn\u00FCpfen")));
+        React.createElement("button", { type: "submit", disabled: uploading, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, uploading ? "Wird hochgeladen\u2026" : mode === "upload" ? "Video hochladen" : "Video verkn\u00FCpfen")));
 }
 function NoteForm({ onSubmit, onClose }) {
     const [date, setDate] = useState(today());
@@ -2362,6 +2416,41 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
                     React.createElement(IconCalendar, { size: 11 }),
                     " Kalender \u00F6ffnen"))))))));
 }
+function polarPoint(cx, cy, r, angleDeg) {
+    const rad = (angleDeg * Math.PI) / 180;
+    return [cx + r * Math.sin(rad), cy - r * Math.cos(rad)];
+}
+function RadarChart({ values, size }) {
+    const n = RADAR_SKILLS.length;
+    const s = size || 240;
+    const cx = s / 2, cy = s / 2;
+    const maxR = s / 2 - 34;
+    const axisAngles = RADAR_SKILLS.map((_, i) => (360 / n) * i);
+    const ringPolys = [0.25, 0.5, 0.75, 1].map((lvl, i) => React.createElement("polygon", { key: i, points: axisAngles.map((a) => polarPoint(cx, cy, maxR * lvl, a).join(",")).join(" "), fill: "none", stroke: "#e7e5e4", strokeWidth: 1 }));
+    const axisLines = axisAngles.map((a, i) => {
+        const [x, y] = polarPoint(cx, cy, maxR, a);
+        return React.createElement("line", { key: i, x1: cx, y1: cy, x2: x, y2: y, stroke: "#e7e5e4", strokeWidth: 1 });
+    });
+    const dataPoints = RADAR_SKILLS.map((skill, i) => polarPoint(cx, cy, maxR * ((values[skill.id] || 0) / 10), axisAngles[i]));
+    const dots = dataPoints.map((p, i) => React.createElement("circle", { key: i, cx: p[0], cy: p[1], r: 3, fill: "#eb1e23" }));
+    const labels = RADAR_SKILLS.map((skill, i) => {
+        const [x, y] = polarPoint(cx, cy, maxR + 20, axisAngles[i]);
+        return React.createElement("text", { key: skill.id, x: x, y: y, fontSize: 11, fontWeight: 600, fill: "#475569", textAnchor: "middle", dominantBaseline: "middle" }, skill.label);
+    });
+    const pad = 26;
+    return React.createElement("svg", { viewBox: `${-pad} ${-pad} ${s + 2 * pad} ${s + 2 * pad}`, width: "100%", style: { maxWidth: s + 2 * pad, display: "block", margin: "0 auto" } },
+        ringPolys,
+        axisLines,
+        React.createElement("polygon", { points: dataPoints.map((p) => p.join(",")).join(" "), fill: "rgba(235,30,35,0.15)", stroke: "#eb1e23", strokeWidth: 2 }),
+        dots,
+        labels);
+}
+function RadarEditor({ values, onChange }) {
+    return React.createElement("div", { className: "space-y-3" }, RADAR_SKILLS.map((skill) => React.createElement("div", { key: skill.id, className: "flex items-center gap-3" },
+        React.createElement("span", { className: "text-xs font-medium text-slate-600 w-28 shrink-0" }, skill.label),
+        React.createElement("input", { type: "range", min: 1, max: 10, value: values[skill.id] || 5, onChange: (e) => onChange(skill.id, Number(e.target.value)), className: "flex-1 accent-[#eb1e23]" }),
+        React.createElement("span", { className: "text-xs font-bold text-slate-900 w-5 text-right" }, values[skill.id] || 5))));
+}
 const WELLNESS_SCALE_COLORS = { 1: "bg-red-500", 2: "bg-orange-500", 3: "bg-amber-400", 4: "bg-lime-500", 5: "bg-emerald-500" };
 const TEAM_COLORS = ["from-[#eb1e23] to-[#8f1418]", "from-[#0a96d4] to-[#0a5a80]", "from-emerald-500 to-emerald-800", "from-violet-500 to-violet-800", "from-amber-500 to-amber-800", "from-slate-600 to-slate-900"];
 function WellnessScaleInput({ field, value, onChange }) {
@@ -2482,8 +2571,9 @@ const TABS = [
     { key: "video", label: "Videos", icon: IconVideo },
     { key: "notiz", label: "Notizen", icon: IconNote },
     { key: "entwicklung", label: "Development Plan", icon: IconClipboard },
+    { key: "steckbrief", label: "Steckbrief", icon: IconFile },
 ];
-const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "video", "notiz", "entwicklung"];
+const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "video", "notiz", "entwicklung", "steckbrief"];
 function SpielerAkte() {
     const [loading, setLoading] = useState(true);
     const [saveError, setSaveError] = useState(false);
@@ -2498,6 +2588,7 @@ function SpielerAkte() {
     const [openHeaderMenu, setOpenHeaderMenu] = useState(null);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [editingStat, setEditingStat] = useState(null);
+    const [videoDefaultType, setVideoDefaultType] = useState(null);
     function toggleVideo(id) {
         setExpandedVideos((prev) => {
             const next = new Set(prev);
@@ -2535,6 +2626,27 @@ function SpielerAkte() {
     const [loginError, setLoginError] = useState("");
     const [loginBusy, setLoginBusy] = useState(false);
     const prevUidRef = useRef(undefined);
+    const steckbriefRef = useRef(null);
+    const [pdfBusy, setPdfBusy] = useState(false);
+    async function exportSteckbriefPdf(playerName) {
+        if (!steckbriefRef.current || !window.html2canvas || !window.jspdf)
+            return;
+        setPdfBusy(true);
+        try {
+            const canvas = await window.html2canvas(steckbriefRef.current, { scale: 2, backgroundColor: "#ffffff" });
+            const imgData = canvas.toDataURL("image/png");
+            const pdf = new window.jspdf.jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const imgWidth = pageWidth - 20;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            pdf.addImage(imgData, "PNG", 10, 10, imgWidth, imgHeight);
+            pdf.save(`Steckbrief-${(playerName || "Spieler").replace(/[^a-z0-9]+/gi, "_")}.pdf`);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+        setPdfBusy(false);
+    }
     useEffect(() => {
         if (firebaseUser?.uid !== prevUidRef.current) {
             prevUidRef.current = firebaseUser?.uid;
@@ -3696,6 +3808,61 @@ function SpielerAkte() {
                                 " ",
                                 n.attachmentName || "Anhang öffnen")))))))))))))),
         activeTab === "entwicklung" && (React.createElement(DevelopmentPlanPanel, { player: selectedPlayer, isTrainer: isTrainer, cycles: devPlanCycles, templates: devPlanTemplates, onCreateCycle: createDevPlanCycle, onSavePlayer: saveDevPlanPlayer, onReleasePlayer: releaseDevPlanPlayer, onSaveTrainer: saveDevPlanTrainer, onReleaseTrainer: releaseDevPlanTrainer, onSaveCombined: saveDevPlanCombined, onDeleteCycle: deleteDevPlanCycle })),
+        activeTab === "steckbrief" && selectedPlayer && (() => {
+            const radarValues = { wurf: 5, verteidigung: 5, athletik: 5, spielintelligenz: 5, teamplay: 5, ...(selectedPlayer.radarRatings || {}) };
+            function setRadarValue(skillId, val) {
+                persistPlayerFields(selectedPlayer.id, { radarRatings: { ...radarValues, [skillId]: val } });
+            }
+            const bioItems = [
+                { label: "Geburtsdatum", value: fmtDate(selectedPlayer.birthdate) },
+                { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "–" },
+                { label: "Letzter Verein", value: selectedPlayer.previousClub || "–" },
+                { label: "Status", value: STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label || "–" },
+            ].map((b) => React.createElement("div", { key: b.label, className: "bg-stone-50 rounded-xl p-3" },
+                React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mb-0.5" }, b.label),
+                React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, b.value)));
+            const statRows = [
+                { label: "Punkte", id: "punkte" },
+                { label: "Rebounds", id: "rebounds" },
+                { label: "Assists", id: "assists" },
+                { label: "Turnover", id: "turnovers" },
+            ].map((x) => React.createElement("div", { key: x.id, className: "bg-stone-50 rounded-xl p-3 text-center" },
+                React.createElement("p", { className: "text-lg font-bold text-slate-700" }, avg(x.id)),
+                React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)));
+            const wurfVideo = sortByDateDesc(playerVideos.filter((v) => v.type === "Wurftechnik"))[0] || null;
+            return React.createElement("div", { className: "space-y-5" },
+                React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2" },
+                    React.createElement(SectionLabel, null, "Spieler-Steckbrief"),
+                    React.createElement("button", { onClick: () => exportSteckbriefPdf(selectedPlayer.name), disabled: pdfBusy, className: btnPrimaryClass + " text-sm px-3.5 py-2" },
+                        React.createElement(IconDownload, { size: 14 }),
+                        pdfBusy ? "Wird erstellt…" : "Als PDF exportieren")),
+                React.createElement("div", { ref: steckbriefRef, className: "bg-white rounded-2xl p-6 space-y-5 border border-stone-200" },
+                    React.createElement("div", { className: "flex items-center gap-4 pb-4 border-b border-stone-100" },
+                        React.createElement("div", { className: "w-16 h-16 rounded-2xl bg-gradient-to-br from-[#eb1e23] to-[#be2228] text-white flex items-center justify-center text-2xl font-black shrink-0" }, selectedPlayer.number !== "" && selectedPlayer.number !== undefined ? selectedPlayer.number : "?"),
+                        React.createElement("div", null,
+                            React.createElement("p", { className: "text-2xl font-bold text-slate-900" }, selectedPlayer.name),
+                            React.createElement("p", { className: "text-sm text-slate-500" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ")))),
+                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3" }, bioItems),
+                    React.createElement("div", { className: "grid md:grid-cols-2 gap-6 items-center" },
+                        React.createElement(RadarChart, { values: radarValues, size: 240 }),
+                        React.createElement("div", { className: "grid grid-cols-2 gap-3" }, statRows)),
+                    React.createElement("div", { className: "pt-4 border-t border-stone-100" },
+                        React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mb-1.5" }, "Wurftechnik-Video"),
+                        wurfVideo
+                            ? React.createElement("a", { href: wurfVideo.url, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 text-sm font-medium text-[#eb1e23] hover:text-[#be2228] bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-full transition" },
+                                React.createElement(IconVideo, { size: 14 }),
+                                fmtDate(wurfVideo.date))
+                            : React.createElement("p", { className: "text-sm text-slate-400" }, "Noch kein Wurftechnik-Video hinterlegt."))),
+                isTrainer && React.createElement("div", { className: `${cardClass} p-4` },
+                    React.createElement("div", { className: "flex items-center justify-between" },
+                        React.createElement(SectionLabel, null, "Wurftechnik-Video hinzufügen"),
+                        React.createElement("button", { onClick: () => { setVideoDefaultType("Wurftechnik"); setModal("video"); }, className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" },
+                            React.createElement(IconUpload, { size: 13 }),
+                            " Video"))),
+                isTrainer && React.createElement("div", { className: `${cardClass} p-4` },
+                    React.createElement(SectionLabel, null, "Skill-Bewertung (erscheint im Steckbrief oben)"),
+                    React.createElement("div", { className: "mt-3" }, React.createElement(RadarEditor, { values: radarValues, onChange: setRadarValue }))));
+        })(),
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
         modal === "player" && (React.createElement(Modal, { title: "Spieler anlegen", onClose: () => setModal(null) },
@@ -3713,7 +3880,7 @@ function SpielerAkte() {
         modal === "test" && (React.createElement(Modal, { title: "Athletik-Test hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(TestForm, { onSubmit: handleAddTest, onClose: () => setModal(null), testTypes: testTypes }))),
         modal === "video" && (React.createElement(Modal, { title: "Video verkn\u00FCpfen", onClose: () => setModal(null) },
-            React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null) }))),
+            React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null), defaultType: videoDefaultType }))),
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(NoteForm, { onSubmit: handleAddNote, onClose: () => setModal(null) }))),
         modal === "accounts" && (React.createElement(Modal, { title: "Zug\u00E4nge verwalten", onClose: () => setModal(null), wide: true },
