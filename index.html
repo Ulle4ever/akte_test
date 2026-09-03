@@ -881,6 +881,8 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [status, setStatus] = useState(initial?.status || "aktiv");
     const [handedness, setHandedness] = useState(initial?.handedness || "");
     const [previousClub, setPreviousClub] = useState(initial?.previousClub || "");
+    const [height, setHeight] = useState(initial?.height ?? "");
+    const [weight, setWeight] = useState(initial?.weight ?? "");
     const [error, setError] = useState("");
     function handleSubmit(e) {
         e.preventDefault();
@@ -901,6 +903,8 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             status,
             handedness,
             previousClub: previousClub.trim(),
+            height: height === "" ? "" : Number(height),
+            weight: weight === "" ? "" : Number(weight),
         });
         onClose();
     }
@@ -930,6 +934,11 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
                     React.createElement("option", { value: "beidhaendig" }, "Beidhändig"))),
             React.createElement(Field, { label: "Letzter Verein" },
                 React.createElement("input", { className: inputClass, value: previousClub, onChange: (e) => setPreviousClub(e.target.value), placeholder: "z. B. TSV Nord" }))),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Größe (cm)" },
+                React.createElement("input", { type: "number", className: inputClass, value: height, onChange: (e) => setHeight(e.target.value), min: "0", max: "260", placeholder: "z. B. 188" })),
+            React.createElement(Field, { label: "Gewicht (kg)" },
+                React.createElement("input", { type: "number", className: inputClass, value: weight, onChange: (e) => setWeight(e.target.value), min: "0", max: "250", placeholder: "z. B. 82" }))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Änderungen speichern" : "Spieler anlegen")));
 }
@@ -3746,10 +3755,20 @@ function SpielerAkte() {
                                     React.createElement(IconEdit, { size: 16 })),
                                 React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg hover:bg-red-50 text-red-400", "aria-label": "L\u00F6schen" },
                                     React.createElement(IconTrash, { size: 16 }))))),
-                        selectedPlayer.birthdate && (React.createElement("div", { className: "flex flex-wrap gap-8 mt-5 pt-4 border-t border-stone-100" },
-                            React.createElement("div", null,
-                                React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, "Geburtsdatum"),
-                                React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, fmtDate(selectedPlayer.birthdate))))),
+                        (() => {
+                            const bioItems = [
+                                { label: "Geburtsdatum", value: selectedPlayer.birthdate ? fmtDate(selectedPlayer.birthdate) : "" },
+                                { label: "Größe", value: selectedPlayer.height ? `${selectedPlayer.height} cm` : "" },
+                                { label: "Gewicht", value: selectedPlayer.weight ? `${selectedPlayer.weight} kg` : "" },
+                                { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
+                                { label: "Letzter Verein", value: selectedPlayer.previousClub || "" },
+                            ].filter((b) => b.value);
+                            if (bioItems.length === 0)
+                                return null;
+                            return React.createElement("div", { className: "flex flex-wrap gap-x-8 gap-y-3 mt-5 pt-4 border-t border-stone-100" }, bioItems.map((b) => React.createElement("div", { key: b.label },
+                                React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, b.label),
+                                React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, b.value))));
+                        })(),
                         (() => {
                             const todayEvents = getPlayerVisibleEvents(calendarEvents, selectedPlayer).filter((e) => e.date === isoDate(new Date()));
                             if (todayEvents.length === 0)
