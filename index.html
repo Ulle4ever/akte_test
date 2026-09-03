@@ -2971,12 +2971,18 @@ function SpielerAkte() {
                     }));
                     if (!cancelled)
                         setWellnessData(Object.fromEntries(wellEntries));
-                    const gradeEntries = await Promise.all(loadedPlayers.map(async (p) => {
-                        const s = await db.collection("playerGrades").doc(p.id).get();
-                        return [p.id, { subjects: s.exists ? (s.data().subjects || []) : [] }];
-                    }));
-                    if (!cancelled)
-                        setGradesData(Object.fromEntries(gradeEntries));
+                    try {
+                        const gradeEntries = await Promise.all(loadedPlayers.map(async (p) => {
+                            const s = await db.collection("playerGrades").doc(p.id).get();
+                            return [p.id, { subjects: s.exists ? (s.data().subjects || []) : [] }];
+                        }));
+                        if (!cancelled)
+                            setGradesData(Object.fromEntries(gradeEntries));
+                    }
+                    catch (e) {
+                        if (!cancelled)
+                            setGradesData({});
+                    }
                     const evSnap = await db.collection("calendarEvents").get();
                     if (!cancelled)
                         setCalendarEvents(evSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
@@ -2993,9 +2999,15 @@ function SpielerAkte() {
                     const ownWellSnap = await db.collection("playerWellness").doc(account.playerId).get();
                     if (!cancelled)
                         setWellnessData({ [account.playerId]: { entries: ownWellSnap.exists ? (ownWellSnap.data().entries || []) : [] } });
-                    const ownGradeSnap = await db.collection("playerGrades").doc(account.playerId).get();
-                    if (!cancelled)
-                        setGradesData({ [account.playerId]: { subjects: ownGradeSnap.exists ? (ownGradeSnap.data().subjects || []) : [] } });
+                    try {
+                        const ownGradeSnap = await db.collection("playerGrades").doc(account.playerId).get();
+                        if (!cancelled)
+                            setGradesData({ [account.playerId]: { subjects: ownGradeSnap.exists ? (ownGradeSnap.data().subjects || []) : [] } });
+                    }
+                    catch (e) {
+                        if (!cancelled)
+                            setGradesData({ [account.playerId]: { subjects: [] } });
+                    }
                     const [teamEvSnap, ownEvSnap] = await Promise.all([
                         loadedPlayerTeamId ? db.collection("calendarEvents").where("teamId", "==", loadedPlayerTeamId).get() : Promise.resolve({ docs: [] }),
                         db.collection("calendarEvents").where("includedPlayerIds", "array-contains", account.playerId).get(),
