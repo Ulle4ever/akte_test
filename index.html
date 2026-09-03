@@ -2694,7 +2694,7 @@ function GradeChips({ grades, onRemove }) {
         g,
         onRemove && React.createElement("button", { type: "button", onClick: () => onRemove(i), className: "text-slate-400 hover:text-red-500 leading-none", "aria-label": "Klausurnote entfernen" }, "×"))));
 }
-function GradesPanel({ isTrainer, isOwnAccount, subjects, onSave, onToggleFlag, onRenameSubject }) {
+function GradesPanel({ isTrainer, isOwnAccount, subjects, onSave, onToggleFlag, onRenameSubject, onSetComment }) {
     const [rows, setRows] = useState(subjects);
     const [error, setError] = useState("");
     const [dirty, setDirty] = useState(false);
@@ -2737,17 +2737,21 @@ function GradesPanel({ isTrainer, isOwnAccount, subjects, onSave, onToggleFlag, 
         return React.createElement("form", { onSubmit: handleSave, className: `${cardClass} p-4 space-y-3` },
             React.createElement(SectionLabel, null, "Noten-Umfrage"),
             React.createElement("p", { className: "text-xs text-slate-400 -mt-1" }, "Zeugnisnote bitte bei allen Fächern eintragen. Bei schlechter als 3- bitte zusätzlich Klausurnoten eintragen."),
-            React.createElement("div", { className: "space-y-1.5" }, rows.map((r) => React.createElement("div", { key: r.id, className: "flex items-center gap-1.5 bg-stone-50 rounded-lg px-2 py-1.5" },
-                React.createElement("input", { className: "flex-1 min-w-0 text-sm bg-white border border-stone-200 rounded-lg px-2 py-1.5", value: r.name, onChange: (e) => updateRow(r.id, { name: e.target.value }), placeholder: "Fach" }),
-                React.createElement("select", { className: "text-sm bg-white border border-stone-200 rounded-lg px-1 py-1.5 w-14 shrink-0", value: r.reportGrade, onChange: (e) => updateRow(r.id, { reportGrade: e.target.value }) },
-                    React.createElement("option", { value: "" }, "–"),
-                    GRADE_OPTIONS.map((g) => React.createElement("option", { key: g, value: g }, g))),
-                React.createElement(GradeChips, { grades: r.examGrades, onRemove: (i) => removeExamGrade(r.id, i) }),
-                React.createElement("select", { className: "text-[10px] w-8 border border-dashed border-stone-300 rounded-full px-0.5 py-0.5 text-slate-400 bg-transparent shrink-0", value: "", onChange: (e) => { addExamGrade(r.id, e.target.value); } },
-                    React.createElement("option", { value: "" }, "+"),
-                    GRADE_OPTIONS.map((g) => React.createElement("option", { key: g, value: g }, g))),
-                React.createElement("button", { type: "button", onClick: () => removeRow(r.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Fach entfernen" },
-                    React.createElement(IconX, { size: 14 }))))),
+            React.createElement("div", { className: "space-y-1.5" }, rows.map((r) => React.createElement("div", { key: r.id, className: "bg-stone-50 rounded-lg px-2 py-1.5 space-y-1" },
+                React.createElement("div", { className: "flex items-center gap-1.5" },
+                    React.createElement("input", { className: "flex-1 min-w-0 text-sm bg-white border border-stone-200 rounded-lg px-2 py-1.5", value: r.name, onChange: (e) => updateRow(r.id, { name: e.target.value }), placeholder: "Fach" }),
+                    React.createElement("select", { className: "text-sm bg-white border border-stone-200 rounded-lg px-1 py-1.5 w-14 shrink-0", value: r.reportGrade, onChange: (e) => updateRow(r.id, { reportGrade: e.target.value }) },
+                        React.createElement("option", { value: "" }, "–"),
+                        GRADE_OPTIONS.map((g) => React.createElement("option", { key: g, value: g }, g))),
+                    React.createElement(GradeChips, { grades: r.examGrades, onRemove: (i) => removeExamGrade(r.id, i) }),
+                    React.createElement("select", { className: "text-[10px] w-8 border border-dashed border-stone-300 rounded-full px-0.5 py-0.5 text-slate-400 bg-transparent shrink-0", value: "", onChange: (e) => { addExamGrade(r.id, e.target.value); } },
+                        React.createElement("option", { value: "" }, "+"),
+                        GRADE_OPTIONS.map((g) => React.createElement("option", { key: g, value: g }, g))),
+                    React.createElement("button", { type: "button", onClick: () => removeRow(r.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Fach entfernen" },
+                        React.createElement(IconX, { size: 14 }))),
+                r.trainerComment && React.createElement("p", { className: "flex items-start gap-1 text-xs text-slate-500 italic pl-0.5" },
+                    React.createElement(IconInfo, { size: 12, className: "shrink-0 mt-0.5 text-[#0a96d4]" }),
+                    r.trainerComment)))),
             React.createElement("button", { type: "button", onClick: addRow, className: "flex items-center gap-1 text-xs font-medium text-[#0a96d4] hover:text-[#4178a0]" },
                 React.createElement(IconPlus, { size: 13 }),
                 " Fach hinzufügen"),
@@ -2756,12 +2760,15 @@ function GradesPanel({ isTrainer, isOwnAccount, subjects, onSave, onToggleFlag, 
     }
     return React.createElement("div", { className: `${cardClass} p-4 space-y-3` },
         React.createElement(SectionLabel, null, "Noten-Umfrage"),
-        subjects.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Der Spieler hat noch keine Fächer eingetragen.")) : (React.createElement("div", { className: "space-y-1.5" }, subjects.map((s) => React.createElement("div", { key: s.id, className: `flex items-center gap-2 rounded-lg px-2.5 py-2 ${s.flagged ? "bg-amber-50 border border-amber-200" : "bg-stone-50"}` },
-            React.createElement("input", { className: "flex-1 min-w-0 text-sm bg-transparent border-none p-0 font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0a96d4] rounded", defaultValue: s.name, onBlur: (e) => { if (e.target.value.trim() && e.target.value.trim() !== s.name)
-                    onRenameSubject(s.id, e.target.value.trim()); } }),
-            React.createElement("span", { className: "text-xs font-bold text-slate-700 shrink-0 w-6 text-center" }, s.reportGrade || "–"),
-            React.createElement(GradeChips, { grades: s.examGrades }),
-            isTrainer && React.createElement("button", { type: "button", onClick: () => onToggleFlag(s.id), className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border shrink-0 transition ${s.flagged ? "bg-amber-500 text-white border-amber-500" : "bg-white text-slate-400 border-stone-200 hover:border-amber-300"}` }, "Beobachtung"))))));
+        subjects.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Der Spieler hat noch keine Fächer eingetragen.")) : (React.createElement("div", { className: "space-y-1.5" }, subjects.map((s) => React.createElement("div", { key: s.id, className: `rounded-lg px-2.5 py-2 space-y-1.5 ${s.flagged ? "bg-amber-50 border border-amber-200" : "bg-stone-50"}` },
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("input", { className: "flex-1 min-w-0 text-sm bg-transparent border-none p-0 font-medium text-slate-800 focus:outline-none focus:ring-1 focus:ring-[#0a96d4] rounded", defaultValue: s.name, onBlur: (e) => { if (e.target.value.trim() && e.target.value.trim() !== s.name)
+                        onRenameSubject(s.id, e.target.value.trim()); } }),
+                React.createElement("span", { className: "text-xs font-bold text-slate-700 shrink-0 w-6 text-center" }, s.reportGrade || "–"),
+                React.createElement(GradeChips, { grades: s.examGrades }),
+                isTrainer && React.createElement("button", { type: "button", onClick: () => onToggleFlag(s.id), className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border shrink-0 transition ${s.flagged ? "bg-amber-500 text-white border-amber-500" : "bg-white text-slate-400 border-stone-200 hover:border-amber-300"}` }, "Beobachtung")),
+            isTrainer && React.createElement("input", { className: "w-full text-xs bg-white border border-stone-200 rounded-lg px-2 py-1 placeholder:text-slate-400", defaultValue: s.trainerComment || "", onBlur: (e) => { if (e.target.value.trim() !== (s.trainerComment || ""))
+                    onSetComment(s.id, e.target.value.trim()); }, placeholder: "Kommentar für den Spieler (z. B. Nachhilfe empfehlen) – sichtbar für den Spieler, nur du kannst ihn schreiben" }))))));
 }
 function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
@@ -3127,6 +3134,10 @@ function SpielerAkte() {
     function renameGradeSubject(playerId, subjectId, name) {
         const cur = gradesData[playerId]?.subjects || [];
         persistGrades(playerId, cur.map((s) => (s.id === subjectId ? { ...s, name } : s)));
+    }
+    function setGradeComment(playerId, subjectId, trainerComment) {
+        const cur = gradesData[playerId]?.subjects || [];
+        persistGrades(playerId, cur.map((s) => (s.id === subjectId ? { ...s, trainerComment } : s)));
     }
     async function persistMeta(changes) {
         setMeta((prev) => ({ ...prev, ...changes }));
@@ -4067,7 +4078,7 @@ function SpielerAkte() {
                                         React.createElement("button", { onClick: () => deleteItem("attendance", a.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                             React.createElement(IconTrash, { size: 14 })))))))))))),
                         activeTab === "wellness" && (React.createElement(WellnessPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, entries: playerWellnessEntries, onAddEntry: (entry) => addWellnessEntry(selectedPlayer.id, entry), onDeleteEntry: (id) => deleteWellnessEntry(selectedPlayer.id, id) })),
-                        activeTab === "noten" && (React.createElement(GradesPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, subjects: playerGradeSubjects, onSave: (subjects) => saveGradeSubjects(selectedPlayer.id, subjects), onToggleFlag: (id) => toggleGradeFlag(selectedPlayer.id, id), onRenameSubject: (id, name) => renameGradeSubject(selectedPlayer.id, id, name) })),
+                        activeTab === "noten" && (React.createElement(GradesPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, subjects: playerGradeSubjects, onSave: (subjects) => saveGradeSubjects(selectedPlayer.id, subjects), onToggleFlag: (id) => toggleGradeFlag(selectedPlayer.id, id), onRenameSubject: (id, name) => renameGradeSubject(selectedPlayer.id, id, name), onSetComment: (id, comment) => setGradeComment(selectedPlayer.id, id, comment) })),
                         activeTab === "video" && (React.createElement("div", null,
                             isTrainer && (React.createElement("div", { className: "flex justify-end mb-3" },
                                 React.createElement("button", { onClick: () => setModal("video"), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-1.5 text-sm font-medium hover:bg-slate-800" },
