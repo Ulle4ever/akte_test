@@ -409,6 +409,11 @@ const CATEGORY_STYLES = {
     athletisch: "bg-red-50 text-red-700 border-red-200",
     mental: "bg-pink-50 text-pink-700 border-pink-200",
 };
+const GRADE_STATUS_OPTIONS = [
+    { value: "gut", label: "Gut", style: "bg-emerald-50 text-emerald-700 border-emerald-200" },
+    { value: "beobachten", label: "Beobachten", style: "bg-amber-50 text-amber-700 border-amber-200" },
+    { value: "kritisch", label: "Kritisch", style: "bg-red-50 text-red-700 border-red-200" },
+];
 const DEFAULT_STAT_CATEGORIES = [
     {
         id: "normal", label: "Normale Statistiken",
@@ -883,7 +888,11 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [previousClub, setPreviousClub] = useState(initial?.previousClub || "");
     const [height, setHeight] = useState(initial?.height ?? "");
     const [weight, setWeight] = useState(initial?.weight ?? "");
+    const [school, setSchool] = useState(initial?.school || "");
+    const [city, setCity] = useState(initial?.city || "");
+    const [district, setDistrict] = useState(initial?.district || "");
     const [error, setError] = useState("");
+    const isCologne = ["köln", "koeln", "cologne"].includes(city.trim().toLowerCase());
     function handleSubmit(e) {
         e.preventDefault();
         if (!name.trim()) {
@@ -905,6 +914,9 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             previousClub: previousClub.trim(),
             height: height === "" ? "" : Number(height),
             weight: weight === "" ? "" : Number(weight),
+            school: school.trim(),
+            city: city.trim(),
+            district: isCologne ? district.trim() : "",
         });
         onClose();
     }
@@ -939,6 +951,13 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
                 React.createElement("input", { type: "number", className: inputClass, value: height, onChange: (e) => setHeight(e.target.value), min: "0", max: "260", placeholder: "z. B. 188" })),
             React.createElement(Field, { label: "Gewicht (kg)" },
                 React.createElement("input", { type: "number", className: inputClass, value: weight, onChange: (e) => setWeight(e.target.value), min: "0", max: "250", placeholder: "z. B. 82" }))),
+        React.createElement(Field, { label: "Schule" },
+            React.createElement("input", { className: inputClass, value: school, onChange: (e) => setSchool(e.target.value), placeholder: "z. B. Gymnasium Nord" })),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Wohnort (Stadt)" },
+                React.createElement("input", { className: inputClass, value: city, onChange: (e) => setCity(e.target.value), placeholder: "z. B. Köln oder Düsseldorf" })),
+            isCologne && (React.createElement(Field, { label: "Stadtteil" },
+                React.createElement("input", { className: inputClass, value: district, onChange: (e) => setDistrict(e.target.value), placeholder: "z. B. Ehrenfeld" })))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Änderungen speichern" : "Spieler anlegen")));
 }
@@ -1165,6 +1184,25 @@ function TestForm({ onSubmit, onClose, testTypes }) {
                 React.createElement("input", { className: inputClass, value: unit, onChange: (e) => setUnit(e.target.value), placeholder: "sek, cm, kg" }))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Testergebnis speichern")));
+}
+function GradeForm({ onSubmit, onClose }) {
+    const [date, setDate] = useState(today());
+    const [status, setStatus] = useState("gut");
+    const [note, setNote] = useState("");
+    function handleSubmit(e) {
+        e.preventDefault();
+        onSubmit({ date, status, note: note.trim() });
+        onClose();
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Datum" },
+                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
+            React.createElement(Field, { label: "Status" },
+                React.createElement("select", { className: inputClass, value: status, onChange: (e) => setStatus(e.target.value) }, GRADE_STATUS_OPTIONS.map((s) => React.createElement("option", { key: s.value, value: s.value }, s.label))))),
+        React.createElement(Field, { label: "Notiz" },
+            React.createElement("textarea", { className: inputClass, rows: 3, value: note, onChange: (e) => setNote(e.target.value), placeholder: "z. B. Mathe 3, Englisch 2, Tendenz stabil" })),
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Eintrag speichern")));
 }
 function VideoForm({ onSubmit, onClose, defaultType }) {
     const [date, setDate] = useState(today());
@@ -2865,7 +2903,7 @@ function SpielerAkte() {
                     const loadedPlayers = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
                     if (!cancelled)
                         setPlayers(loadedPlayers);
-                    const privDefaults = { notes: [], tests: [], attendance: [] };
+                    const privDefaults = { notes: [], tests: [], attendance: [], grades: [] };
                     const privEntries = await Promise.all(loadedPlayers.map(async (p) => {
                         const s = await db.collection("playerPrivate").doc(p.id).get();
                         return [p.id, s.exists ? { ...privDefaults, ...s.data() } : privDefaults];
@@ -3005,10 +3043,10 @@ function SpielerAkte() {
     }
     async function createPlayerDoc(playerId, initialData) {
         setPlayers((prev) => [...prev, { id: playerId, ...initialData }]);
-        setPrivateData((prev) => ({ ...prev, [playerId]: { notes: [], tests: [], attendance: [] } }));
+        setPrivateData((prev) => ({ ...prev, [playerId]: { notes: [], tests: [], attendance: [], grades: [] } }));
         try {
             await db.collection("players").doc(playerId).set(initialData);
-            await db.collection("playerPrivate").doc(playerId).set({ notes: [], tests: [], attendance: [] });
+            await db.collection("playerPrivate").doc(playerId).set({ notes: [], tests: [], attendance: [], grades: [] });
             setSaveError(false);
         }
         catch (e) {
@@ -3247,6 +3285,7 @@ function SpielerAkte() {
     const playerTests = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.tests || []) : [];
     const playerVideos = selectedPlayer ? sortByDateDesc(selectedPlayer.videos || []) : [];
     const playerNotes = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.notes || []) : [];
+    const playerGrades = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.grades || []) : [];
     const playerAttendance = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.attendance || []) : [];
     const playerWellnessEntries = selectedPlayer ? sortByDateDesc(wellnessData[selectedPlayer.id]?.entries || []) : [];
     const avg = (key) => (playerStats.length ? fmtNum(playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length, 1) : "–");
@@ -3332,6 +3371,10 @@ function SpielerAkte() {
     function handleAddNote(entry) {
         const cur = privateData[selectedPlayer.id]?.notes || [];
         persistPrivateFields(selectedPlayer.id, { notes: [...cur, { id: uid(), ...entry }] });
+    }
+    function handleAddGrade(entry) {
+        const cur = privateData[selectedPlayer.id]?.grades || [];
+        persistPrivateFields(selectedPlayer.id, { grades: [...cur, { id: uid(), ...entry }] });
     }
     function handleImportAttendance(entries, date) {
         const byPlayer = {};
@@ -4032,11 +4075,14 @@ function SpielerAkte() {
                     ? autoValues[s.id]
                     : manualRatings[s.id];
             });
+            const wohnort = selectedPlayer.district ? `${selectedPlayer.district}, ${selectedPlayer.city}` : (selectedPlayer.city || "–");
             const bioItems = [
                 { label: "Geburtsdatum", value: fmtDate(selectedPlayer.birthdate) },
                 { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "–" },
                 { label: "Letzter Verein", value: selectedPlayer.previousClub || "–" },
                 { label: "Status", value: STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label || "–" },
+                { label: "Schule", value: selectedPlayer.school || "–" },
+                { label: "Wohnort", value: wohnort },
             ].map((b) => React.createElement("div", { key: b.label, className: "bg-stone-50 rounded-xl p-3.5 min-w-0" },
                 React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mb-0.5" }, b.label),
                 React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, b.value)));
@@ -4062,7 +4108,7 @@ function SpielerAkte() {
                         React.createElement("div", { className: "min-w-0" },
                             React.createElement("p", { className: "text-2xl font-bold text-slate-900 truncate" }, selectedPlayer.name),
                             React.createElement("p", { className: "text-sm text-slate-500 truncate" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ")))),
-                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-4 min-w-0" }, bioItems),
+                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-3 gap-4 min-w-0" }, bioItems),
                     React.createElement("div", { className: "grid md:grid-cols-2 gap-8 items-center min-w-0" },
                         React.createElement("div", { className: "min-w-0 flex justify-center" }, React.createElement(RadarChart, { values: radarValues, size: 240 })),
                         React.createElement("div", { className: "grid grid-cols-2 gap-4 min-w-0" }, statRows)),
@@ -4079,7 +4125,20 @@ function SpielerAkte() {
                         React.createElement("button", { onClick: () => { setVideoDefaultType("Wurftechnik"); setModal("video"); }, className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800 shrink-0" },
                             React.createElement(IconUpload, { size: 13 }),
                             " Wurftechnik-Video")),
-                    React.createElement(RadarEditor, { values: manualRatings, onChange: setRadarValue, modes: radarModes, onModeChange: setRadarMode, autoValues: autoValues })));
+                    React.createElement(RadarEditor, { values: manualRatings, onChange: setRadarValue, modes: radarModes, onModeChange: setRadarMode, autoValues: autoValues })),
+                isTrainer && React.createElement("div", { className: `${cardClass} p-4 space-y-3` },
+                    React.createElement("div", { className: "flex items-center justify-between" },
+                        React.createElement(SectionLabel, null, "Notenüberwachung"),
+                        React.createElement("button", { onClick: () => setModal("grade"), className: "flex items-center gap-1.5 text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800 shrink-0" },
+                            React.createElement(IconPlus, { size: 13 }),
+                            " Eintrag")),
+                    playerGrades.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Noten-Einträge erfasst.")) : (React.createElement("div", { className: "space-y-2" }, playerGrades.map((g) => (React.createElement("div", { key: g.id, className: "flex items-start gap-3 bg-stone-50 rounded-xl p-3" },
+                        React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border shrink-0 mt-0.5 ${GRADE_STATUS_OPTIONS.find((s) => s.value === g.status)?.style || "bg-stone-100 text-slate-500 border-stone-200"}` }, GRADE_STATUS_OPTIONS.find((s) => s.value === g.status)?.label || "–"),
+                        React.createElement("div", { className: "min-w-0 flex-1" },
+                            React.createElement("p", { className: "text-xs text-slate-400" }, fmtDate(g.date)),
+                            g.note && React.createElement("p", { className: "text-sm text-slate-700 mt-0.5" }, g.note)),
+                        React.createElement("button", { onClick: () => deleteItem("grades", g.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Eintrag löschen" },
+                            React.createElement(IconTrash, { size: 14 })))))))));
         })()))))),
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
@@ -4097,6 +4156,8 @@ function SpielerAkte() {
             React.createElement(SimpleListManager, { items: testTypes, onAdd: addTestType, onRename: renameTestType, onDelete: deleteTestType, onMove: moveTestType, onClose: () => setModal(null), addPlaceholder: "Neue Testart, z. B. T-Test", description: "Diese Liste erscheint als Auswahl im Athletik-Test-Formular. \u00C4nderungen wirken nur auf Anzeige/neue Eintr\u00E4ge." }))),
         modal === "test" && (React.createElement(Modal, { title: "Athletik-Test hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(TestForm, { onSubmit: handleAddTest, onClose: () => setModal(null), testTypes: testTypes }))),
+        modal === "grade" && (React.createElement(Modal, { title: "Noten-Eintrag hinzuf\u00FCgen", onClose: () => setModal(null) },
+            React.createElement(GradeForm, { onSubmit: handleAddGrade, onClose: () => setModal(null) }))),
         modal === "video" && (React.createElement(Modal, { title: "Video verkn\u00FCpfen", onClose: () => setModal(null) },
             React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null), defaultType: videoDefaultType }))),
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
