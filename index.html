@@ -29,7 +29,7 @@
     font-display: swap;
   }
   html, body { overflow-x: hidden; max-width: 100vw; }
-  body { font-family: "Montserrat", ui-sans-serif, system-ui, sans-serif; }
+  body { font-family: "Montserrat", ui-sans-serif, system-ui, sans-serif; background: #fafaf9; }
 
   /* ============================================================
      GLOBALES POLISH
@@ -932,7 +932,7 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
 }
 function SectionLabel({ children }) {
     return React.createElement("p", { className: "flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-wider pt-1" },
-        React.createElement("span", { className: "w-[3px] h-3.5 rounded-full bg-gradient-to-b from-[#eb1e23] to-[#0a96d4] shrink-0" }),
+        React.createElement("span", { className: "w-[3px] h-3.5 rounded-full bg-[#eb1e23] shrink-0" }),
         children);
 }
 function SimpleListManager({ title, description, items, onAdd, onRename, onDelete, onMove, onClose, addPlaceholder }) {
@@ -2451,7 +2451,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
         setShowEventForm(true);
     }
     const hour = new Date().getHours();
-    const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Willkommen zur\u00FCck" : "Guten Abend";
+    const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Willkommen zurueck" : "Guten Abend";
     const kpiTiles = [
         { label: "Teams", value: teams.length, icon: IconUsers, grad: "from-[#0a96d4] to-[#0a6fa0]" },
         { label: "Spieler gesamt", value: players.length, icon: IconUsers, grad: "from-slate-700 to-slate-900" },
@@ -3537,7 +3537,7 @@ function SpielerAkte() {
         [types[i], types[j]] = [types[j], types[i]];
         persistMeta({ testTypes: types });
     }
-    return (React.createElement("div", { className: "min-h-[100dvh] bg-stone-50 flex flex-col" },
+    return (React.createElement("div", { className: "min-h-[100dvh] flex flex-col" },
         React.createElement("img", { src: LOGO_DATA_URI, alt: "", "aria-hidden": "true", className: "fixed -right-16 bottom-0 w-[420px] h-[420px] object-contain opacity-[0.05] grayscale pointer-events-none select-none -z-10" }),
         React.createElement("header", { className: "bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white px-4 sm:px-6 py-3 sm:py-3.5 pt-safe flex items-center justify-between flex-wrap gap-3 sticky top-0 z-10 border-b border-white/10 relative" },
             React.createElement("div", { className: "absolute bottom-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[#eb1e23] to-[#0a96d4]" }),
