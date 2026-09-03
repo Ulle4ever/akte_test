@@ -323,7 +323,9 @@ function normalizeMinMax(value, min, max) {
     const t = (value - min) / (max - min);
     return Math.round((1 + t * 9) * 10) / 10;
 }
-function computeAutoRadar(teamPlayers, statCategories, privateData, isTrainer) {
+function computeAutoRadar(teamPlayers, statCategories, privateData, isTrainer, testTypes) {
+    const labelToTestTypeId = {};
+    (testTypes || []).forEach((t) => { labelToTestTypeId[t.label] = t.id; });
     const hasField = (id) => statCategories.some((c) => c.fields.some((f) => f.id === id));
     const shootingFieldIds = ["fg", "tp", "ft"].filter(hasField);
     const hasSteals = hasField("steals");
@@ -354,7 +356,8 @@ function computeAutoRadar(teamPlayers, statCategories, privateData, isTrainer) {
             const latestByType = {};
             tests.forEach((t) => { if (!latestByType[t.testType] || t.date > latestByType[t.testType].date)
                 latestByType[t.testType] = t; });
-            Object.entries(latestByType).forEach(([typeId, t]) => {
+            Object.entries(latestByType).forEach(([label, t]) => {
+                const typeId = labelToTestTypeId[label] || label;
                 if (!TEST_DIRECTION[typeId])
                     return;
                 const val = Number(t.result);
@@ -3682,7 +3685,7 @@ function SpielerAkte() {
                 !selectedPlayer && !showGlobalCalendar && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
-                selectedPlayer && (React.createElement("div", { className: "rsk-fade-in" },
+                selectedPlayer && (React.createElement("div", { className: "rsk-fade-in min-w-0" },
                     React.createElement("div", { className: `${cardClass} p-6 relative overflow-hidden` },
                         React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#eb1e23] via-slate-800 to-[#0a96d4]" }),
                         React.createElement("div", { className: "flex items-start justify-between flex-wrap gap-4" },
@@ -3730,7 +3733,7 @@ function SpielerAkte() {
                             React.createElement(Icon, { size: 15, className: active ? "text-[#eb1e23]" : "" }),
                             t.label));
                     })),
-                    React.createElement("div", { className: "mt-5" },
+                    React.createElement("div", { className: "mt-5 min-w-0" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
                             React.createElement("div", { className: "flex flex-wrap gap-4" },
                                 React.createElement("div", { className: `${cardClass} p-4 text-center w-full md:w-48 hover:shadow-md transition-shadow relative overflow-hidden` },
@@ -3959,7 +3962,7 @@ function SpielerAkte() {
                 persistPlayerFields(selectedPlayer.id, { radarModes: { ...radarModes, [skillId]: mode } });
             }
             const teamPlayers = players.filter((p) => p.teamId === selectedPlayer.teamId);
-            const autoRadarAll = computeAutoRadar(teamPlayers.length ? teamPlayers : [selectedPlayer], statCategories, privateData, isTrainer);
+            const autoRadarAll = computeAutoRadar(teamPlayers.length ? teamPlayers : [selectedPlayer], statCategories, privateData, isTrainer, testTypes);
             const autoValues = autoRadarAll[selectedPlayer.id] || { wurf: null, verteidigung: null, athletik: null };
             const radarValues = {};
             RADAR_SKILLS.forEach((s) => {
@@ -3972,36 +3975,36 @@ function SpielerAkte() {
                 { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "–" },
                 { label: "Letzter Verein", value: selectedPlayer.previousClub || "–" },
                 { label: "Status", value: STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label || "–" },
-            ].map((b) => React.createElement("div", { key: b.label, className: "bg-stone-50 rounded-xl p-3" },
+            ].map((b) => React.createElement("div", { key: b.label, className: "bg-stone-50 rounded-xl p-3.5 min-w-0" },
                 React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mb-0.5" }, b.label),
-                React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, b.value)));
+                React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, b.value)));
             const statRows = [
                 { label: "Punkte", id: "punkte" },
                 { label: "Rebounds", id: "rebounds" },
                 { label: "Assists", id: "assists" },
                 { label: "Turnover", id: "turnovers" },
-            ].map((x) => React.createElement("div", { key: x.id, className: "bg-stone-50 rounded-xl p-3 text-center" },
+            ].map((x) => React.createElement("div", { key: x.id, className: "bg-stone-50 rounded-xl p-3.5 text-center" },
                 React.createElement("p", { className: "text-lg font-bold text-slate-700" }, avg(x.id)),
                 React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)));
             const wurfVideo = sortByDateDesc(playerVideos.filter((v) => v.type === "Wurftechnik"))[0] || null;
-            return React.createElement("div", { className: "space-y-5" },
+            return React.createElement("div", { className: "space-y-5 min-w-0 max-w-full" },
                 React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2" },
                     React.createElement(SectionLabel, null, "Spieler-Steckbrief"),
                     React.createElement("button", { onClick: () => exportSteckbriefPdf(selectedPlayer.name), disabled: pdfBusy, className: btnPrimaryClass + " text-sm px-3.5 py-2" },
                         React.createElement(IconDownload, { size: 14 }),
                         pdfBusy ? "Wird erstellt…" : "Als PDF exportieren")),
-                React.createElement("div", { ref: steckbriefRef, className: "bg-white rounded-2xl p-6 space-y-5 border border-stone-200 relative overflow-hidden" },
+                React.createElement("div", { ref: steckbriefRef, className: "bg-white rounded-2xl p-6 sm:p-8 space-y-6 border border-stone-200 relative overflow-hidden w-full max-w-full min-w-0 box-border" },
                     React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1.5 bg-gradient-to-r from-[#eb1e23] via-slate-800 to-[#0a96d4]" }),
-                    React.createElement("div", { className: "flex items-center gap-4 pb-4 border-b border-stone-100" },
+                    React.createElement("div", { className: "flex items-center gap-5 pb-5 border-b border-stone-100 min-w-0" },
                         React.createElement("div", { className: "w-16 h-16 rounded-2xl bg-gradient-to-br from-[#eb1e23] to-[#be2228] text-white flex items-center justify-center text-2xl font-black shrink-0" }, selectedPlayer.number !== "" && selectedPlayer.number !== undefined ? selectedPlayer.number : "?"),
-                        React.createElement("div", null,
-                            React.createElement("p", { className: "text-2xl font-bold text-slate-900" }, selectedPlayer.name),
-                            React.createElement("p", { className: "text-sm text-slate-500" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ")))),
-                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-3" }, bioItems),
-                    React.createElement("div", { className: "grid md:grid-cols-2 gap-6 items-center" },
-                        React.createElement(RadarChart, { values: radarValues, size: 240 }),
-                        React.createElement("div", { className: "grid grid-cols-2 gap-3" }, statRows)),
-                    React.createElement("div", { className: "pt-4 border-t border-stone-100" },
+                        React.createElement("div", { className: "min-w-0" },
+                            React.createElement("p", { className: "text-2xl font-bold text-slate-900 truncate" }, selectedPlayer.name),
+                            React.createElement("p", { className: "text-sm text-slate-500 truncate" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ")))),
+                    React.createElement("div", { className: "grid grid-cols-2 md:grid-cols-4 gap-4 min-w-0" }, bioItems),
+                    React.createElement("div", { className: "grid md:grid-cols-2 gap-8 items-center min-w-0" },
+                        React.createElement("div", { className: "min-w-0 flex justify-center" }, React.createElement(RadarChart, { values: radarValues, size: 240 })),
+                        React.createElement("div", { className: "grid grid-cols-2 gap-4 min-w-0" }, statRows)),
+                    React.createElement("div", { className: "pt-5 border-t border-stone-100" },
                         React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mb-1.5" }, "Wurftechnik-Video"),
                         wurfVideo
                             ? React.createElement("a", { href: wurfVideo.url, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 text-sm font-medium text-[#eb1e23] hover:text-[#be2228] bg-red-50 hover:bg-red-100 px-3 py-1.5 rounded-full transition" },
