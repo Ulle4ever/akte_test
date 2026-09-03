@@ -3949,7 +3949,7 @@ function SpielerAkte() {
                             n.attachmentUrl && (React.createElement("a", { href: n.attachmentUrl, target: "_blank", rel: "noopener noreferrer", className: "inline-flex items-center gap-1.5 mt-2 text-xs font-medium text-[#0a96d4] hover:text-[#4178a0] bg-sky-50 hover:bg-sky-100 px-2.5 py-1 rounded-full transition" },
                                 React.createElement(IconPaperclip, { size: 13 }),
                                 " ",
-                                n.attachmentName || "Anhang öffnen")))))))))))))),
+                                n.attachmentName || "Anhang öffnen"))))))))),
         activeTab === "entwicklung" && (React.createElement(DevelopmentPlanPanel, { player: selectedPlayer, isTrainer: isTrainer, cycles: devPlanCycles, templates: devPlanTemplates, onCreateCycle: createDevPlanCycle, onSavePlayer: saveDevPlanPlayer, onReleasePlayer: releaseDevPlanPlayer, onSaveTrainer: saveDevPlanTrainer, onReleaseTrainer: releaseDevPlanTrainer, onSaveCombined: saveDevPlanCombined, onDeleteCycle: deleteDevPlanCycle })),
         activeTab === "steckbrief" && selectedPlayer && (() => {
             const manualRatings = { wurf: 5, verteidigung: 5, athletik: 5, spielintelligenz: 5, teamplay: 5, ...(selectedPlayer.radarRatings || {}) };
@@ -4018,7 +4018,7 @@ function SpielerAkte() {
                             React.createElement(IconUpload, { size: 13 }),
                             " Wurftechnik-Video")),
                     React.createElement(RadarEditor, { values: manualRatings, onChange: setRadarValue, modes: radarModes, onModeChange: setRadarMode, autoValues: autoValues })));
-        })(),
+        })()))))),
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
         modal === "player" && (React.createElement(Modal, { title: "Spieler anlegen", onClose: () => setModal(null) },
