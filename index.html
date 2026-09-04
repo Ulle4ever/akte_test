@@ -827,6 +827,150 @@ function parseAdvancedStatsCsv(text) {
     }
     return { rows, error: rows.length === 0 ? "Keine Spielerzeilen gefunden." : null };
 }
+function unfoldIcsLines(text) {
+    const clean = text.charCodeAt(0) === 0xFEFF ? text.slice(1) : text;
+    const rawLines = clean.split(/\r\n|\n|\r/);
+    const lines = [];
+    for (const line of rawLines) {
+        if ((line.startsWith(" ") || line.startsWith("\t")) && lines.length > 0) {
+            lines[lines.length - 1] += line.slice(1);
+        }
+        else {
+            lines.push(line);
+        }
+    }
+    return lines;
+}
+function unescapeIcsText(s) {
+    return (s || "").replace(/\\n/gi, " ").replace(/\\,/g, ",").replace(/\\;/g, ";").replace(/\\\\/g, "\\");
+}
+function parseIcsDateTime(value) {
+    const clean = (value || "").split(";").pop();
+    const m = clean.match(/^(\d{4})(\d{2})(\d{2})(?:T(\d{2})(\d{2})(\d{2})(Z)?)?$/);
+    if (!m)
+        return null;
+    const [, y, mo, d, h, mi, se, z] = m;
+    if (h === undefined)
+        return { date: `${y}-${mo}-${d}`, time: "", isAllDay: true };
+    if (z) {
+        const dt = new Date(Date.UTC(+y, +mo - 1, +d, +h, +mi, +se));
+        return { date: isoDate(dt), time: `${String(dt.getHours()).padStart(2, "0")}:${String(dt.getMinutes()).padStart(2, "0")}`, isAllDay: false };
+    }
+    return { date: `${y}-${mo}-${d}`, time: `${h}:${mi}`, isAllDay: false };
+}
+const ICS_WEEKDAY_MAP = { SU: 0, MO: 1, TU: 2, WE: 3, TH: 4, FR: 5, SA: 6 };
+function expandWeeklyIcsRule(startDate, startTime, isAllDay, rrule) {
+    const interval = Number(rrule.INTERVAL) || 1;
+    const start = new Date(startDate + "T00:00:00");
+    const byday = rrule.BYDAY ? rrule.BYDAY.split(",").map((d) => ICS_WEEKDAY_MAP[d.trim()]).filter((d) => d !== undefined) : [start.getDay()];
+    let until = null;
+    if (rrule.UNTIL) {
+        const p = parseIcsDateTime(rrule.UNTIL);
+        if (p)
+            until = new Date(p.date + "T23:59:59");
+    }
+    const count = rrule.COUNT ? Number(rrule.COUNT) : null;
+    const maxCap = 300;
+    const weekStart = new Date(start);
+    weekStart.setDate(weekStart.getDate() - weekStart.getDay());
+    const results = [];
+    let weekIndex = 0;
+    while (results.length < maxCap && weekIndex < 520) {
+        const thisWeekStart = new Date(weekStart);
+        thisWeekStart.setDate(thisWeekStart.getDate() + weekIndex * 7 * interval);
+        if (until && thisWeekStart > until)
+            break;
+        if (!until && !count && weekIndex >= 104)
+            break;
+        byday.forEach((wd) => {
+            const occ = new Date(thisWeekStart);
+            occ.setDate(occ.getDate() + wd);
+            if (occ < start)
+                return;
+            if (until && occ > until)
+                return;
+            results.push(isoDate(occ));
+        });
+        weekIndex++;
+    }
+    results.sort();
+    const limited = count ? results.slice(0, count) : results;
+    return limited.slice(0, maxCap).map((date) => ({ date, time: startTime, isAllDay }));
+}
+function parseIcsRRule(rruleStr) {
+    const parts = {};
+    rruleStr.split(";").forEach((p) => {
+        const [k, v] = p.split("=");
+        if (k)
+            parts[k.trim().toUpperCase()] = v;
+    });
+    return parts;
+}
+function parseIcsFile(text) {
+    try {
+        const lines = unfoldIcsLines(text);
+        const rawEvents = [];
+        let cur = null;
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (trimmed === "BEGIN:VEVENT") {
+                cur = {};
+                continue;
+            }
+            if (trimmed === "END:VEVENT") {
+                if (cur)
+                    rawEvents.push(cur);
+                cur = null;
+                continue;
+            }
+            if (!cur)
+                continue;
+            const idx = line.indexOf(":");
+            if (idx === -1)
+                continue;
+            const rawKey = line.slice(0, idx);
+            const value = line.slice(idx + 1);
+            const key = rawKey.split(";")[0].toUpperCase();
+            if (key === "SUMMARY")
+                cur.title = unescapeIcsText(value);
+            else if (key === "LOCATION")
+                cur.location = unescapeIcsText(value);
+            else if (key === "DTSTART")
+                cur.dtstart = value;
+            else if (key === "RRULE")
+                cur.rrule = value;
+            else if (key === "UID")
+                cur.uid = value;
+        }
+        if (rawEvents.length === 0)
+            return { events: [], error: "Keine Termine (VEVENT) in der Datei gefunden. Ist es wirklich eine .ics-Datei?" };
+        let result = [];
+        let truncated = false;
+        rawEvents.forEach((ev, idx) => {
+            if (!ev.dtstart)
+                return;
+            const start = parseIcsDateTime(ev.dtstart);
+            if (!start)
+                return;
+            const rrule = ev.rrule ? parseIcsRRule(ev.rrule) : null;
+            const occurrences = rrule && rrule.FREQ === "WEEKLY"
+                ? expandWeeklyIcsRule(start.date, start.time, start.isAllDay, rrule)
+                : [{ date: start.date, time: start.time, isAllDay: start.isAllDay }];
+            occurrences.forEach((occ) => {
+                result.push({ id: `${ev.uid || idx}-${occ.date}-${occ.time}`, title: ev.title || "Ohne Titel", date: occ.date, time: occ.isAllDay ? "" : occ.time, location: ev.location || "" });
+            });
+        });
+        result.sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+        if (result.length > 400) {
+            result = result.slice(0, 400);
+            truncated = true;
+        }
+        return { events: result, error: result.length === 0 ? "Keine verwertbaren Termine gefunden." : null, truncated };
+    }
+    catch (e) {
+        return { events: [], error: "Datei konnte nicht gelesen werden. Ist es wirklich eine .ics-Datei?" };
+    }
+}
 const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2.5 sm:py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#eb1e23] focus:border-[#eb1e23] transition";
 const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
 const shadowClass = "shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)]";
@@ -1652,6 +1796,125 @@ function TeamNoteForm({ teams, players, defaultTeamId, onSubmit, onClose }) {
                 }))))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", disabled: uploading, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, uploading ? "Wird hochgeladen…" : "Team-Notiz speichern")));
+}
+function IcsImportModal({ teams, onConfirm, onClose }) {
+    const [stage, setStage] = useState("upload");
+    const [parseError, setParseError] = useState("");
+    const [truncated, setTruncated] = useState(false);
+    const [rows, setRows] = useState([]);
+    const [included, setIncluded] = useState({});
+    const [teamById, setTeamById] = useState({});
+    const [typeById, setTypeById] = useState({});
+    const [bulkTeam, setBulkTeam] = useState("");
+    const [bulkType, setBulkType] = useState("training");
+    const [fileName, setFileName] = useState("");
+    function handleFile(e) {
+        const file = e.target.files[0];
+        if (!file)
+            return;
+        setFileName(file.name);
+        const reader = new FileReader();
+        reader.onload = (ev) => {
+            const { events, error, truncated: trunc } = parseIcsFile(ev.target.result);
+            if (error) {
+                setParseError(error);
+                return;
+            }
+            const inc = {}, tm = {}, ty = {};
+            events.forEach((ev2) => { inc[ev2.id] = true; tm[ev2.id] = ""; ty[ev2.id] = "training"; });
+            setRows(events);
+            setIncluded(inc);
+            setTeamById(tm);
+            setTypeById(ty);
+            setTruncated(!!trunc);
+            setParseError("");
+            setStage("review");
+        };
+        reader.onerror = () => setParseError("Datei konnte nicht gelesen werden.");
+        reader.readAsText(file);
+    }
+    function applyBulkTeam() {
+        if (!bulkTeam)
+            return;
+        setTeamById((prev) => {
+            const next = { ...prev };
+            rows.forEach((r) => { if (included[r.id])
+                next[r.id] = bulkTeam; });
+            return next;
+        });
+    }
+    function applyBulkType() {
+        setTypeById((prev) => {
+            const next = { ...prev };
+            rows.forEach((r) => { if (included[r.id])
+                next[r.id] = bulkType; });
+            return next;
+        });
+    }
+    function toggleIncluded(id) {
+        setIncluded((prev) => ({ ...prev, [id]: !prev[id] }));
+    }
+    function handleConfirm() {
+        const events = rows.filter((r) => included[r.id]).map((r) => ({
+            title: r.title, date: r.date, time: r.time, location: r.location,
+            teamId: teamById[r.id] || null, type: typeById[r.id] || "training",
+        }));
+        onConfirm(events);
+        onClose();
+    }
+    const includedCount = Object.values(included).filter(Boolean).length;
+    if (stage === "upload") {
+        return (React.createElement("div", { className: "space-y-4" },
+            React.createElement("p", { className: "text-xs text-slate-500" }, "Exportiere deinen Kalender aus Google Calendar (Einstellungen → \"Kalender exportieren\") und wähle die heruntergeladene .ics-Datei hier aus. Alle gefundenen Termine (inkl. wöchentlicher Wiederholungen) werden danach zur Kontrolle angezeigt, bevor irgendwas gespeichert wird."),
+            React.createElement("label", { className: "flex flex-col items-center justify-center gap-2 border-2 border-dashed border-stone-300 rounded-lg py-8 cursor-pointer hover:border-[#eb1e23] hover:bg-red-50/30 transition" },
+                React.createElement(IconUpload, { size: 24, className: "text-slate-400" }),
+                React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, ".ics-Datei auswählen"),
+                React.createElement("input", { type: "file", accept: ".ics,text/calendar", className: "hidden", onChange: handleFile })),
+            fileName && !parseError && React.createElement("p", { className: "text-xs text-slate-400" },
+                "Zuletzt gewählt: ",
+                fileName),
+            parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError)));
+    }
+    const typeOptionEls = Object.entries(EVENT_TYPE_STYLES).map(([k, v]) => React.createElement("option", { key: k, value: k }, v.label));
+    const teamOptionEls = teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name));
+    const bulkControls = React.createElement("div", { className: "flex items-center gap-2 flex-wrap bg-stone-50 rounded-lg p-3" },
+        React.createElement("span", { className: "text-xs font-semibold text-slate-500" }, "Für ausgewählte Zeilen:"),
+        React.createElement("select", { className: "text-xs rounded border border-stone-300 px-2 py-1.5", value: bulkTeam, onChange: (e) => setBulkTeam(e.target.value) },
+            React.createElement("option", { value: "" }, "– Team wählen –"),
+            teamOptionEls),
+        React.createElement("button", { type: "button", onClick: applyBulkTeam, className: "text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" }, "Team setzen"),
+        React.createElement("select", { className: "text-xs rounded border border-stone-300 px-2 py-1.5", value: bulkType, onChange: (e) => setBulkType(e.target.value) }, typeOptionEls),
+        React.createElement("button", { type: "button", onClick: applyBulkType, className: "text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" }, "Typ setzen"));
+    const tableHead = React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
+        React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
+            React.createElement("th", { className: "px-2 py-2" }),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Titel"),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Datum"),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Zeit"),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Team"),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Typ")));
+    const tableRows = rows.map((r) => {
+        const checkboxCell = React.createElement("td", { className: "px-2 py-1.5" },
+            React.createElement("input", { type: "checkbox", checked: !!included[r.id], onChange: () => toggleIncluded(r.id) }));
+        const titleCell = React.createElement("td", { className: "px-2.5 py-1.5 font-medium text-slate-700" }, r.title);
+        const dateCell = React.createElement("td", { className: "px-2.5 py-1.5 text-slate-500 whitespace-nowrap" }, fmtDate(r.date));
+        const timeCell = React.createElement("td", { className: "px-2.5 py-1.5 text-slate-500 whitespace-nowrap" }, r.time || "Ganztägig");
+        const teamSelect = React.createElement("select", { className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: teamById[r.id] || "", onChange: (e) => setTeamById((prev) => ({ ...prev, [r.id]: e.target.value })) },
+            React.createElement("option", { value: "" }, "– Individuell –"),
+            teamOptionEls);
+        const teamCell = React.createElement("td", { className: "px-2.5 py-1.5" }, teamSelect);
+        const typeSelect = React.createElement("select", { className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: typeById[r.id] || "training", onChange: (e) => setTypeById((prev) => ({ ...prev, [r.id]: e.target.value })) }, typeOptionEls);
+        const typeCell = React.createElement("td", { className: "px-2.5 py-1.5" }, typeSelect);
+        return React.createElement("tr", { key: r.id, className: `border-t border-stone-100 ${included[r.id] ? "" : "opacity-40"}` }, checkboxCell, titleCell, dateCell, timeCell, teamCell, typeCell);
+    });
+    const tableBody = React.createElement("tbody", null, tableRows);
+    const table = React.createElement("div", { className: "max-h-[45vh] overflow-y-auto border border-stone-200 rounded-lg" },
+        React.createElement("table", { className: "w-full text-xs" }, tableHead, tableBody));
+    const actionButtons = React.createElement("div", { className: "flex gap-2" },
+        React.createElement("button", { onClick: () => setStage("upload"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Andere Datei"),
+        React.createElement("button", { onClick: handleConfirm, disabled: includedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, includedCount, " Termine importieren"));
+    const truncatedNotice = truncated && React.createElement("p", { className: "text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "Es wurden mehr als 400 Termine gefunden – nur die ersten 400 wurden geladen.");
+    return React.createElement("div", { className: "space-y-4" }, truncatedNotice, bulkControls, table, actionButtons);
 }
 function AttendanceImportModal({ players, teams, onConfirm, onClose }) {
     const [stage, setStage] = useState("upload");
@@ -3480,6 +3743,26 @@ function SpielerAkte() {
         const cur = privateData[selectedPlayer.id]?.notes || [];
         persistPrivateFields(selectedPlayer.id, { notes: [...cur, { id: uid(), ...entry }] });
     }
+    async function handleImportCalendarEvents(events) {
+        if (events.length === 0)
+            return;
+        const chunks = [];
+        for (let i = 0; i < events.length; i += 400)
+            chunks.push(events.slice(i, i + 400));
+        const allNew = [];
+        for (const chunk of chunks) {
+            const batch = db.batch();
+            const newOnes = chunk.map((ev) => {
+                const ref = db.collection("calendarEvents").doc();
+                const doc = { title: ev.title, date: ev.date, time: ev.time || "", location: ev.location || "", type: ev.type, teamId: ev.teamId || null, notes: "", excludedPlayerIds: [], includedPlayerIds: [] };
+                batch.set(ref, doc);
+                return { id: ref.id, ...doc };
+            });
+            await batch.commit();
+            allNew.push(...newOnes);
+        }
+        setCalendarEvents((prev) => [...prev, ...allNew]);
+    }
     function handleImportAttendance(entries, date) {
         const byPlayer = {};
         entries.forEach((e) => { (byPlayer[e.playerId] = byPlayer[e.playerId] || []).push({ id: uid(), date, ...e }); });
@@ -3751,6 +4034,7 @@ function SpielerAkte() {
                     React.createElement(IconAlert, { size: 14 }),
                     " Speichern fehlgeschlagen")),
                 isTrainer && (React.createElement(HeaderMenu, { label: "Importieren", icon: IconUpload, isOpen: openHeaderMenu === "import", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "import" ? null : "import"), onClose: () => setOpenHeaderMenu(null), items: [
+                        { label: "Kalender importieren (.ics)", icon: IconCalendar, onClick: () => setModal("importCalendar") },
                         { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
                         { label: "Habit-Stats importieren", icon: IconActivity, onClick: () => setModal("importHabits") },
                         { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => setModal("importBoxscore") },
@@ -4260,6 +4544,8 @@ function SpielerAkte() {
             React.createElement(TeamNoteForm, { teams: teams, players: players, defaultTeamId: selectedPlayer?.teamId, onSubmit: addTeamNote, onClose: () => setModal(null) }))),
         modal === "importAttendance" && (React.createElement(Modal, { title: "Anwesenheit aus CSV importieren", onClose: () => setModal(null), wide: true },
             React.createElement(AttendanceImportModal, { players: players, teams: teams, onConfirm: handleImportAttendance, onClose: () => setModal(null) }))),
+        modal === "importCalendar" && (React.createElement(Modal, { title: "Kalender aus .ics importieren", onClose: () => setModal(null), wide: true },
+            React.createElement(IcsImportModal, { teams: teams, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
         modal === "importHabits" && (React.createElement(Modal, { title: "Habit-Stats aus CSV importieren", onClose: () => setModal(null), wide: true },
             React.createElement(HabitStatsImportModal, { players: players, teams: teams, onConfirm: handleImportHabitStats, onClose: () => setModal(null) }))),
         modal === "importBoxscore" && (React.createElement(Modal, { title: "Boxscore einf\u00FCgen", onClose: () => setModal(null), wide: true },
