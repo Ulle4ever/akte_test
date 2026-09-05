@@ -226,6 +226,9 @@ const IconTrophy = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M7 4h10v5a5 5 0 0 1-10 0V4Z" }),
     React.createElement("path", { d: "M7 5H4a3 3 0 0 0 3 6" }),
     React.createElement("path", { d: "M17 5h3a3 3 0 0 1-3 6" }));
+const IconUndo = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M9 14 4 9l5-5" }),
+    React.createElement("path", { d: "M4 9h10.5a5.5 5.5 0 0 1 0 11H11" }));
 const IconHeart = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.3 1.5 4.05 3 5.5l7 7Z" }));
 const IconHome = (p) => React.createElement(Icon, { ...p },
@@ -458,6 +461,27 @@ function isoWeekKey(dateStr) {
     const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
     const week = 1 + Math.round(((d - firstThursday) / 86400000 - 3 + ((firstThursday.getUTCDay() + 6) % 7)) / 7);
     return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
+}
+function currentWeekMonday() {
+    const now = new Date();
+    const day = (now.getDay() + 6) % 7;
+    const monday = new Date(now.getFullYear(), now.getMonth(), now.getDate() - day);
+    monday.setHours(0, 0, 0, 0);
+    return monday;
+}
+function mondayOfIsoWeek(year, week) {
+    const jan4 = new Date(year, 0, 4);
+    const jan4Day = (jan4.getDay() + 6) % 7;
+    const week1Monday = new Date(year, 0, 4 - jan4Day);
+    const monday = new Date(week1Monday);
+    monday.setDate(week1Monday.getDate() + (week - 1) * 7);
+    return monday;
+}
+function formatWeekRange(monday) {
+    const sunday = new Date(monday);
+    sunday.setDate(monday.getDate() + 6);
+    const fmt = (d) => d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
+    return `${fmt(monday)} – ${fmt(sunday)}.${sunday.getFullYear()}`;
 }
 const WELLNESS_SCALE_FIELDS = [
     { id: "sleep", label: "Schlafqualität", lowLabel: "Sehr schlecht", highLabel: "Ausgezeichnet" },
@@ -970,6 +994,153 @@ function parseIcsFile(text) {
     catch (e) {
         return { events: [], error: "Datei konnte nicht gelesen werden. Ist es wirklich eine .ics-Datei?" };
     }
+}
+let tesseractLoadPromise = null;
+function loadTesseractScript() {
+    if (window.Tesseract)
+        return Promise.resolve();
+    if (tesseractLoadPromise)
+        return tesseractLoadPromise;
+    tesseractLoadPromise = new Promise((resolve, reject) => {
+        const s = document.createElement("script");
+        s.src = "https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/2.1.5/tesseract.min.js";
+        s.onload = () => resolve();
+        s.onerror = () => reject(new Error("Bilderkennungs-Bibliothek konnte nicht geladen werden."));
+        document.head.appendChild(s);
+    });
+    return tesseractLoadPromise;
+}
+function isNearWhite(r, g, b) {
+    return r > 200 && g > 200 && b > 200 && Math.max(r, g, b) - Math.min(r, g, b) < 25;
+}
+function colorDistance(c1, c2) {
+    return Math.sqrt((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2 + (c1[2] - c2[2]) ** 2);
+}
+function detectColoredBlocks(canvas) {
+    const width = canvas.width, height = canvas.height;
+    const ctx = canvas.getContext("2d");
+    const imageData = ctx.getImageData(0, 0, width, height);
+    const data = imageData.data;
+    const n = width * height;
+    const visited = new Uint8Array(n);
+    const stack = new Int32Array(n);
+    const blocks = [];
+    function pixelAt(idx) {
+        const p = idx * 4;
+        return [data[p], data[p + 1], data[p + 2]];
+    }
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const idx = y * width + x;
+            if (visited[idx])
+                continue;
+            visited[idx] = 1;
+            const seedColor = pixelAt(idx);
+            if (isNearWhite(seedColor[0], seedColor[1], seedColor[2]))
+                continue;
+            let sp = 0;
+            stack[sp++] = idx;
+            let minX = x, maxX = x, minY = y, maxY = y, count = 0;
+            let rSum = 0, gSum = 0, bSum = 0;
+            while (sp > 0) {
+                const cur = stack[--sp];
+                const cx = cur % width, cy = (cur / width) | 0;
+                const cColor = pixelAt(cur);
+                count++;
+                rSum += cColor[0];
+                gSum += cColor[1];
+                bSum += cColor[2];
+                if (cx < minX)
+                    minX = cx;
+                if (cx > maxX)
+                    maxX = cx;
+                if (cy < minY)
+                    minY = cy;
+                if (cy > maxY)
+                    maxY = cy;
+                const candidates = [];
+                if (cx > 0)
+                    candidates.push(cur - 1);
+                if (cx < width - 1)
+                    candidates.push(cur + 1);
+                if (cy > 0)
+                    candidates.push(cur - width);
+                if (cy < height - 1)
+                    candidates.push(cur + width);
+                for (const nb of candidates) {
+                    if (visited[nb])
+                        continue;
+                    const nColor = pixelAt(nb);
+                    if (isNearWhite(nColor[0], nColor[1], nColor[2])) {
+                        visited[nb] = 1;
+                        continue;
+                    }
+                    if (colorDistance(nColor, seedColor) > 90)
+                        continue;
+                    visited[nb] = 1;
+                    stack[sp++] = nb;
+                }
+            }
+            if (count > 300 && maxX - minX > 20 && maxY - minY > 15) {
+                blocks.push({ minX, maxX, minY, maxY, count });
+            }
+        }
+    }
+    return blocks;
+}
+function assignColumnsByWidth(blocks, imageWidth, numDays) {
+    const colWidth = imageWidth / numDays;
+    return blocks.map((b) => ({ ...b, column: Math.min(numDays - 1, Math.max(0, Math.floor(((b.minX + b.maxX) / 2) / colWidth))) }));
+}
+async function ocrBlock(sourceCanvas, block, padding) {
+    const sx = Math.max(0, block.minX - padding);
+    const sy = Math.max(0, block.minY - padding);
+    const ex = Math.min(sourceCanvas.width, block.maxX + padding);
+    const ey = Math.min(sourceCanvas.height, block.maxY + padding);
+    const w = ex - sx, h = ey - sy;
+    const cropCanvas = document.createElement("canvas");
+    cropCanvas.width = w;
+    cropCanvas.height = h;
+    const cctx = cropCanvas.getContext("2d");
+    cctx.drawImage(sourceCanvas, sx, sy, w, h, 0, 0, w, h);
+    const result = await window.Tesseract.recognize(cropCanvas, "deu");
+    return result.data.text || "";
+}
+function parseBlockText(rawText) {
+    const cleaned = (rawText || "").replace(/\r/g, "").trim();
+    const timeMatch = cleaned.match(/(\d{1,2})[.:](\d{2})\s*(?:bis|-|–|bs)\s*(\d{1,2})[.:](\d{2})/i);
+    let startTime = "", endTime = "";
+    if (timeMatch) {
+        startTime = `${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}`;
+        endTime = `${timeMatch[3].padStart(2, "0")}:${timeMatch[4]}`;
+    }
+    const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean);
+    const titleLine = lines.find((l) => !/\d{1,2}[.:]\d{2}/.test(l));
+    const title = (titleLine || lines[0] || "Termin").trim();
+    return { title, startTime, endTime };
+}
+async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, onProgress) {
+    await loadTesseractScript();
+    const canvas = document.createElement("canvas");
+    canvas.width = imgEl.naturalWidth;
+    canvas.height = imgEl.naturalHeight;
+    const ctx = canvas.getContext("2d");
+    ctx.drawImage(imgEl, 0, 0);
+    const rawBlocks = detectColoredBlocks(canvas);
+    const blocks = assignColumnsByWidth(rawBlocks, canvas.width, numDays);
+    blocks.sort((a, b) => a.column - b.column || a.minY - b.minY);
+    const results = [];
+    for (let i = 0; i < blocks.length; i++) {
+        const block = blocks[i];
+        if (onProgress)
+            onProgress(i + 1, blocks.length);
+        const text = await ocrBlock(canvas, block, 4);
+        const { title, startTime, endTime } = parseBlockText(text);
+        const date = new Date(mondayDate);
+        date.setDate(mondayDate.getDate() + block.column);
+        results.push({ id: `blk-${i}`, title, date: isoDate(date), time: startTime, endTime });
+    }
+    return results;
 }
 const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2.5 sm:py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#eb1e23] focus:border-[#eb1e23] transition";
 const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
@@ -1797,6 +1968,148 @@ function TeamNoteForm({ teams, players, defaultTeamId, onSubmit, onClose }) {
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", disabled: uploading, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, uploading ? "Wird hochgeladen…" : "Team-Notiz speichern")));
 }
+function ScreenshotImportModal({ teams, onConfirm, onClose }) {
+    const [stage, setStage] = useState("setup");
+    const [targetTeam, setTargetTeam] = useState("");
+    const [numDays, setNumDays] = useState(7);
+    const [weekConfirmed, setWeekConfirmed] = useState(null);
+    const [customWeek, setCustomWeek] = useState("");
+    const [customYear, setCustomYear] = useState(String(new Date().getFullYear()));
+    const [progress, setProgress] = useState({ done: 0, total: 0 });
+    const [parseError, setParseError] = useState("");
+    const [rows, setRows] = useState([]);
+    const [included, setIncluded] = useState({});
+    const [typeById, setTypeById] = useState({});
+    const [bulkType, setBulkType] = useState("training");
+    const defaultMonday = currentWeekMonday();
+    const effectiveMonday = weekConfirmed === false && customWeek ? mondayOfIsoWeek(Number(customYear) || defaultMonday.getFullYear(), Number(customWeek)) : defaultMonday;
+    async function handleFile(e) {
+        const file = e.target.files[0];
+        if (!file)
+            return;
+        setParseError("");
+        const imgUrl = URL.createObjectURL(file);
+        const img = new Image();
+        img.onload = async () => {
+            setStage("processing");
+            setProgress({ done: 0, total: 0 });
+            try {
+                const events = await extractEventsFromCalendarScreenshot(img, effectiveMonday, numDays, (done, total) => setProgress({ done, total }));
+                URL.revokeObjectURL(imgUrl);
+                if (events.length === 0) {
+                    setParseError("Es konnten keine Termin-Kästchen im Bild erkannt werden. Bitte einen anderen Ausschnitt versuchen (Screenshot sollte die farbigen Kästchen deutlich zeigen).");
+                    setStage("setup");
+                    return;
+                }
+                const inc = {}, ty = {};
+                events.forEach((ev) => { inc[ev.id] = true; ty[ev.id] = "training"; });
+                setRows(events);
+                setIncluded(inc);
+                setTypeById(ty);
+                setStage("review");
+            }
+            catch (err) {
+                setParseError("Bilderkennung fehlgeschlagen: " + (err.message || "Unbekannter Fehler"));
+                setStage("setup");
+            }
+        };
+        img.onerror = () => setParseError("Bild konnte nicht geladen werden.");
+        img.src = imgUrl;
+    }
+    function toggleIncluded(id) {
+        setIncluded((prev) => ({ ...prev, [id]: !prev[id] }));
+    }
+    function updateRow(id, changes) {
+        setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...changes } : r)));
+    }
+    function applyBulkType() {
+        setTypeById((prev) => {
+            const next = { ...prev };
+            rows.forEach((r) => { if (included[r.id])
+                next[r.id] = bulkType; });
+            return next;
+        });
+    }
+    function handleConfirm() {
+        const events = rows.filter((r) => included[r.id]).map((r) => ({
+            title: r.title, date: r.date, time: r.time, location: "",
+            teamId: targetTeam && targetTeam !== "individuell" ? targetTeam : null,
+            type: typeById[r.id] || "training",
+        }));
+        onConfirm(events);
+        onClose();
+    }
+    const includedCount = Object.values(included).filter(Boolean).length;
+    const teamChosen = targetTeam !== "";
+    const weekOk = weekConfirmed === true || (weekConfirmed === false && customWeek !== "");
+    const canUpload = teamChosen && weekOk;
+    if (stage === "setup") {
+        const intro = React.createElement("p", { className: "text-xs text-slate-500" }, "Screenshot einer Wochenansicht (z. B. aus Google Calendar) hochladen. Die App erkennt die farbigen Termin-Kästchen automatisch, liest Titel und Uhrzeit aus und zeigt danach alles zur Kontrolle an. Die Erkennung ist nicht perfekt – bitte vor dem Speichern prüfen.");
+        const teamField = React.createElement(Field, { label: "Dieser Import ist für Team" },
+            React.createElement("select", { className: inputClass, value: targetTeam, onChange: (e) => setTargetTeam(e.target.value) },
+                React.createElement("option", { value: "" }, "– Bitte Team wählen –"),
+                teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)),
+                React.createElement("option", { value: "individuell" }, "Individuell (kein Team)")));
+        const weekQuestionText = React.createElement("p", { className: "text-sm text-slate-700" }, `Ist das die Woche vom ${formatWeekRange(defaultMonday)} (aktuelle Woche)?`);
+        const weekYesNo = React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { type: "button", onClick: () => setWeekConfirmed(true), className: `flex-1 rounded-lg py-2 text-sm font-semibold border transition ${weekConfirmed === true ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-stone-300 hover:border-slate-400"}` }, "Ja"),
+            React.createElement("button", { type: "button", onClick: () => setWeekConfirmed(false), className: `flex-1 rounded-lg py-2 text-sm font-semibold border transition ${weekConfirmed === false ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-stone-300 hover:border-slate-400"}` }, "Nein, andere Woche"));
+        const customWeekFields = weekConfirmed === false ? React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Kalenderwoche (KW)" },
+                React.createElement("input", { type: "number", min: "1", max: "53", className: inputClass, value: customWeek, onChange: (e) => setCustomWeek(e.target.value) })),
+            React.createElement(Field, { label: "Jahr" },
+                React.createElement("input", { type: "number", className: inputClass, value: customYear, onChange: (e) => setCustomYear(e.target.value) }))) : null;
+        const resolvedWeekNote = weekOk ? React.createElement("p", { className: "text-xs text-slate-400" }, `Verwendetes Datum: Woche vom ${formatWeekRange(effectiveMonday)}`) : null;
+        const weekSection = React.createElement("div", { className: "space-y-2 bg-stone-50 rounded-lg p-3" }, weekQuestionText, weekYesNo, customWeekFields, resolvedWeekNote);
+        const daysField = React.createElement(Field, { label: "Wie viele Tage zeigt der Screenshot?" },
+            React.createElement("select", { className: inputClass, value: numDays, onChange: (e) => setNumDays(Number(e.target.value)) }, [1, 2, 3, 4, 5, 6, 7].map((n) => React.createElement("option", { key: n, value: n }, n))));
+        const uploadLabel = React.createElement("label", { className: `flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg py-8 transition ${canUpload ? "border-stone-300 cursor-pointer hover:border-[#eb1e23] hover:bg-red-50/30" : "border-stone-200 opacity-50 cursor-not-allowed"}` },
+            React.createElement(IconUpload, { size: 24, className: "text-slate-400" }),
+            React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, canUpload ? "Screenshot auswählen" : "Erst Team und Woche oben angeben"),
+            React.createElement("input", { type: "file", accept: "image/*", className: "hidden", disabled: !canUpload, onChange: handleFile }));
+        const errorNote = parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError);
+        return React.createElement("div", { className: "space-y-4" }, intro, teamField, weekSection, daysField, uploadLabel, errorNote);
+    }
+    if (stage === "processing") {
+        const progressText = progress.total > 0 ? `Kästchen ${progress.done} / ${progress.total} wird gelesen…` : "Kästchen werden erkannt…";
+        return React.createElement("div", { className: "flex flex-col items-center justify-center gap-3 py-14" },
+            React.createElement(IconLoader, { size: 28, className: "text-slate-400" }),
+            React.createElement("p", { className: "text-sm text-slate-600" }, progressText),
+            React.createElement("p", { className: "text-xs text-slate-400" }, "Das kann je nach Anzahl der Termine einen Moment dauern."));
+    }
+    const typeOptionEls = Object.entries(EVENT_TYPE_STYLES).map(([k, v]) => React.createElement("option", { key: k, value: k }, v.label));
+    const bulkControls = React.createElement("div", { className: "flex items-center gap-2 flex-wrap bg-stone-50 rounded-lg p-3" },
+        React.createElement("span", { className: "text-xs font-semibold text-slate-500" }, "Für ausgewählte Zeilen:"),
+        React.createElement("select", { className: "text-xs rounded border border-stone-300 px-2 py-1.5", value: bulkType, onChange: (e) => setBulkType(e.target.value) }, typeOptionEls),
+        React.createElement("button", { type: "button", onClick: applyBulkType, className: "text-xs font-medium bg-slate-900 text-white rounded-lg px-2.5 py-1.5 hover:bg-slate-800" }, "Typ setzen"));
+    const tableRows = rows.map((r) => {
+        const checkboxCell = React.createElement("td", { className: "px-2 py-1.5" },
+            React.createElement("input", { type: "checkbox", checked: !!included[r.id], onChange: () => toggleIncluded(r.id) }));
+        const titleCell = React.createElement("td", { className: "px-2.5 py-1.5" },
+            React.createElement("input", { className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: r.title, onChange: (e) => updateRow(r.id, { title: e.target.value }) }));
+        const dateCell = React.createElement("td", { className: "px-2.5 py-1.5" },
+            React.createElement("input", { type: "date", className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: r.date, onChange: (e) => updateRow(r.id, { date: e.target.value }) }));
+        const timeCell = React.createElement("td", { className: "px-2.5 py-1.5" },
+            React.createElement("input", { type: "time", className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: r.time, onChange: (e) => updateRow(r.id, { time: e.target.value }) }));
+        const typeCell = React.createElement("td", { className: "px-2.5 py-1.5" },
+            React.createElement("select", { className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: typeById[r.id] || "training", onChange: (e) => setTypeById((prev) => ({ ...prev, [r.id]: e.target.value })) }, typeOptionEls));
+        return React.createElement("tr", { key: r.id, className: `border-t border-stone-100 ${included[r.id] ? "" : "opacity-40"}` }, checkboxCell, titleCell, dateCell, timeCell, typeCell);
+    });
+    const tableHead = React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
+        React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
+            React.createElement("th", { className: "px-2 py-2" }),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Titel"),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Datum"),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Zeit"),
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Typ")));
+    const table = React.createElement("div", { className: "max-h-[45vh] overflow-y-auto border border-stone-200 rounded-lg" },
+        React.createElement("table", { className: "w-full text-xs" }, tableHead, React.createElement("tbody", null, tableRows)));
+    const hint = React.createElement("p", { className: "text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "Titel, Datum und Uhrzeit sind editierbar – bitte kurz gegenprüfen, die automatische Erkennung kann sich vertun.");
+    const actionButtons = React.createElement("div", { className: "flex gap-2" },
+        React.createElement("button", { onClick: () => setStage("setup"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Anderer Screenshot"),
+        React.createElement("button", { onClick: handleConfirm, disabled: includedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, includedCount, " Termine importieren"));
+    return React.createElement("div", { className: "space-y-4" }, hint, bulkControls, table, actionButtons);
+}
 function IcsImportModal({ teams, onConfirm, onClose }) {
     const [stage, setStage] = useState("upload");
     const [parseError, setParseError] = useState("");
@@ -1808,6 +2121,7 @@ function IcsImportModal({ teams, onConfirm, onClose }) {
     const [bulkTeam, setBulkTeam] = useState("");
     const [bulkType, setBulkType] = useState("training");
     const [fileName, setFileName] = useState("");
+    const [targetTeam, setTargetTeam] = useState("");
     function handleFile(e) {
         const file = e.target.files[0];
         if (!file)
@@ -1821,7 +2135,7 @@ function IcsImportModal({ teams, onConfirm, onClose }) {
                 return;
             }
             const inc = {}, tm = {}, ty = {};
-            events.forEach((ev2) => { inc[ev2.id] = true; tm[ev2.id] = ""; ty[ev2.id] = "training"; });
+            events.forEach((ev2) => { inc[ev2.id] = true; tm[ev2.id] = targetTeam; ty[ev2.id] = "training"; });
             setRows(events);
             setIncluded(inc);
             setTeamById(tm);
@@ -1857,19 +2171,25 @@ function IcsImportModal({ teams, onConfirm, onClose }) {
     function handleConfirm() {
         const events = rows.filter((r) => included[r.id]).map((r) => ({
             title: r.title, date: r.date, time: r.time, location: r.location,
-            teamId: teamById[r.id] || null, type: typeById[r.id] || "training",
+            teamId: teamById[r.id] && teamById[r.id] !== "individuell" ? teamById[r.id] : null, type: typeById[r.id] || "training",
         }));
         onConfirm(events);
         onClose();
     }
     const includedCount = Object.values(included).filter(Boolean).length;
     if (stage === "upload") {
+        const teamChosen = targetTeam !== "";
         return (React.createElement("div", { className: "space-y-4" },
             React.createElement("p", { className: "text-xs text-slate-500" }, "Exportiere deinen Kalender aus Google Calendar (Einstellungen → \"Kalender exportieren\") und wähle die heruntergeladene .ics-Datei hier aus. Alle gefundenen Termine (inkl. wöchentlicher Wiederholungen) werden danach zur Kontrolle angezeigt, bevor irgendwas gespeichert wird."),
-            React.createElement("label", { className: "flex flex-col items-center justify-center gap-2 border-2 border-dashed border-stone-300 rounded-lg py-8 cursor-pointer hover:border-[#eb1e23] hover:bg-red-50/30 transition" },
+            React.createElement(Field, { label: "Dieser Import ist für Team" },
+                React.createElement("select", { className: inputClass, value: targetTeam, onChange: (e) => setTargetTeam(e.target.value) },
+                    React.createElement("option", { value: "" }, "– Bitte Team wählen –"),
+                    teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)),
+                    React.createElement("option", { value: "individuell" }, "Individuell (kein Team)"))),
+            React.createElement("label", { className: `flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg py-8 transition ${teamChosen ? "border-stone-300 cursor-pointer hover:border-[#eb1e23] hover:bg-red-50/30" : "border-stone-200 opacity-50 cursor-not-allowed"}` },
                 React.createElement(IconUpload, { size: 24, className: "text-slate-400" }),
-                React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, ".ics-Datei auswählen"),
-                React.createElement("input", { type: "file", accept: ".ics,text/calendar", className: "hidden", onChange: handleFile })),
+                React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, teamChosen ? ".ics-Datei auswählen" : "Erst Team oben wählen"),
+                React.createElement("input", { type: "file", accept: ".ics,text/calendar", className: "hidden", disabled: !teamChosen, onChange: handleFile })),
             fileName && !parseError && React.createElement("p", { className: "text-xs text-slate-400" },
                 "Zuletzt gewählt: ",
                 fileName),
@@ -1899,8 +2219,8 @@ function IcsImportModal({ teams, onConfirm, onClose }) {
         const titleCell = React.createElement("td", { className: "px-2.5 py-1.5 font-medium text-slate-700" }, r.title);
         const dateCell = React.createElement("td", { className: "px-2.5 py-1.5 text-slate-500 whitespace-nowrap" }, fmtDate(r.date));
         const timeCell = React.createElement("td", { className: "px-2.5 py-1.5 text-slate-500 whitespace-nowrap" }, r.time || "Ganztägig");
-        const teamSelect = React.createElement("select", { className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: teamById[r.id] || "", onChange: (e) => setTeamById((prev) => ({ ...prev, [r.id]: e.target.value })) },
-            React.createElement("option", { value: "" }, "– Individuell –"),
+        const teamSelect = React.createElement("select", { className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: teamById[r.id] || "individuell", onChange: (e) => setTeamById((prev) => ({ ...prev, [r.id]: e.target.value })) },
+            React.createElement("option", { value: "individuell" }, "– Individuell –"),
             teamOptionEls);
         const teamCell = React.createElement("td", { className: "px-2.5 py-1.5" }, teamSelect);
         const typeSelect = React.createElement("select", { className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: typeById[r.id] || "training", onChange: (e) => setTypeById((prev) => ({ ...prev, [r.id]: e.target.value })) }, typeOptionEls);
@@ -2329,11 +2649,13 @@ function getPlayerVisibleTeamNotes(teamNotes, player) {
         return matchesTeamAll || matchesIndiv;
     });
 }
-function CalendarView({ events, isTrainer, team, teams, teamPlayers, allPlayers, contextLabel, onAdd, onEdit, onDelete }) {
+function CalendarView({ events, isTrainer, team, teams, teamPlayers, allPlayers, contextLabel, onAdd, onEdit, onDelete, onClearTeam, onClearAll }) {
     const [viewMonth, setViewMonth] = useState(() => { const d = new Date(); d.setDate(1); return d; });
     const [selectedDate, setSelectedDate] = useState(null);
     const [editingEvent, setEditingEvent] = useState(null);
     const [showForm, setShowForm] = useState(false);
+    const [confirmClear, setConfirmClear] = useState(false);
+    const [clearAllInput, setClearAllInput] = useState("");
     const monthStart = new Date(viewMonth.getFullYear(), viewMonth.getMonth(), 1);
     const monthEnd = new Date(viewMonth.getFullYear(), viewMonth.getMonth() + 1, 0);
     const gridStart = startOfWeekMonday(monthStart);
@@ -2355,8 +2677,28 @@ function CalendarView({ events, isTrainer, team, teams, teamPlayers, allPlayers,
         setEditingEvent(ev);
         setShowForm(true);
     }
+    const canClear = isTrainer && (onClearTeam || onClearAll);
+    const clearLabel = onClearAll ? "Gesamten Kalender löschen" : "Kalender dieses Teams leeren";
+    function runClear() {
+        if (onClearAll)
+            onClearAll();
+        else if (onClearTeam && team)
+            onClearTeam(team.id);
+        setConfirmClear(false);
+        setClearAllInput("");
+    }
+    const clearConfirmRow = React.createElement("div", { className: "flex items-center gap-2 flex-wrap bg-red-50 border border-red-200 rounded-lg px-3 py-2 mb-3" },
+        React.createElement("span", { className: "text-xs text-red-700 font-medium" }, onClearAll ? "Wirklich ALLE Termine aller Teams unwiderruflich löschen?" : "Wirklich alle Termine dieses Teams unwiderruflich löschen?"),
+        onClearAll && React.createElement("input", { className: "text-xs border border-red-300 rounded px-2 py-1 w-36", placeholder: "LÖSCHEN eingeben", value: clearAllInput, onChange: (e) => setClearAllInput(e.target.value) }),
+        React.createElement("button", { type: "button", onClick: runClear, disabled: !!onClearAll && clearAllInput !== "LÖSCHEN", className: "text-xs font-semibold bg-red-600 hover:bg-red-700 disabled:opacity-40 text-white rounded-lg px-3 py-1.5" }, "Ja, löschen"),
+        React.createElement("button", { type: "button", onClick: () => { setConfirmClear(false); setClearAllInput(""); }, className: "text-xs font-medium text-slate-500 hover:text-slate-800" }, "Abbrechen"));
+    const clearTriggerButton = React.createElement("button", { type: "button", onClick: () => setConfirmClear(true), className: "flex items-center gap-1.5 text-xs font-medium text-red-400 hover:text-red-600 mb-3" },
+        React.createElement(IconTrash, { size: 13 }),
+        clearLabel);
+    const clearSection = canClear ? (confirmClear ? clearConfirmRow : clearTriggerButton) : null;
     return (React.createElement("div", { className: "space-y-4" },
         React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 sm:p-5" },
+            clearSection,
             React.createElement("div", { className: "flex items-center justify-between mb-3" },
                 React.createElement("button", { onClick: () => setViewMonth((m) => new Date(m.getFullYear(), m.getMonth() - 1, 1)), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500" },
                     React.createElement(IconArrowLeft, { size: 16 })),
@@ -3083,6 +3425,362 @@ function TeamOverviewTable({ team, players, privateData, statCategories, onSelec
                     React.createElement("td", { className: "px-4 py-3 text-right" }, fgPctFor(p.id)),
                     React.createElement("td", { className: "px-4 py-3 text-right" }, latestAttendance(p.id)))))))))));
 }
+// ---- Live-Anschreiben (Spielbericht / Boxscore) ----
+const SCORESHEET_LS_KEY = "rsk_scoresheet_draft_v1";
+function loadScoresheetDraft() {
+    try {
+        const raw = localStorage.getItem(SCORESHEET_LS_KEY);
+        return raw ? JSON.parse(raw) : null;
+    } catch (e) { return null; }
+}
+function saveScoresheetDraft(draft) {
+    try { localStorage.setItem(SCORESHEET_LS_KEY, JSON.stringify(draft)); } catch (e) { }
+}
+function clearScoresheetDraft() {
+    try { localStorage.removeItem(SCORESHEET_LS_KEY); } catch (e) { }
+}
+const SCORESHEET_EVENT_POINTS = { "2m": 2, "3m": 3, "ftm": 1, "2x": 0, "3x": 0, "ftx": 0, "foul": 0 };
+const SCORESHEET_EVENT_LABELS = {
+    "2m": "2 Punkte", "2x": "2er verworfen", "3m": "3 Punkte", "3x": "3er verworfen",
+    "ftm": "Freiwurf getroffen", "ftx": "Freiwurf verworfen", "foul": "Foul",
+};
+function quarterLabel(q) {
+    return q <= 4 ? `${q}. Viertel` : `Verlängerung ${q - 4}`;
+}
+function quarterShortLabel(q) {
+    return q <= 4 ? `V${q}` : `VL${q - 4}`;
+}
+function computeScoresheetPlayerStats(events, side, playerId) {
+    const own = events.filter((e) => e.side === side && e.playerId === playerId);
+    const count = (t) => own.filter((e) => e.type === t).length;
+    const twoM = count("2m"), twoX = count("2x"), threeM = count("3m"), threeX = count("3x");
+    const ftM = count("ftm"), ftX = count("ftx"), fouls = count("foul");
+    return {
+        pts: twoM * 2 + threeM * 3 + ftM,
+        fgm: twoM + threeM, fga: twoM + twoX + threeM + threeX,
+        tpm: threeM, tpa: threeM + threeX,
+        ftm: ftM, fta: ftM + ftX,
+        fouls,
+    };
+}
+function computeScoresheetTeamScore(events, side, quarter) {
+    return events
+        .filter((e) => e.side === side && (quarter === undefined || e.quarter === quarter))
+        .reduce((sum, e) => sum + (SCORESHEET_EVENT_POINTS[e.type] || 0), 0);
+}
+function ScoresheetSetupForm({ teams, players, onStart }) {
+    const [homeTeamId, setHomeTeamId] = useState(teams[0]?.id || "");
+    const teamPlayers = players.filter((p) => p.teamId === homeTeamId);
+    const [selectedPlayerIds, setSelectedPlayerIds] = useState(() => new Set(teamPlayers.map((p) => p.id)));
+    const [extraHome, setExtraHome] = useState([]);
+    const [awayName, setAwayName] = useState("");
+    const [awayRoster, setAwayRoster] = useState([]);
+    const [awayBulk, setAwayBulk] = useState("");
+    const [date, setDate] = useState(today());
+    const [competition, setCompetition] = useState("");
+    const [location, setLocation] = useState("");
+    const [error, setError] = useState("");
+    useEffect(() => {
+        setSelectedPlayerIds(new Set(players.filter((p) => p.teamId === homeTeamId).map((p) => p.id)));
+        setExtraHome([]);
+    }, [homeTeamId]);
+    function togglePlayer(id) {
+        setSelectedPlayerIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    }
+    function addExtraHome() {
+        setExtraHome((prev) => [...prev, { id: uid(), number: "", name: "" }]);
+    }
+    function updateExtraHome(id, field, value) {
+        setExtraHome((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    }
+    function removeExtraHome(id) {
+        setExtraHome((prev) => prev.filter((p) => p.id !== id));
+    }
+    function addAwayRow() {
+        setAwayRoster((prev) => [...prev, { id: uid(), number: "", name: "" }]);
+    }
+    function updateAwayRow(id, field, value) {
+        setAwayRoster((prev) => prev.map((p) => (p.id === id ? { ...p, [field]: value } : p)));
+    }
+    function removeAwayRow(id) {
+        setAwayRoster((prev) => prev.filter((p) => p.id !== id));
+    }
+    function applyAwayBulk() {
+        const lines = awayBulk.split(/\r\n|\n/).map((l) => l.trim()).filter(Boolean);
+        if (lines.length === 0) return;
+        const parsed = lines.map((line) => {
+            const m = line.match(/^(\d{1,3})\s+(.+)$/);
+            return m ? { id: uid(), number: m[1], name: m[2].trim() } : { id: uid(), number: "", name: line };
+        });
+        setAwayRoster((prev) => [...prev, ...parsed]);
+        setAwayBulk("");
+    }
+    function handleStart() {
+        const homeTeam = teams.find((t) => t.id === homeTeamId);
+        if (!homeTeam) { setError("Bitte ein eigenes Team auswählen."); return; }
+        const homeRoster = [
+            ...teamPlayers.filter((p) => selectedPlayerIds.has(p.id)).map((p) => ({ id: p.id, number: p.number ?? "", name: p.name })),
+            ...extraHome.filter((p) => p.name.trim()).map((p) => ({ id: p.id, number: p.number, name: p.name.trim() })),
+        ];
+        const cleanAwayRoster = awayRoster.filter((p) => p.name.trim()).map((p) => ({ id: p.id, number: p.number, name: p.name.trim() }));
+        if (homeRoster.length === 0) { setError("Das eigene Team braucht mindestens einen Spieler."); return; }
+        if (!awayName.trim()) { setError("Bitte einen Gegner-Namen eingeben."); return; }
+        if (cleanAwayRoster.length === 0) { setError("Bitte mindestens einen Gegner-Spieler eintragen."); return; }
+        setError("");
+        onStart({
+            id: uid(), date, competition: competition.trim(), location: location.trim(),
+            home: { teamId: homeTeamId, name: homeTeam.name, roster: homeRoster },
+            away: { name: awayName.trim(), roster: cleanAwayRoster },
+            quarter: 1, events: [], finishedAt: null,
+        });
+    }
+    return React.createElement("div", { className: "space-y-4 max-w-3xl" },
+        React.createElement("div", null,
+            React.createElement(SectionLabel, null, "Anschreiben"),
+            React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Neues Spiel anlegen: Team, Aufstellung und Gegner festlegen, dann live anschreiben.")),
+        error && React.createElement("div", { className: "bg-red-50 border border-red-200 text-red-700 text-sm rounded-xl px-3 py-2" }, error),
+        React.createElement("div", { className: `${cardClass} p-4 grid grid-cols-1 sm:grid-cols-3 gap-3` },
+            React.createElement(Field, { label: "Datum" }, React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
+            React.createElement(Field, { label: "Wettbewerb (optional)" }, React.createElement("input", { className: inputClass, value: competition, onChange: (e) => setCompetition(e.target.value), placeholder: "z. B. Liga, Spieltag 3" })),
+            React.createElement(Field, { label: "Ort (optional)" }, React.createElement("input", { className: inputClass, value: location, onChange: (e) => setLocation(e.target.value), placeholder: "Halle / Ort" }))),
+        React.createElement("div", { className: `${cardClass} p-4` },
+            React.createElement("h3", { className: "text-sm font-bold text-slate-900 mb-3" }, "Eigenes Team"),
+            React.createElement(Field, { label: "Team" },
+                React.createElement("select", { className: inputClass, value: homeTeamId, onChange: (e) => setHomeTeamId(e.target.value) },
+                    teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
+            React.createElement("p", { className: labelClass + " mt-3" }, "Aufstellung"),
+            teamPlayers.length === 0 && React.createElement("p", { className: "text-sm text-slate-400" }, "Keine Spieler in diesem Team."),
+            React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-3 gap-1.5" },
+                teamPlayers.map((p) => React.createElement("label", { key: p.id, className: `flex items-center gap-2 text-sm rounded-lg px-2 py-1.5 cursor-pointer ${selectedPlayerIds.has(p.id) ? "bg-red-50 text-slate-800" : "text-slate-400"}` },
+                    React.createElement("input", { type: "checkbox", checked: selectedPlayerIds.has(p.id), onChange: () => togglePlayer(p.id) }),
+                    React.createElement("span", { className: "font-semibold" }, p.number !== "" && p.number !== undefined ? p.number : "–"),
+                    React.createElement("span", { className: "truncate" }, p.name)))),
+            extraHome.length > 0 && React.createElement("div", { className: "mt-3 space-y-1.5" },
+                extraHome.map((p) => React.createElement("div", { key: p.id, className: "flex items-center gap-2" },
+                    React.createElement("input", { className: inputClass + " w-16", placeholder: "Nr.", value: p.number, onChange: (e) => updateExtraHome(p.id, "number", e.target.value) }),
+                    React.createElement("input", { className: inputClass, placeholder: "Name", value: p.name, onChange: (e) => updateExtraHome(p.id, "name", e.target.value) }),
+                    React.createElement("button", { onClick: () => removeExtraHome(p.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Entfernen" }, React.createElement(IconTrash, { size: 15 }))))),
+            React.createElement("button", { onClick: addExtraHome, className: "mt-3 text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1" }, React.createElement(IconPlus, { size: 13 }), " Zusätzlicher Spieler (z. B. Gastspieler)")),
+        React.createElement("div", { className: `${cardClass} p-4` },
+            React.createElement("h3", { className: "text-sm font-bold text-slate-900 mb-3" }, "Gegner"),
+            React.createElement(Field, { label: "Gegner-Teamname" },
+                React.createElement("input", { className: inputClass, value: awayName, onChange: (e) => setAwayName(e.target.value), placeholder: "z. B. TV Musterstadt" })),
+            React.createElement("p", { className: labelClass + " mt-3" }, "Kader"),
+            awayRoster.length > 0 && React.createElement("div", { className: "space-y-1.5 mb-2" },
+                awayRoster.map((p) => React.createElement("div", { key: p.id, className: "flex items-center gap-2" },
+                    React.createElement("input", { className: inputClass + " w-16", placeholder: "Nr.", value: p.number, onChange: (e) => updateAwayRow(p.id, "number", e.target.value) }),
+                    React.createElement("input", { className: inputClass, placeholder: "Name", value: p.name, onChange: (e) => updateAwayRow(p.id, "name", e.target.value) }),
+                    React.createElement("button", { onClick: () => removeAwayRow(p.id), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Entfernen" }, React.createElement(IconTrash, { size: 15 }))))),
+            React.createElement("button", { onClick: addAwayRow, className: "text-xs font-medium text-slate-500 hover:text-slate-800 flex items-center gap-1" }, React.createElement(IconPlus, { size: 13 }), " Spieler hinzufügen"),
+            React.createElement("div", { className: "mt-3" },
+                React.createElement("p", { className: labelClass }, "Schnell einfügen (eine Zeile pro Spieler: \"Nr. Name\")"),
+                React.createElement("textarea", { className: inputClass + " min-h-[70px]", value: awayBulk, onChange: (e) => setAwayBulk(e.target.value), placeholder: "10 Max Mustermann\n11 Erik Beispiel" }),
+                React.createElement("button", { onClick: applyAwayBulk, className: btnSecondaryClass + " mt-2 px-3 py-1.5 text-xs" }, "Übernehmen"))),
+        React.createElement("button", { onClick: handleStart, className: btnPrimaryClass + " w-full py-3 text-sm" }, React.createElement(IconTrophy, { size: 16 }), " Spiel starten"));
+}
+function ScoresheetLive({ game, onUpdate, onFinish, onCancel }) {
+    const { home, away, events, quarter } = game;
+    function pushEvent(side, playerId, type) {
+        onUpdate({ ...game, events: [...events, { id: uid(), side, playerId, type, quarter, ts: Date.now() }] });
+    }
+    function undoLast() {
+        if (events.length === 0) return;
+        onUpdate({ ...game, events: events.slice(0, -1) });
+    }
+    function setQuarter(q) {
+        onUpdate({ ...game, quarter: q });
+    }
+    function addOvertime() {
+        const maxQ = Math.max(4, quarter, ...events.map((e) => e.quarter));
+        onUpdate({ ...game, quarter: maxQ + 1 });
+    }
+    const homeScore = computeScoresheetTeamScore(events, "home");
+    const awayScore = computeScoresheetTeamScore(events, "away");
+    const lastEvent = events[events.length - 1];
+    const lastEventName = lastEvent && (home.roster.find((p) => p.id === lastEvent.playerId) || away.roster.find((p) => p.id === lastEvent.playerId))?.name;
+    const maxQuarter = Math.max(4, quarter, ...events.map((e) => e.quarter));
+    const quarterNums = Array.from({ length: maxQuarter }, (_, i) => i + 1);
+    function TeamColumn({ side, team }) {
+        return React.createElement("div", { className: `${cardClass} p-4` },
+            React.createElement("h3", { className: "text-base font-bold text-slate-900 mb-3 truncate" }, team.name),
+            React.createElement("div", { className: "space-y-2" }, team.roster.map((p) => {
+                const st = computeScoresheetPlayerStats(events, side, p.id);
+                const fouledOut = st.fouls >= 5;
+                return React.createElement("div", { key: p.id, className: `rounded-xl border p-2.5 ${fouledOut ? "border-red-300 bg-red-50" : "border-stone-200"}` },
+                    React.createElement("div", { className: "flex items-center justify-between mb-1.5 gap-2" },
+                        React.createElement("div", { className: "flex items-center gap-2 min-w-0" },
+                            React.createElement("span", { className: "w-7 h-7 rounded-full bg-stone-100 text-slate-700 text-xs font-bold flex items-center justify-center shrink-0" }, p.number || "–"),
+                            React.createElement("span", { className: "text-sm font-semibold text-slate-800 truncate" }, p.name)),
+                        React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
+                            React.createElement("span", { className: "text-sm font-black text-slate-900" }, st.pts),
+                            React.createElement("span", { className: `text-xs font-bold px-1.5 py-0.5 rounded-full ${fouledOut ? "bg-red-500 text-white" : "bg-stone-100 text-slate-500"}` }, `${st.fouls} F`))),
+                    React.createElement("div", { className: "flex flex-wrap gap-1" },
+                        React.createElement("button", { onClick: () => pushEvent(side, p.id, "2m"), className: "px-2 py-1 rounded-lg text-xs font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200" }, "2 ✓"),
+                        React.createElement("button", { onClick: () => pushEvent(side, p.id, "2x"), className: "px-2 py-1 rounded-lg text-xs font-semibold bg-stone-100 text-slate-500 hover:bg-stone-200" }, "2 ✗"),
+                        React.createElement("button", { onClick: () => pushEvent(side, p.id, "3m"), className: "px-2 py-1 rounded-lg text-xs font-semibold bg-emerald-100 text-emerald-700 hover:bg-emerald-200" }, "3 ✓"),
+                        React.createElement("button", { onClick: () => pushEvent(side, p.id, "3x"), className: "px-2 py-1 rounded-lg text-xs font-semibold bg-stone-100 text-slate-500 hover:bg-stone-200" }, "3 ✗"),
+                        React.createElement("button", { onClick: () => pushEvent(side, p.id, "ftm"), className: "px-2 py-1 rounded-lg text-xs font-semibold bg-sky-100 text-sky-700 hover:bg-sky-200" }, "FT ✓"),
+                        React.createElement("button", { onClick: () => pushEvent(side, p.id, "ftx"), className: "px-2 py-1 rounded-lg text-xs font-semibold bg-stone-100 text-slate-500 hover:bg-stone-200" }, "FT ✗"),
+                        React.createElement("button", { onClick: () => pushEvent(side, p.id, "foul"), className: "px-2 py-1 rounded-lg text-xs font-semibold bg-amber-100 text-amber-700 hover:bg-amber-200" }, "Foul")));
+            })));
+    }
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: `${cardClass} p-4` },
+            React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-3 mb-3" },
+                React.createElement("div", { className: "flex items-center gap-4" },
+                    React.createElement("div", { className: "text-center" },
+                        React.createElement("div", { className: "text-xs font-semibold text-slate-500 truncate max-w-[140px]" }, home.name),
+                        React.createElement("div", { className: "text-3xl font-black text-slate-900" }, homeScore)),
+                    React.createElement("span", { className: "text-slate-300 font-bold" }, ":"),
+                    React.createElement("div", { className: "text-center" },
+                        React.createElement("div", { className: "text-xs font-semibold text-slate-500 truncate max-w-[140px]" }, away.name),
+                        React.createElement("div", { className: "text-3xl font-black text-slate-900" }, awayScore))),
+                React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                    React.createElement("button", { onClick: undoLast, disabled: events.length === 0, className: btnSecondaryClass + " px-3 py-2 text-sm disabled:opacity-40" }, React.createElement(IconUndo, { size: 14 }), " Rückgängig"),
+                    React.createElement("button", { onClick: onFinish, className: btnPrimaryClass + " px-4 py-2 text-sm" }, React.createElement(IconTrophy, { size: 14 }), " Spiel beenden"),
+                    React.createElement("button", { onClick: onCancel, className: "text-xs text-slate-400 hover:text-red-500 underline" }, "Abbrechen"))),
+            React.createElement("div", { className: "flex items-center gap-1.5 flex-wrap" },
+                quarterNums.map((q) => React.createElement("button", { key: q, onClick: () => setQuarter(q), className: `px-3 py-1.5 rounded-lg text-xs font-semibold ${quarter === q ? "bg-slate-900 text-white" : "bg-stone-100 text-slate-600 hover:bg-stone-200"}` }, quarterLabel(q))),
+                React.createElement("button", { onClick: addOvertime, className: "px-3 py-1.5 rounded-lg text-xs font-semibold bg-stone-100 text-slate-600 hover:bg-stone-200" }, "+ Verlängerung")),
+            lastEvent && React.createElement("p", { className: "text-xs text-slate-400 mt-2" }, `Zuletzt: ${lastEventName || "?"} – ${SCORESHEET_EVENT_LABELS[lastEvent.type]} (${quarterLabel(lastEvent.quarter)})`)),
+        React.createElement("div", { className: "grid grid-cols-1 lg:grid-cols-2 gap-4" },
+            React.createElement(TeamColumn, { side: "home", team: home }),
+            React.createElement(TeamColumn, { side: "away", team: away })));
+}
+function ScoresheetFinal({ game, onBack, onNew }) {
+    const ref = useRef(null);
+    const [pdfBusy, setPdfBusy] = useState(false);
+    const { home, away, events } = game;
+    const maxQuarter = Math.max(4, 1, ...events.map((e) => e.quarter));
+    const quarterNums = Array.from({ length: maxQuarter }, (_, i) => i + 1);
+    const homeScore = computeScoresheetTeamScore(events, "home");
+    const awayScore = computeScoresheetTeamScore(events, "away");
+    function TeamTable({ side, team }) {
+        const rows = team.roster.map((p) => ({ p, st: computeScoresheetPlayerStats(events, side, p.id) }));
+        const totals = rows.reduce((acc, r) => ({
+            pts: acc.pts + r.st.pts, fgm: acc.fgm + r.st.fgm, fga: acc.fga + r.st.fga,
+            tpm: acc.tpm + r.st.tpm, tpa: acc.tpa + r.st.tpa, ftm: acc.ftm + r.st.ftm, fta: acc.fta + r.st.fta, fouls: acc.fouls + r.st.fouls,
+        }), { pts: 0, fgm: 0, fga: 0, tpm: 0, tpa: 0, ftm: 0, fta: 0, fouls: 0 });
+        return React.createElement("div", { className: "mb-5" },
+            React.createElement("h4", { className: "text-sm font-bold text-slate-900 mb-2" }, team.name),
+            React.createElement("div", { className: "overflow-x-auto" },
+                React.createElement("table", { className: "w-full text-xs" },
+                    React.createElement("thead", null, React.createElement("tr", { className: "border-b border-stone-300 text-slate-500" },
+                        ["Nr", "Name", "2P", "3P", "FT", "Pkt", "F"].map((h) => React.createElement("th", { key: h, className: "text-left font-semibold py-1.5 px-2" }, h)))),
+                    React.createElement("tbody", null,
+                        rows.map(({ p, st }) => React.createElement("tr", { key: p.id, className: "border-b border-stone-100" },
+                            React.createElement("td", { className: "py-1 px-2" }, p.number || "–"),
+                            React.createElement("td", { className: "py-1 px-2 font-medium" }, p.name),
+                            React.createElement("td", { className: "py-1 px-2" }, `${st.fgm - st.tpm}/${st.fga - st.tpa}`),
+                            React.createElement("td", { className: "py-1 px-2" }, `${st.tpm}/${st.tpa}`),
+                            React.createElement("td", { className: "py-1 px-2" }, `${st.ftm}/${st.fta}`),
+                            React.createElement("td", { className: "py-1 px-2 font-bold" }, st.pts),
+                            React.createElement("td", { className: "py-1 px-2" }, st.fouls))),
+                        React.createElement("tr", { className: "font-bold text-slate-900" },
+                            React.createElement("td", { className: "py-1.5 px-2", colSpan: 2 }, "Gesamt"),
+                            React.createElement("td", { className: "py-1.5 px-2" }, `${totals.fgm - totals.tpm}/${totals.fga - totals.tpa}`),
+                            React.createElement("td", { className: "py-1.5 px-2" }, `${totals.tpm}/${totals.tpa}`),
+                            React.createElement("td", { className: "py-1.5 px-2" }, `${totals.ftm}/${totals.fta}`),
+                            React.createElement("td", { className: "py-1.5 px-2" }, totals.pts),
+                            React.createElement("td", { className: "py-1.5 px-2" }, totals.fouls))))));
+    }
+    async function exportPdf() {
+        if (!ref.current || !window.html2canvas || !window.jspdf) return;
+        setPdfBusy(true);
+        try {
+            const canvas = await window.html2canvas(ref.current, { scale: 2, backgroundColor: "#ffffff" });
+            const imgData = canvas.toDataURL("image/png");
+            const pdf = new window.jspdf.jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
+            const pageWidth = pdf.internal.pageSize.getWidth();
+            const imgWidth = pageWidth - 20;
+            const imgHeight = (canvas.height * imgWidth) / canvas.width;
+            pdf.addImage(imgData, "PNG", 10, 10, imgWidth, imgHeight);
+            pdf.save(`Spielbericht_${(home.name + "_vs_" + away.name).replace(/[^a-z0-9]+/gi, "_")}_${game.date}.pdf`);
+        } catch (e) { }
+        setPdfBusy(false);
+    }
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", { className: "flex items-center justify-between flex-wrap gap-2" },
+            React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, "Spielbericht"),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("button", { onClick: onBack, className: btnSecondaryClass + " px-3 py-2 text-sm" }, "Zurück zum Spiel"),
+                React.createElement("button", { onClick: exportPdf, disabled: pdfBusy, className: btnPrimaryClass + " px-4 py-2 text-sm" }, React.createElement(IconDownload, { size: 14 }), pdfBusy ? " Erstelle PDF…" : " Als PDF exportieren"),
+                React.createElement("button", { onClick: onNew, className: "text-xs text-slate-400 hover:text-slate-700 underline" }, "Neues Spiel"))),
+        React.createElement("div", { ref: ref, className: `${cardClass} p-6` },
+            React.createElement("div", { className: "flex items-center justify-between mb-1 gap-3" },
+                React.createElement("div", { className: "min-w-0" },
+                    React.createElement("p", { className: "text-xs text-slate-400" }, fmtDate(game.date), game.competition ? ` · ${game.competition}` : "", game.location ? ` · ${game.location}` : ""),
+                    React.createElement("h3", { className: "text-xl font-black text-slate-900 truncate" }, `${home.name} vs. ${away.name}`)),
+                React.createElement("div", { className: "text-2xl font-black text-slate-900 shrink-0" }, `${homeScore} : ${awayScore}`)),
+            React.createElement("table", { className: "w-full text-xs mb-6 mt-3" },
+                React.createElement("thead", null, React.createElement("tr", { className: "border-b border-stone-300 text-slate-500" },
+                    React.createElement("th", { className: "text-left font-semibold py-1.5 px-2" }, "Team"),
+                    quarterNums.map((q) => React.createElement("th", { key: q, className: "text-left font-semibold py-1.5 px-2" }, quarterShortLabel(q))),
+                    React.createElement("th", { className: "text-left font-semibold py-1.5 px-2" }, "Gesamt"))),
+                React.createElement("tbody", null,
+                    React.createElement("tr", { className: "border-b border-stone-100" },
+                        React.createElement("td", { className: "py-1 px-2 font-medium" }, home.name),
+                        quarterNums.map((q) => React.createElement("td", { key: q, className: "py-1 px-2" }, computeScoresheetTeamScore(events, "home", q))),
+                        React.createElement("td", { className: "py-1 px-2 font-bold" }, homeScore)),
+                    React.createElement("tr", null,
+                        React.createElement("td", { className: "py-1 px-2 font-medium" }, away.name),
+                        quarterNums.map((q) => React.createElement("td", { key: q, className: "py-1 px-2" }, computeScoresheetTeamScore(events, "away", q))),
+                        React.createElement("td", { className: "py-1 px-2 font-bold" }, awayScore)))),
+            React.createElement(TeamTable, { side: "home", team: home }),
+            React.createElement(TeamTable, { side: "away", team: away })));
+}
+function ScoresheetView({ teams, players }) {
+    const [game, setGame] = useState(null);
+    const [phase, setPhase] = useState("setup");
+    const [draftPrompt, setDraftPrompt] = useState(null);
+    const [confirmCancel, setConfirmCancel] = useState(false);
+    useEffect(() => {
+        const draft = loadScoresheetDraft();
+        if (draft && draft.game) setDraftPrompt(draft);
+    }, []);
+    useEffect(() => {
+        if (game) saveScoresheetDraft({ game, phase });
+    }, [game, phase]);
+    function startGame(newGame) {
+        setGame(newGame);
+        setPhase("live");
+        setDraftPrompt(null);
+    }
+    function resumeDraft() {
+        setGame(draftPrompt.game);
+        setPhase(draftPrompt.phase || "live");
+        setDraftPrompt(null);
+    }
+    function discardDraft() {
+        clearScoresheetDraft();
+        setDraftPrompt(null);
+    }
+    function newGame() {
+        clearScoresheetDraft();
+        setGame(null);
+        setPhase("setup");
+        setConfirmCancel(false);
+    }
+    return React.createElement("div", { className: "space-y-4" },
+        draftPrompt && !game && React.createElement("div", { className: "bg-amber-50 border border-amber-200 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3" },
+            React.createElement("p", { className: "text-sm text-amber-800" }, `Es gibt ein nicht abgeschlossenes Spiel: ${draftPrompt.game.home?.name} vs. ${draftPrompt.game.away?.name} (${fmtDate(draftPrompt.game.date)}).`),
+            React.createElement("div", { className: "flex gap-2 shrink-0" },
+                React.createElement("button", { onClick: resumeDraft, className: btnPrimaryClass + " px-3 py-1.5 text-xs" }, "Fortsetzen"),
+                React.createElement("button", { onClick: discardDraft, className: btnSecondaryClass + " px-3 py-1.5 text-xs" }, "Verwerfen"))),
+        !game && React.createElement(ScoresheetSetupForm, { teams: teams, players: players, onStart: startGame }),
+        game && phase === "live" && React.createElement(React.Fragment, null,
+            confirmCancel && React.createElement("div", { className: "bg-red-50 border border-red-200 rounded-2xl p-4 flex items-center justify-between flex-wrap gap-3" },
+                React.createElement("p", { className: "text-sm text-red-700" }, "Spiel wirklich abbrechen? Alle erfassten Punkte gehen verloren."),
+                React.createElement("div", { className: "flex gap-2 shrink-0" },
+                    React.createElement("button", { onClick: newGame, className: "bg-red-600 hover:bg-red-700 text-white rounded-xl px-3 py-1.5 text-xs font-semibold" }, "Ja, abbrechen"),
+                    React.createElement("button", { onClick: () => setConfirmCancel(false), className: btnSecondaryClass + " px-3 py-1.5 text-xs" }, "Weiter anschreiben"))),
+            React.createElement(ScoresheetLive, { game: game, onUpdate: setGame, onFinish: () => setPhase("final"), onCancel: () => setConfirmCancel(true) })),
+        game && phase === "final" && React.createElement(ScoresheetFinal, { game: game, onBack: () => setPhase("live"), onNew: newGame }));
+}
 const TABS = [
     { key: "uebersicht", label: "Übersicht", icon: IconUsers },
     { key: "steckbrief", label: "Steckbrief", icon: IconFile },
@@ -3105,6 +3803,7 @@ function SpielerAkte() {
     const [showTeamCalendar, setShowTeamCalendar] = useState(false);
     const [showGlobalCalendar, setShowGlobalCalendar] = useState(false);
     const [showVerwaltung, setShowVerwaltung] = useState(false);
+    const [showScoresheet, setShowScoresheet] = useState(false);
     const [selectedPlayerId, setSelectedPlayerId] = useState(null);
     const [activeTab, setActiveTab] = useState("uebersicht");
     const [expandedCats, setExpandedCats] = useState(() => new Set());
@@ -3492,6 +4191,28 @@ function SpielerAkte() {
         setCalendarEvents((prev) => prev.filter((e) => e.id !== id));
         await db.collection("calendarEvents").doc(id).delete();
     }
+    async function deleteCalendarEventsBatch(ids) {
+        for (let i = 0; i < ids.length; i += 400) {
+            const chunk = ids.slice(i, i + 400);
+            const batch = db.batch();
+            chunk.forEach((id) => batch.delete(db.collection("calendarEvents").doc(id)));
+            await batch.commit();
+        }
+    }
+    async function clearTeamCalendar(teamId) {
+        const ids = calendarEvents.filter((e) => e.teamId === teamId).map((e) => e.id);
+        if (ids.length === 0)
+            return;
+        setCalendarEvents((prev) => prev.filter((e) => e.teamId !== teamId));
+        await deleteCalendarEventsBatch(ids);
+    }
+    async function clearAllCalendars() {
+        const ids = calendarEvents.map((e) => e.id);
+        if (ids.length === 0)
+            return;
+        setCalendarEvents([]);
+        await deleteCalendarEventsBatch(ids);
+    }
     async function addTeamNote(note) {
         const newNote = {
             teamId: note.teamId, date: note.date, title: note.title, text: note.text || "",
@@ -3672,6 +4393,7 @@ function SpielerAkte() {
         setShowTeamCalendar(false);
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
+        setShowScoresheet(false);
         setMobileSidebarOpen(false);
     }
     function goHome() {
@@ -3680,6 +4402,7 @@ function SpielerAkte() {
         setShowTeamCalendar(false);
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
+        setShowScoresheet(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -3689,6 +4412,7 @@ function SpielerAkte() {
         setShowTeamCalendar(true);
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
+        setShowScoresheet(false);
         setMobileSidebarOpen(false);
     }
     function goVerwaltung() {
@@ -3697,6 +4421,7 @@ function SpielerAkte() {
         setShowTeamCalendar(false);
         setShowGlobalCalendar(false);
         setShowVerwaltung(true);
+        setShowScoresheet(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -3706,6 +4431,17 @@ function SpielerAkte() {
         setShowTeamCalendar(false);
         setShowVerwaltung(false);
         setShowGlobalCalendar(true);
+        setShowScoresheet(false);
+        setConfirmDeletePlayer(false);
+        setMobileSidebarOpen(false);
+    }
+    function goScoresheet() {
+        setSelectedPlayerId(null);
+        setSelectedTeamId("all");
+        setShowTeamCalendar(false);
+        setShowGlobalCalendar(false);
+        setShowVerwaltung(false);
+        setShowScoresheet(true);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -4035,6 +4771,7 @@ function SpielerAkte() {
                     " Speichern fehlgeschlagen")),
                 isTrainer && (React.createElement(HeaderMenu, { label: "Importieren", icon: IconUpload, isOpen: openHeaderMenu === "import", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "import" ? null : "import"), onClose: () => setOpenHeaderMenu(null), items: [
                         { label: "Kalender importieren (.ics)", icon: IconCalendar, onClick: () => setModal("importCalendar") },
+                        { label: "Kalender aus Screenshot (Beta)", icon: IconUpload, onClick: () => setModal("importScreenshot") },
                         { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
                         { label: "Habit-Stats importieren", icon: IconActivity, onClick: () => setModal("importHabits") },
                         { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => setModal("importBoxscore") },
@@ -4063,14 +4800,15 @@ function SpielerAkte() {
                     React.createElement("button", { onClick: () => setMobileSidebarOpen(false), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Schließen" },
                         React.createElement(IconX, { size: 18 }))),
                 React.createElement("div", { className: "flex flex-col gap-1 pb-3 mb-1 border-b border-stone-200" }, [
-                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !selectedPlayerId && selectedTeamId === "all" },
+                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !showScoresheet && !selectedPlayerId && selectedTeamId === "all" },
                     { key: "calendar", label: "Kalender", icon: IconCalendar, onClick: goGlobalCalendar, active: showGlobalCalendar },
+                    { key: "scoresheet", label: "Anschreiben", icon: IconTrophy, onClick: goScoresheet, active: showScoresheet },
                     { key: "verwaltung", label: "Verwaltung", icon: IconSettings, onClick: goVerwaltung, active: showVerwaltung },
                 ].map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#eb1e23]/10 to-[#0a96d4]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
                     React.createElement(item.icon, { size: 16, className: item.active ? "text-[#eb1e23]" : "text-slate-400" }),
                     item.label))),
                 React.createElement("div", { className: "flex gap-2" },
-                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); setShowVerwaltung(false); } },
+                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); setShowVerwaltung(false); setShowScoresheet(false); } },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
                         teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
                     React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
@@ -4114,7 +4852,7 @@ function SpielerAkte() {
                             React.createElement("button", { onClick: () => setShowTeamCalendar(false), className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
                                 React.createElement(IconUsers, { size: 14 }),
                                 " Spieler-\u00DCbersicht")),
-                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teams: teams, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent }),
+                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teams: teams, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearTeam: clearTeamCalendar }),
                         React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 mt-4" },
                             React.createElement("div", { className: "flex items-center justify-between mb-2" },
                                 React.createElement(SectionLabel, null, "Team-Notizen"),
@@ -4148,7 +4886,7 @@ function SpielerAkte() {
                         React.createElement("button", { onClick: goHome, className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
                             React.createElement(IconUsers, { size: 14 }),
                             " Dashboard")),
-                    React.createElement(CalendarView, { events: calendarEvents, isTrainer: isTrainer, team: null, teams: teams, teamPlayers: [], allPlayers: players, contextLabel: "Alle Teams", onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent }))),
+                    React.createElement(CalendarView, { events: calendarEvents, isTrainer: isTrainer, team: null, teams: teams, teamPlayers: [], allPlayers: players, contextLabel: "Alle Teams", onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearAll: clearAllCalendars }))),
                 !selectedPlayer && !showGlobalCalendar && showVerwaltung && isTrainer && (React.createElement("div", { className: "space-y-5 rsk-fade-in" },
                     React.createElement("div", null,
                         React.createElement(SectionLabel, null, "Verwaltung"),
@@ -4164,8 +4902,9 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && showScoresheet && isTrainer && (React.createElement(ScoresheetView, { teams: teams, players: players })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showScoresheet && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showScoresheet && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
                 selectedPlayer && (React.createElement("div", { className: "rsk-fade-in min-w-0" },
@@ -4546,6 +5285,8 @@ function SpielerAkte() {
             React.createElement(AttendanceImportModal, { players: players, teams: teams, onConfirm: handleImportAttendance, onClose: () => setModal(null) }))),
         modal === "importCalendar" && (React.createElement(Modal, { title: "Kalender aus .ics importieren", onClose: () => setModal(null), wide: true },
             React.createElement(IcsImportModal, { teams: teams, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
+        modal === "importScreenshot" && (React.createElement(Modal, { title: "Kalender aus Screenshot importieren (Beta)", onClose: () => setModal(null), wide: true },
+            React.createElement(ScreenshotImportModal, { teams: teams, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
         modal === "importHabits" && (React.createElement(Modal, { title: "Habit-Stats aus CSV importieren", onClose: () => setModal(null), wide: true },
             React.createElement(HabitStatsImportModal, { players: players, teams: teams, onConfirm: handleImportHabitStats, onClose: () => setModal(null) }))),
         modal === "importBoxscore" && (React.createElement(Modal, { title: "Boxscore einf\u00FCgen", onClose: () => setModal(null), wide: true },
