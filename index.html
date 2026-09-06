@@ -1100,31 +1100,62 @@ function assignColumnsByWidth(blocks, numDays) {
     const colWidth = span / numDays;
     return blocks.map((b) => ({ ...b, column: Math.min(numDays - 1, Math.max(0, Math.floor((((b.minX + b.maxX) / 2) - minX) / colWidth))) }));
 }
-async function ocrBlock(sourceCanvas, block, padding) {
+function prepareOcrCanvas(sourceCanvas, block, padding) {
     const sx = Math.max(0, block.minX - padding);
     const sy = Math.max(0, block.minY - padding);
     const ex = Math.min(sourceCanvas.width, block.maxX + padding);
     const ey = Math.min(sourceCanvas.height, block.maxY + padding);
     const w = ex - sx, h = ey - sy;
+    // Auf eine Mindesthöhe hochskalieren - Tesseract erkennt kleine, per Screenshot
+    // verkleinerte Schrift in den Kästchen sonst sehr schlecht.
+    const scale = Math.max(1, Math.min(4, 120 / h));
+    const outW = Math.round(w * scale), outH = Math.round(h * scale);
     const cropCanvas = document.createElement("canvas");
-    cropCanvas.width = w;
-    cropCanvas.height = h;
+    cropCanvas.width = outW;
+    cropCanvas.height = outH;
     const cctx = cropCanvas.getContext("2d");
-    cctx.drawImage(sourceCanvas, sx, sy, w, h, 0, 0, w, h);
-    const result = await window.Tesseract.recognize(cropCanvas, "deu");
+    cctx.imageSmoothingEnabled = true;
+    cctx.drawImage(sourceCanvas, sx, sy, w, h, 0, 0, outW, outH);
+    // Google-Calendar-Kästchen haben meist weiße Schrift auf farbigem/dunklem
+    // Grund - Tesseract ist auf dunkle Schrift auf hellem Grund trainiert.
+    // Deshalb: in Graustufen wandeln und bei insgesamt dunklem Kästchen invertieren.
+    const imgData = cctx.getImageData(0, 0, outW, outH);
+    const d = imgData.data;
+    let sum = 0;
+    for (let i = 0; i < d.length; i += 4) {
+        const gray = 0.299 * d[i] + 0.587 * d[i + 1] + 0.114 * d[i + 2];
+        d[i] = d[i + 1] = d[i + 2] = gray;
+        sum += gray;
+    }
+    const avg = sum / (d.length / 4);
+    if (avg < 140) {
+        for (let i = 0; i < d.length; i += 4) {
+            d[i] = 255 - d[i];
+            d[i + 1] = 255 - d[i + 1];
+            d[i + 2] = 255 - d[i + 2];
+        }
+    }
+    cctx.putImageData(imgData, 0, 0);
+    return cropCanvas;
+}
+async function ocrBlock(worker, sourceCanvas, block, padding) {
+    const cropCanvas = prepareOcrCanvas(sourceCanvas, block, padding);
+    const result = await worker.recognize(cropCanvas);
     return result.data.text || "";
 }
 function parseBlockText(rawText) {
     const cleaned = (rawText || "").replace(/\r/g, "").trim();
-    const timeMatch = cleaned.match(/(\d{1,2})[.:](\d{2})\s*(?:bis|-|–|bs)\s*(\d{1,2})[.:](\d{2})/i);
+    const flat = cleaned.replace(/\s+/g, " ");
+    const timeMatch = flat.match(/(\d{1,2})[.:]?(\d{2})?\s*(?:bis|-|–|bs)\s*(\d{1,2})[.:](\d{2})/i);
     let startTime = "", endTime = "";
     if (timeMatch) {
-        startTime = `${timeMatch[1].padStart(2, "0")}:${timeMatch[2]}`;
+        const startMin = timeMatch[2] || "00";
+        startTime = `${timeMatch[1].padStart(2, "0")}:${startMin}`;
         endTime = `${timeMatch[3].padStart(2, "0")}:${timeMatch[4]}`;
     }
     const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean);
-    const titleLine = lines.find((l) => !/\d{1,2}[.:]\d{2}/.test(l));
-    const title = (titleLine || lines[0] || "Termin").trim();
+    const titleLines = lines.filter((l) => !/\d{1,2}[.:]\d{2}/.test(l) && !/^(bis|-|–|bs)$/i.test(l));
+    const title = (titleLines.join(" ").trim() || lines[0] || "Termin").trim();
     return { title, startTime, endTime };
 }
 async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, onProgress) {
@@ -1137,16 +1168,33 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
     const rawBlocks = detectColoredBlocks(canvas);
     const blocks = assignColumnsByWidth(rawBlocks, numDays);
     blocks.sort((a, b) => a.column - b.column || a.minY - b.minY);
+    // Ein Worker für alle Kästchen wiederverwenden (deutlich schneller als pro
+    // Kästchen neu zu laden) und auf "ein einzelner Textblock" statt volle
+    // Seitenerkennung stellen - passt viel besser zu kurzen Kästchen-Texten.
+    const worker = typeof window.Tesseract.createWorker === "function" ? await window.Tesseract.createWorker() : null;
+    if (worker) {
+        await worker.load();
+        await worker.loadLanguage("deu");
+        await worker.initialize("deu");
+        if (window.Tesseract.PSM)
+            await worker.setParameters({ tessedit_pageseg_mode: window.Tesseract.PSM.SINGLE_BLOCK });
+    }
     const results = [];
-    for (let i = 0; i < blocks.length; i++) {
-        const block = blocks[i];
-        if (onProgress)
-            onProgress(i + 1, blocks.length);
-        const text = await ocrBlock(canvas, block, 4);
-        const { title, startTime, endTime } = parseBlockText(text);
-        const date = new Date(mondayDate);
-        date.setDate(mondayDate.getDate() + block.column);
-        results.push({ id: `blk-${i}`, title, date: isoDate(date), time: startTime, endTime });
+    try {
+        for (let i = 0; i < blocks.length; i++) {
+            const block = blocks[i];
+            if (onProgress)
+                onProgress(i + 1, blocks.length);
+            const text = worker ? await ocrBlock(worker, canvas, block, 4) : (await window.Tesseract.recognize(prepareOcrCanvas(canvas, block, 4), "deu")).data.text;
+            const { title, startTime, endTime } = parseBlockText(text);
+            const date = new Date(mondayDate);
+            date.setDate(mondayDate.getDate() + block.column);
+            results.push({ id: `blk-${i}`, title, date: isoDate(date), time: startTime, endTime });
+        }
+    }
+    finally {
+        if (worker)
+            await worker.terminate();
     }
     return results;
 }
@@ -2874,6 +2922,143 @@ function EventForm({ initialEvent, defaultDate, defaultTeamId, teams, allPlayers
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-[#eb1e23] hover:bg-[#be2228] text-white rounded-lg py-2.5 text-sm font-semibold transition" }, initialEvent ? "Änderungen speichern" : "Termin anlegen")));
 }
+function getEventAttendees(event, allPlayers) {
+    const matchesTeam = (p) => !!event.teamId && event.teamId === p.teamId;
+    const isExcluded = (p) => matchesTeam(p) && (event.excludedPlayerIds || []).includes(p.id);
+    const isInvited = (p) => (event.includedPlayerIds || []).includes(p.id);
+    return (allPlayers || []).filter((p) => (matchesTeam(p) && !isExcluded(p)) || isInvited(p));
+}
+function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd }) {
+    const [teamFilter, setTeamFilter] = useState("all");
+    const [typeFilter, setTypeFilter] = useState("training");
+    const [showPast, setShowPast] = useState(false);
+    const [showForm, setShowForm] = useState(false);
+    const [editingEvent, setEditingEvent] = useState(null);
+    const [addPickerFor, setAddPickerFor] = useState(null);
+    const [pickerPlayerId, setPickerPlayerId] = useState("");
+    const todayIso = isoDate(new Date());
+    function teamOfEvent(e) {
+        return teams.find((t) => t.id === e.teamId) || null;
+    }
+    function eventMatchesTeamFilter(e) {
+        if (teamFilter === "all")
+            return true;
+        if (e.teamId === teamFilter)
+            return true;
+        return getEventAttendees(e, allPlayers).some((p) => p.teamId === teamFilter);
+    }
+    const filteredEvents = events
+        .filter((e) => showPast || e.date >= todayIso)
+        .filter((e) => typeFilter === "all" || e.type === typeFilter)
+        .filter(eventMatchesTeamFilter)
+        .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+    const byDate = {};
+    filteredEvents.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+    const dateKeys = Object.keys(byDate).sort();
+    function openNew() {
+        setEditingEvent(null);
+        setShowForm(true);
+    }
+    function openEdit(e) {
+        setEditingEvent(e);
+        setShowForm(true);
+    }
+    function toggleTeamPlayerExcluded(event, playerId) {
+        const cur = event.excludedPlayerIds || [];
+        const next = cur.includes(playerId) ? cur.filter((x) => x !== playerId) : [...cur, playerId];
+        onEdit(event.id, { excludedPlayerIds: next });
+    }
+    function removeIncludedPlayer(event, playerId) {
+        const next = (event.includedPlayerIds || []).filter((x) => x !== playerId);
+        onEdit(event.id, { includedPlayerIds: next });
+    }
+    function addIncludedPlayer(event, playerId) {
+        if (!playerId)
+            return;
+        const cur = event.includedPlayerIds || [];
+        if (cur.includes(playerId))
+            return;
+        onEdit(event.id, { includedPlayerIds: [...cur, playerId] });
+        setAddPickerFor(null);
+        setPickerPlayerId("");
+    }
+    const filterBar = React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
+        React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: teamFilter, onChange: (e) => setTeamFilter(e.target.value) },
+            React.createElement("option", { value: "all" }, "Alle Teams"),
+            teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
+        React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: typeFilter, onChange: (e) => setTypeFilter(e.target.value) },
+            React.createElement("option", { value: "all" }, "Alle Arten"),
+            Object.entries(EVENT_TYPE_STYLES).map(([k, v]) => React.createElement("option", { key: k, value: k }, v.label))),
+        React.createElement("label", { className: "flex items-center gap-1.5 text-sm text-slate-600 ml-1" },
+            React.createElement("input", { type: "checkbox", className: "rounded", checked: showPast, onChange: (e) => setShowPast(e.target.checked) }),
+            "Vergangene anzeigen"),
+        React.createElement("button", { onClick: openNew, className: "ml-auto flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white rounded-lg px-3 py-2 hover:bg-slate-800" },
+            React.createElement(IconPlus, { size: 14 }),
+            " Einheit anlegen"));
+    function playerChip(event, player, kind) {
+        const isExcludedChip = kind === "team" && (event.excludedPlayerIds || []).includes(player.id);
+        const baseClass = "inline-flex items-center gap-1 text-xs font-medium rounded-full pl-2.5 pr-1.5 py-1 transition";
+        const styleClass = isExcludedChip
+            ? "bg-stone-100 text-slate-400 line-through"
+            : kind === "extra" ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700";
+        const toggleTitle = kind === "team" ? (isExcludedChip ? "Wieder einschließen" : "Für diese Einheit ausschließen") : "Aus dieser Einheit entfernen";
+        const onToggle = kind === "team" ? () => toggleTeamPlayerExcluded(event, player.id) : () => removeIncludedPlayer(event, player.id);
+        return React.createElement("span", { key: player.id, className: `${baseClass} ${styleClass}` },
+            player.name,
+            React.createElement("button", { type: "button", onClick: onToggle, title: toggleTitle, className: "hover:text-red-500 rounded-full w-4 h-4 flex items-center justify-center" },
+                React.createElement(IconX, { size: 10 })));
+    }
+    function eventRow(event) {
+        const team = teamOfEvent(event);
+        const teamPlayers = team ? allPlayers.filter((p) => p.teamId === team.id) : [];
+        const extraPlayers = allPlayers.filter((p) => (event.includedPlayerIds || []).includes(p.id) && p.teamId !== team?.id);
+        const attendeeCount = getEventAttendees(event, allPlayers).length;
+        const teamChips = teamPlayers.map((p) => playerChip(event, p, "team"));
+        const extraChips = extraPlayers.map((p) => playerChip(event, p, "extra"));
+        const addBtn = React.createElement("button", { type: "button", onClick: () => setAddPickerFor(addPickerFor === event.id ? null : event.id), className: "inline-flex items-center gap-1 text-xs font-medium text-slate-400 hover:text-slate-700 border border-dashed border-stone-300 rounded-full px-2.5 py-1" },
+            React.createElement(IconPlus, { size: 10 }),
+            " Spieler");
+        const eligibleForAdd = allPlayers.filter((p) => !(event.includedPlayerIds || []).includes(p.id) && p.teamId !== team?.id);
+        const addPicker = addPickerFor === event.id ? React.createElement("div", { className: "flex items-center gap-1.5 mt-1.5" },
+            React.createElement("select", { className: "text-xs rounded border border-stone-300 px-1.5 py-1", value: pickerPlayerId, onChange: (e) => setPickerPlayerId(e.target.value) },
+                React.createElement("option", { value: "" }, "– Spieler wählen –"),
+                eligibleForAdd.map((p) => React.createElement("option", { key: p.id, value: p.id }, `${p.name}${p.teamId ? " (" + (teams.find((t) => t.id === p.teamId)?.name || "") + ")" : ""}`))),
+            React.createElement("button", { type: "button", onClick: () => addIncludedPlayer(event, pickerPlayerId), className: "text-xs font-medium bg-slate-900 text-white rounded-lg px-2 py-1 hover:bg-slate-800" }, "OK")) : null;
+        const rosterSection = React.createElement("div", { className: "flex flex-wrap items-center gap-1.5 mt-2" }, teamChips, extraChips, addBtn);
+        const headerLine = React.createElement("div", { className: "flex items-center justify-between gap-3" },
+            React.createElement("div", { className: "min-w-0 flex items-center gap-2.5" },
+                React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${EVENT_TYPE_STYLES[event.type]?.dot || "bg-slate-400"}` }),
+                event.time && React.createElement("span", { className: "text-sm font-semibold text-slate-800 shrink-0" }, event.time),
+                React.createElement("span", { className: "text-sm text-slate-700 truncate" }, event.title),
+                React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, team ? team.name : "Individuell")),
+            React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
+                React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, attendeeCount, " Spieler"),
+                React.createElement("button", { onClick: () => openEdit(event), className: "text-slate-300 hover:text-[#0a96d4]", "aria-label": "Bearbeiten" },
+                    React.createElement(IconEdit, { size: 14 })),
+                React.createElement("button", { onClick: () => onDelete(event.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Löschen" },
+                    React.createElement(IconTrash, { size: 14 }))));
+        return React.createElement("div", { key: event.id, className: "bg-stone-50 rounded-xl p-3.5" }, headerLine, rosterSection, addPicker);
+    }
+    const dayGroups = dateKeys.map((iso) => {
+        const isToday = iso === todayIso;
+        const dayHeader = React.createElement("p", { className: `text-xs font-semibold uppercase tracking-wide mb-2 ${isToday ? "text-[#eb1e23]" : "text-slate-400"}` },
+            new Date(iso + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }),
+            isToday && " · Heute");
+        const rows = React.createElement("div", { className: "space-y-2" }, byDate[iso].map(eventRow));
+        return React.createElement("div", { key: iso }, dayHeader, rows);
+    });
+    const emptyState = filteredEvents.length === 0 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-10" }, "Keine Einheiten gefunden.") : null;
+    const formModal = showForm ? React.createElement(Modal, { title: editingEvent ? "Einheit bearbeiten" : "Einheit anlegen", onClose: () => setShowForm(false), wide: true },
+        React.createElement(EventForm, { initialEvent: editingEvent, teams: teams, allPlayers: allPlayers, onSubmit: (vals) => { editingEvent ? onEdit(editingEvent.id, vals) : onAdd(vals); setShowForm(false); }, onClose: () => setShowForm(false) })) : null;
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", null,
+            React.createElement(SectionLabel, null, "Alle Einheiten"),
+            React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Überblick über alle Trainings/Termine mit den zugeordneten Spielern - Spieler per Klick auf das X ausschließen oder über \"+ Spieler\" zusätzlich hinzufügen.")),
+        filterBar,
+        emptyState,
+        React.createElement("div", { className: "space-y-5" }, dayGroups),
+        formModal);
+}
 function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, onLoad, onCreate, onDelete, onClose }) {
     const [showForm, setShowForm] = useState(false);
     const [label, setLabel] = useState("");
@@ -3476,6 +3661,7 @@ function SpielerAkte() {
     const [showTeamCalendar, setShowTeamCalendar] = useState(false);
     const [showGlobalCalendar, setShowGlobalCalendar] = useState(false);
     const [showVerwaltung, setShowVerwaltung] = useState(false);
+    const [showAllUnits, setShowAllUnits] = useState(false);
     const [selectedPlayerId, setSelectedPlayerId] = useState(null);
     const [activeTab, setActiveTab] = useState("uebersicht");
     const [expandedCats, setExpandedCats] = useState(() => new Set());
@@ -4028,6 +4214,9 @@ function SpielerAkte() {
         else if (showVerwaltung) {
             breadcrumbItems.push({ label: "Verwaltung", onClick: null });
         }
+        else if (showAllUnits) {
+            breadcrumbItems.push({ label: "Alle Einheiten", onClick: null });
+        }
         else if (selectedPlayer) {
             if (selectedTeam)
                 breadcrumbItems.push({ label: selectedTeam.name, onClick: () => { setSelectedPlayerId(null); setSelectedTeamId(selectedTeam.id); setShowTeamCalendar(false); setShowGlobalCalendar(false); } });
@@ -4065,6 +4254,7 @@ function SpielerAkte() {
         setShowTeamCalendar(false);
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
+        setShowAllUnits(false);
         setMobileSidebarOpen(false);
     }
     function goHome() {
@@ -4073,6 +4263,7 @@ function SpielerAkte() {
         setShowTeamCalendar(false);
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
+        setShowAllUnits(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -4082,6 +4273,7 @@ function SpielerAkte() {
         setShowTeamCalendar(true);
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
+        setShowAllUnits(false);
         setMobileSidebarOpen(false);
     }
     function goVerwaltung() {
@@ -4090,6 +4282,7 @@ function SpielerAkte() {
         setShowTeamCalendar(false);
         setShowGlobalCalendar(false);
         setShowVerwaltung(true);
+        setShowAllUnits(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -4099,6 +4292,17 @@ function SpielerAkte() {
         setShowTeamCalendar(false);
         setShowVerwaltung(false);
         setShowGlobalCalendar(true);
+        setShowAllUnits(false);
+        setConfirmDeletePlayer(false);
+        setMobileSidebarOpen(false);
+    }
+    function goAllUnits() {
+        setSelectedPlayerId(null);
+        setSelectedTeamId("all");
+        setShowTeamCalendar(false);
+        setShowGlobalCalendar(false);
+        setShowVerwaltung(false);
+        setShowAllUnits(true);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -4457,14 +4661,15 @@ function SpielerAkte() {
                     React.createElement("button", { onClick: () => setMobileSidebarOpen(false), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Schließen" },
                         React.createElement(IconX, { size: 18 }))),
                 React.createElement("div", { className: "flex flex-col gap-1 pb-3 mb-1 border-b border-stone-200" }, [
-                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !selectedPlayerId && selectedTeamId === "all" },
+                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !showAllUnits && !selectedPlayerId && selectedTeamId === "all" },
                     { key: "calendar", label: "Kalender", icon: IconCalendar, onClick: goGlobalCalendar, active: showGlobalCalendar },
+                    { key: "allunits", label: "Alle Einheiten", icon: IconClipboard, onClick: goAllUnits, active: showAllUnits },
                     { key: "verwaltung", label: "Verwaltung", icon: IconSettings, onClick: goVerwaltung, active: showVerwaltung },
                 ].map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#eb1e23]/10 to-[#0a96d4]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
                     React.createElement(item.icon, { size: 16, className: item.active ? "text-[#eb1e23]" : "text-slate-400" }),
                     item.label))),
                 React.createElement("div", { className: "flex gap-2" },
-                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); setShowVerwaltung(false); } },
+                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); setShowVerwaltung(false); setShowAllUnits(false); } },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
                         teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
                     React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
@@ -4543,7 +4748,8 @@ function SpielerAkte() {
                             React.createElement(IconUsers, { size: 14 }),
                             " Dashboard")),
                     React.createElement(CalendarView, { events: calendarEvents, isTrainer: isTrainer, team: null, teams: teams, teamPlayers: [], allPlayers: players, contextLabel: "Alle Teams", onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearAll: clearAllCalendars }))),
-                !selectedPlayer && !showGlobalCalendar && showVerwaltung && isTrainer && (React.createElement("div", { className: "space-y-5 rsk-fade-in" },
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && showAllUnits && isTrainer && (React.createElement(AllUnitsView, { events: calendarEvents, teams: teams, allPlayers: players, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onAdd: addCalendarEvent })),
+                !selectedPlayer && !showGlobalCalendar && !showAllUnits && showVerwaltung && isTrainer && (React.createElement("div", { className: "space-y-5 rsk-fade-in" },
                     React.createElement("div", null,
                         React.createElement(SectionLabel, null, "Verwaltung"),
                         React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Teams, Zugänge und die Vorlagen für Statistiken, Tests und Development-Pläne verwalten.")),
@@ -4558,8 +4764,8 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
                 selectedPlayer && (React.createElement("div", { className: "rsk-fade-in min-w-0" },
