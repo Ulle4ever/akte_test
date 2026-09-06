@@ -1088,9 +1088,17 @@ function detectColoredBlocks(canvas) {
     }
     return blocks;
 }
-function assignColumnsByWidth(blocks, imageWidth, numDays) {
-    const colWidth = imageWidth / numDays;
-    return blocks.map((b) => ({ ...b, column: Math.min(numDays - 1, Math.max(0, Math.floor(((b.minX + b.maxX) / 2) / colWidth))) }));
+function assignColumnsByWidth(blocks, numDays) {
+    if (blocks.length === 0)
+        return blocks;
+    // Spalten anhand der tatsächlichen Kästchen-Ausdehnung berechnen statt der
+    // vollen Bildbreite - sonst verschiebt eine Zeitachsen-Spalte links (oder ein
+    // beschnittener Screenshot) alle Tage falsch, weil sie nicht Teil des Rasters ist.
+    const minX = Math.min(...blocks.map((b) => b.minX));
+    const maxX = Math.max(...blocks.map((b) => b.maxX));
+    const span = Math.max(1, maxX - minX);
+    const colWidth = span / numDays;
+    return blocks.map((b) => ({ ...b, column: Math.min(numDays - 1, Math.max(0, Math.floor((((b.minX + b.maxX) / 2) - minX) / colWidth))) }));
 }
 async function ocrBlock(sourceCanvas, block, padding) {
     const sx = Math.max(0, block.minX - padding);
@@ -1127,7 +1135,7 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
     const ctx = canvas.getContext("2d");
     ctx.drawImage(imgEl, 0, 0);
     const rawBlocks = detectColoredBlocks(canvas);
-    const blocks = assignColumnsByWidth(rawBlocks, canvas.width, numDays);
+    const blocks = assignColumnsByWidth(rawBlocks, numDays);
     blocks.sort((a, b) => a.column - b.column || a.minY - b.minY);
     const results = [];
     for (let i = 0; i < blocks.length; i++) {
@@ -1968,9 +1976,11 @@ function TeamNoteForm({ teams, players, defaultTeamId, onSubmit, onClose }) {
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", disabled: uploading, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, uploading ? "Wird hochgeladen…" : "Team-Notiz speichern")));
 }
-function ScreenshotImportModal({ teams, onConfirm, onClose }) {
+function ScreenshotImportModal({ teams, allPlayers, onConfirm, onClose }) {
     const [stage, setStage] = useState("setup");
+    const [targetKind, setTargetKind] = useState("team");
     const [targetTeam, setTargetTeam] = useState("");
+    const [targetPlayerId, setTargetPlayerId] = useState("");
     const [numDays, setNumDays] = useState(7);
     const [weekConfirmed, setWeekConfirmed] = useState(null);
     const [customWeek, setCustomWeek] = useState("");
@@ -1980,7 +1990,9 @@ function ScreenshotImportModal({ teams, onConfirm, onClose }) {
     const [rows, setRows] = useState([]);
     const [included, setIncluded] = useState({});
     const [typeById, setTypeById] = useState({});
+    const [optionalById, setOptionalById] = useState({});
     const [bulkType, setBulkType] = useState("training");
+    const playerOptionLabel = (p) => `${p.name}${p.teamId ? " (" + (teams.find((t) => t.id === p.teamId)?.name || "") + ")" : ""}`;
     const defaultMonday = currentWeekMonday();
     const effectiveMonday = weekConfirmed === false && customWeek ? mondayOfIsoWeek(Number(customYear) || defaultMonday.getFullYear(), Number(customWeek)) : defaultMonday;
     async function handleFile(e) {
@@ -2001,11 +2013,12 @@ function ScreenshotImportModal({ teams, onConfirm, onClose }) {
                     setStage("setup");
                     return;
                 }
-                const inc = {}, ty = {};
-                events.forEach((ev) => { inc[ev.id] = true; ty[ev.id] = "training"; });
+                const inc = {}, ty = {}, opt = {};
+                events.forEach((ev) => { inc[ev.id] = true; ty[ev.id] = "training"; opt[ev.id] = false; });
                 setRows(events);
                 setIncluded(inc);
                 setTypeById(ty);
+                setOptionalById(opt);
                 setStage("review");
             }
             catch (err) {
@@ -2032,24 +2045,33 @@ function ScreenshotImportModal({ teams, onConfirm, onClose }) {
     }
     function handleConfirm() {
         const events = rows.filter((r) => included[r.id]).map((r) => ({
-            title: r.title, date: r.date, time: r.time, location: "",
-            teamId: targetTeam && targetTeam !== "individuell" ? targetTeam : null,
+            title: optionalById[r.id] ? `${r.title} (optional)` : r.title, date: r.date, time: r.time, location: "",
+            teamId: targetKind === "team" && targetTeam && targetTeam !== "individuell" ? targetTeam : null,
+            includedPlayerIds: targetKind === "player" && targetPlayerId ? [targetPlayerId] : [],
             type: typeById[r.id] || "training",
         }));
         onConfirm(events);
         onClose();
     }
     const includedCount = Object.values(included).filter(Boolean).length;
-    const teamChosen = targetTeam !== "";
+    const targetChosen = targetKind === "team" ? targetTeam !== "" : targetKind === "player" ? targetPlayerId !== "" : true;
     const weekOk = weekConfirmed === true || (weekConfirmed === false && customWeek !== "");
-    const canUpload = teamChosen && weekOk;
+    const canUpload = targetChosen && weekOk;
     if (stage === "setup") {
         const intro = React.createElement("p", { className: "text-xs text-slate-500" }, "Screenshot einer Wochenansicht (z. B. aus Google Calendar) hochladen. Die App erkennt die farbigen Termin-Kästchen automatisch, liest Titel und Uhrzeit aus und zeigt danach alles zur Kontrolle an. Die Erkennung ist nicht perfekt – bitte vor dem Speichern prüfen.");
-        const teamField = React.createElement(Field, { label: "Dieser Import ist für Team" },
+        const targetKindButtons = React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { type: "button", onClick: () => setTargetKind("team"), className: `flex-1 rounded-lg py-2 text-xs font-semibold border transition ${targetKind === "team" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-stone-300 hover:border-slate-400"}` }, "Team"),
+            React.createElement("button", { type: "button", onClick: () => setTargetKind("player"), className: `flex-1 rounded-lg py-2 text-xs font-semibold border transition ${targetKind === "player" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-stone-300 hover:border-slate-400"}` }, "Einzelner Spieler"),
+            React.createElement("button", { type: "button", onClick: () => setTargetKind("individuell"), className: `flex-1 rounded-lg py-2 text-xs font-semibold border transition ${targetKind === "individuell" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-stone-300 hover:border-slate-400"}` }, "Niemand zugeordnet"));
+        const teamSelectField = targetKind === "team" ? React.createElement(Field, { label: "Team" },
             React.createElement("select", { className: inputClass, value: targetTeam, onChange: (e) => setTargetTeam(e.target.value) },
                 React.createElement("option", { value: "" }, "– Bitte Team wählen –"),
-                teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)),
-                React.createElement("option", { value: "individuell" }, "Individuell (kein Team)")));
+                teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))) : null;
+        const playerSelectField = targetKind === "player" ? React.createElement(Field, { label: "Spieler" },
+            React.createElement("select", { className: inputClass, value: targetPlayerId, onChange: (e) => setTargetPlayerId(e.target.value) },
+                React.createElement("option", { value: "" }, "– Bitte Spieler wählen –"),
+                (allPlayers || []).map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))) : null;
+        const targetField = React.createElement(Field, { label: "Für wen ist dieser individuelle Trainingsplan?" }, targetKindButtons, teamSelectField, playerSelectField);
         const weekQuestionText = React.createElement("p", { className: "text-sm text-slate-700" }, `Ist das die Woche vom ${formatWeekRange(defaultMonday)} (aktuelle Woche)?`);
         const weekYesNo = React.createElement("div", { className: "flex gap-2" },
             React.createElement("button", { type: "button", onClick: () => setWeekConfirmed(true), className: `flex-1 rounded-lg py-2 text-sm font-semibold border transition ${weekConfirmed === true ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-stone-300 hover:border-slate-400"}` }, "Ja"),
@@ -2065,10 +2087,10 @@ function ScreenshotImportModal({ teams, onConfirm, onClose }) {
             React.createElement("select", { className: inputClass, value: numDays, onChange: (e) => setNumDays(Number(e.target.value)) }, [1, 2, 3, 4, 5, 6, 7].map((n) => React.createElement("option", { key: n, value: n }, n))));
         const uploadLabel = React.createElement("label", { className: `flex flex-col items-center justify-center gap-2 border-2 border-dashed rounded-lg py-8 transition ${canUpload ? "border-stone-300 cursor-pointer hover:border-[#eb1e23] hover:bg-red-50/30" : "border-stone-200 opacity-50 cursor-not-allowed"}` },
             React.createElement(IconUpload, { size: 24, className: "text-slate-400" }),
-            React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, canUpload ? "Screenshot auswählen" : "Erst Team und Woche oben angeben"),
+            React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, canUpload ? "Screenshot auswählen" : "Erst Ziel und Woche oben angeben"),
             React.createElement("input", { type: "file", accept: "image/*", className: "hidden", disabled: !canUpload, onChange: handleFile }));
         const errorNote = parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError);
-        return React.createElement("div", { className: "space-y-4" }, intro, teamField, weekSection, daysField, uploadLabel, errorNote);
+        return React.createElement("div", { className: "space-y-4" }, intro, targetField, weekSection, daysField, uploadLabel, errorNote);
     }
     if (stage === "processing") {
         const progressText = progress.total > 0 ? `Kästchen ${progress.done} / ${progress.total} wird gelesen…` : "Kästchen werden erkannt…";
@@ -2093,7 +2115,9 @@ function ScreenshotImportModal({ teams, onConfirm, onClose }) {
             React.createElement("input", { type: "time", className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: r.time, onChange: (e) => updateRow(r.id, { time: e.target.value }) }));
         const typeCell = React.createElement("td", { className: "px-2.5 py-1.5" },
             React.createElement("select", { className: "w-full rounded border border-stone-300 px-1.5 py-1 text-xs", value: typeById[r.id] || "training", onChange: (e) => setTypeById((prev) => ({ ...prev, [r.id]: e.target.value })) }, typeOptionEls));
-        return React.createElement("tr", { key: r.id, className: `border-t border-stone-100 ${included[r.id] ? "" : "opacity-40"}` }, checkboxCell, titleCell, dateCell, timeCell, typeCell);
+        const optionalCell = React.createElement("td", { className: "px-2 py-1.5 text-center" },
+            React.createElement("input", { type: "checkbox", checked: !!optionalById[r.id], title: "Als optional markieren", onChange: () => setOptionalById((prev) => ({ ...prev, [r.id]: !prev[r.id] })) }));
+        return React.createElement("tr", { key: r.id, className: `border-t border-stone-100 ${included[r.id] ? "" : "opacity-40"}` }, checkboxCell, titleCell, dateCell, timeCell, typeCell, optionalCell);
     });
     const tableHead = React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
         React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
@@ -2101,14 +2125,19 @@ function ScreenshotImportModal({ teams, onConfirm, onClose }) {
             React.createElement("th", { className: "text-left px-2.5 py-2" }, "Titel"),
             React.createElement("th", { className: "text-left px-2.5 py-2" }, "Datum"),
             React.createElement("th", { className: "text-left px-2.5 py-2" }, "Zeit"),
-            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Typ")));
+            React.createElement("th", { className: "text-left px-2.5 py-2" }, "Typ"),
+            React.createElement("th", { className: "text-center px-2 py-2" }, "Opt.")));
     const table = React.createElement("div", { className: "max-h-[45vh] overflow-y-auto border border-stone-200 rounded-lg" },
         React.createElement("table", { className: "w-full text-xs" }, tableHead, React.createElement("tbody", null, tableRows)));
     const hint = React.createElement("p", { className: "text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "Titel, Datum und Uhrzeit sind editierbar – bitte kurz gegenprüfen, die automatische Erkennung kann sich vertun.");
+    const targetName = targetKind === "team" ? (teams.find((t) => t.id === targetTeam)?.name || "–") : targetKind === "player" ? ((allPlayers || []).find((p) => p.id === targetPlayerId)?.name || "–") : "Niemand zugeordnet";
+    const targetNote = React.createElement("p", { className: "text-xs text-slate-400" },
+        "Ziel dieses Imports: ",
+        React.createElement("span", { className: "font-semibold text-slate-600" }, targetName));
     const actionButtons = React.createElement("div", { className: "flex gap-2" },
         React.createElement("button", { onClick: () => setStage("setup"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Anderer Screenshot"),
         React.createElement("button", { onClick: handleConfirm, disabled: includedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, includedCount, " Termine importieren"));
-    return React.createElement("div", { className: "space-y-4" }, hint, bulkControls, table, actionButtons);
+    return React.createElement("div", { className: "space-y-4" }, hint, targetNote, bulkControls, table, actionButtons);
 }
 function IcsImportModal({ teams, onConfirm, onClose }) {
     const [stage, setStage] = useState("upload");
@@ -4118,7 +4147,7 @@ function SpielerAkte() {
             const batch = db.batch();
             const newOnes = chunk.map((ev) => {
                 const ref = db.collection("calendarEvents").doc();
-                const doc = { title: ev.title, date: ev.date, time: ev.time || "", location: ev.location || "", type: ev.type, teamId: ev.teamId || null, notes: "", excludedPlayerIds: [], includedPlayerIds: [] };
+                const doc = { title: ev.title, date: ev.date, time: ev.time || "", location: ev.location || "", type: ev.type, teamId: ev.teamId || null, notes: "", excludedPlayerIds: [], includedPlayerIds: ev.includedPlayerIds || [] };
                 batch.set(ref, doc);
                 return { id: ref.id, ...doc };
             });
@@ -4912,7 +4941,7 @@ function SpielerAkte() {
         modal === "importCalendar" && (React.createElement(Modal, { title: "Kalender aus .ics importieren", onClose: () => setModal(null), wide: true },
             React.createElement(IcsImportModal, { teams: teams, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
         modal === "importScreenshot" && (React.createElement(Modal, { title: "Kalender aus Screenshot importieren (Beta)", onClose: () => setModal(null), wide: true },
-            React.createElement(ScreenshotImportModal, { teams: teams, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
+            React.createElement(ScreenshotImportModal, { teams: teams, allPlayers: players, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
         modal === "importHabits" && (React.createElement(Modal, { title: "Habit-Stats aus CSV importieren", onClose: () => setModal(null), wide: true },
             React.createElement(HabitStatsImportModal, { players: players, teams: teams, onConfirm: handleImportHabitStats, onClose: () => setModal(null) }))),
         modal === "importBoxscore" && (React.createElement(Modal, { title: "Boxscore einf\u00FCgen", onClose: () => setModal(null), wide: true },
