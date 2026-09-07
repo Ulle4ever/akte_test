@@ -2,8 +2,16 @@
 <html lang="de">
 <head>
 <meta charset="UTF-8" />
-<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
 <title>Spieler-Akte · Rheinstars Köln</title>
+<link rel="manifest" href="manifest.json" />
+<meta name="theme-color" content="#eb1e23" />
+<link rel="icon" href="icon-192.png" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<meta name="mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-capable" content="yes" />
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+<meta name="apple-mobile-web-app-title" content="Spieler-Akte" />
 <link rel="preconnect" href="https://fonts.googleapis.com" />
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
@@ -2188,8 +2196,8 @@ function ScreenshotImportModal({ teams, allPlayers, onConfirm, onClose }) {
             React.createElement("th", { className: "text-left px-2.5 py-2" }, "Bis"),
             React.createElement("th", { className: "text-left px-2.5 py-2" }, "Typ"),
             React.createElement("th", { className: "text-center px-2 py-2" }, "Opt.")));
-    const table = React.createElement("div", { className: "max-h-[45vh] overflow-y-auto border border-stone-200 rounded-lg" },
-        React.createElement("table", { className: "w-full text-xs" }, tableHead, React.createElement("tbody", null, tableRows)));
+    const table = React.createElement("div", { className: "max-h-[45vh] overflow-y-auto overflow-x-auto border border-stone-200 rounded-lg" },
+        React.createElement("table", { className: "w-full min-w-[640px] text-xs" }, tableHead, React.createElement("tbody", null, tableRows)));
     const hint = React.createElement("p", { className: "text-xs text-amber-600 bg-amber-50 border border-amber-200 rounded-lg px-3 py-2" }, "Titel, Datum und Uhrzeit sind editierbar – bitte kurz gegenprüfen, die automatische Erkennung kann sich vertun.");
     const targetName = targetKind === "team" ? (teams.find((t) => t.id === targetTeam)?.name || "–") : targetKind === "player" ? ((allPlayers || []).find((p) => p.id === targetPlayerId)?.name || "–") : "Niemand zugeordnet";
     const targetNote = React.createElement("p", { className: "text-xs text-slate-400" },
@@ -2318,8 +2326,8 @@ function IcsImportModal({ teams, onConfirm, onClose }) {
         return React.createElement("tr", { key: r.id, className: `border-t border-stone-100 ${included[r.id] ? "" : "opacity-40"}` }, checkboxCell, titleCell, dateCell, timeCell, teamCell, typeCell);
     });
     const tableBody = React.createElement("tbody", null, tableRows);
-    const table = React.createElement("div", { className: "max-h-[45vh] overflow-y-auto border border-stone-200 rounded-lg" },
-        React.createElement("table", { className: "w-full text-xs" }, tableHead, tableBody));
+    const table = React.createElement("div", { className: "max-h-[45vh] overflow-y-auto overflow-x-auto border border-stone-200 rounded-lg" },
+        React.createElement("table", { className: "w-full min-w-[560px] text-xs" }, tableHead, tableBody));
     const actionButtons = React.createElement("div", { className: "flex gap-2" },
         React.createElement("button", { onClick: () => setStage("upload"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Andere Datei"),
         React.createElement("button", { onClick: handleConfirm, disabled: includedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, includedCount, " Termine importieren"));
@@ -2402,7 +2410,7 @@ function AttendanceImportModal({ players, teams, onConfirm, onClose }) {
                 " von ",
                 rows.length,
                 " Zeilen zugeordnet")),
-        React.createElement("div", { className: "max-h-[45vh] overflow-y-auto border border-stone-200 rounded-lg" },
+        React.createElement("div", { className: "max-h-[45vh] overflow-y-auto overflow-x-auto border border-stone-200 rounded-lg" },
             React.createElement("table", { className: "w-full text-xs" },
                 React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
                     React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
@@ -3506,12 +3514,12 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
         { label: "Spieler gesamt", value: players.length, icon: IconUsers, grad: "from-slate-700 to-slate-900" },
         { label: "Verletzt / Reha", value: outPlayers.length, icon: IconAlert, grad: outPlayers.length > 0 ? "from-amber-500 to-amber-700" : "from-emerald-500 to-emerald-700" },
         { label: "Monitoring-Check-ins", value: `${checkedInWellness.length}/${players.length}`, icon: IconHeart, grad: "from-[#eb1e23] to-[#be2228]" },
-    ].map((k) => React.createElement("div", { key: k.label, className: "bg-white border border-stone-100 rounded-2xl p-4 flex items-center gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]" },
-        React.createElement("span", { className: `w-10 h-10 rounded-xl bg-gradient-to-br ${k.grad} text-white flex items-center justify-center shrink-0` },
-            React.createElement(k.icon, { size: 17 })),
+    ].map((k) => React.createElement("div", { key: k.label, className: "bg-white border border-stone-100 rounded-2xl p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]" },
+        React.createElement("span", { className: `w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br ${k.grad} text-white flex items-center justify-center shrink-0` },
+            React.createElement(k.icon, { size: 16 })),
         React.createElement("div", { className: "min-w-0" },
             React.createElement("p", { className: "text-xl font-black text-slate-900 leading-tight" }, k.value),
-            React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide truncate" }, k.label))));
+            React.createElement("p", { className: "text-[11px] sm:text-xs text-slate-400 uppercase tracking-wide leading-tight" }, k.label))));
     const terminCard = React.createElement("div", { className: `${cardClass} p-5` },
         React.createElement("div", { className: "flex items-center justify-between" },
             React.createElement(SectionLabel, null, "Nächste Termine"),
@@ -5349,6 +5357,13 @@ function SpielerAkte() {
             React.createElement(AdvancedRechnerLiveModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) })))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(SpielerAkte, null));
+</script>
+<script>
+  if ("serviceWorker" in navigator) {
+    window.addEventListener("load", () => {
+      navigator.serviceWorker.register("sw.js").catch(() => {});
+    });
+  }
 </script>
 </body>
 </html>

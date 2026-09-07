@@ -1,0 +1,18 @@
+{
+  "name": "Spieler-Akte · Rheinstars Köln",
+  "short_name": "Spieler-Akte",
+  "description": "Interne Spieler-, Team- und Kalenderverwaltung der Rheinstars Köln.",
+  "start_url": "./index.html",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f5f5f4",
+  "theme_color": "#eb1e23",
+  "lang": "de",
+  "icons": [
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "maskable" },
+    { "src": "icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ]
+}
