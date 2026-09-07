@@ -91,6 +91,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -113,9 +114,27 @@ const firebaseConfig = {
     messagingSenderId: "1096936057835",
     appId: "1:1096936057835:web:67f5459fbd83acfb0f87ae",
 };
+/* ============================================================
+   PUSH-BENACHRICHTIGUNGEN (Web Push / Firebase Cloud Messaging)
+   Diesen Schluessel bekommt ihr in der Firebase-Konsole unter
+   Projekteinstellungen -> Cloud Messaging -> Tab "Web-Push-Zertifikate"
+   -> "Schluesselpaar generieren". Das ist ein OEFFENTLICHER Schluessel,
+   unbedenklich hier im Code. Ohne diesen Schluessel funktioniert der
+   "Benachrichtigungen aktivieren"-Button nicht.
+   ============================================================ */
+const FCM_VAPID_KEY = "";
 firebase.initializeApp(firebaseConfig);
 const db = firebase.firestore();
 const auth = firebase.auth();
+// Messaging ist nicht in jedem Browser/Kontext verfuegbar (z.B. Safari < 16.4,
+// oder wenn die Seite nicht ueber https/localhost laeuft) - darum defensiv.
+let messaging = null;
+try {
+    messaging = firebase.messaging ? firebase.messaging() : null;
+}
+catch (e) {
+    messaging = null;
+}
 /* Zweite, unabhängige Firebase-App-Instanz. Wird nur benutzt, um neue
    Spieler/Eltern-Zugänge anzulegen, ohne dass dabei der gerade eingeloggte
    Trainer aus seiner eigenen Sitzung geworfen wird (das würde sonst passieren,
@@ -215,6 +234,14 @@ const IconX = (p) => React.createElement(Icon, { ...p },
 const IconLock = (p) => React.createElement(Icon, { ...p },
     React.createElement("rect", { x: "5", y: "11", width: "14", height: "10", rx: "2" }),
     React.createElement("path", { d: "M8 11V7a4 4 0 0 1 8 0v4" }));
+const IconBell = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" }),
+    React.createElement("path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }));
+const IconBellOff = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M8.7 3.3A6 6 0 0 1 18 8c0 4.2 1 6.7 1.9 8.1" }),
+    React.createElement("path", { d: "M6.3 6.3C6.1 6.9 6 7.4 6 8c0 7-3 9-3 9h13" }),
+    React.createElement("path", { d: "M13.73 21a2 2 0 0 1-3.46 0" }),
+    React.createElement("line", { x1: "2", y1: "2", x2: "22", y2: "22" }));
 const IconKey = (p) => React.createElement(Icon, { ...p },
     React.createElement("circle", { cx: "8", cy: "15", r: "4" }),
     React.createElement("path", { d: "M10.5 12.5 20 3" }),
@@ -3895,6 +3922,9 @@ function SpielerAkte() {
     const [loadError, setLoadError] = useState(null);
     const [firebaseUser, setFirebaseUser] = useState(undefined); // undefined = noch am prüfen, null = ausgeloggt
     const [account, setAccount] = useState(null); // { role: "trainer"|"player", playerId?, email }
+    const [notifPermission, setNotifPermission] = useState(() => (typeof Notification !== "undefined" ? Notification.permission : "unsupported"));
+    const [notifBusy, setNotifBusy] = useState(false);
+    const [notifError, setNotifError] = useState("");
     const [meta, setMeta] = useState(null); // { teams, statCategories, testTypes }
     const [players, setPlayers] = useState([]);
     const [privateData, setPrivateData] = useState({}); // { [playerId]: { notes, tests, attendance } }, nur für Trainer geladen
@@ -3967,6 +3997,23 @@ function SpielerAkte() {
             }
         });
         return () => unsub();
+    }, []);
+    useEffect(() => {
+        if (!messaging)
+            return;
+        // Kommt eine Push-Nachricht an, waehrend die App gerade offen ist, zeigt der
+        // Browser sie NICHT automatisch an (das macht er nur im Hintergrund via
+        // Service Worker) - hier deshalb selbst als Benachrichtigung anzeigen.
+        const unsub = messaging.onMessage((payload) => {
+            const title = payload.notification?.title || "Spieler-Akte";
+            const body = payload.notification?.body || "";
+            try {
+                new Notification(title, { body, icon: "icon-192.png" });
+            }
+            catch (e) { }
+        });
+        return () => { if (typeof unsub === "function")
+            unsub(); };
     }, []);
     useEffect(() => {
         if (!account)
@@ -4094,6 +4141,56 @@ function SpielerAkte() {
         setActiveTab("uebersicht");
         setConfirmDeletePlayer(false);
         auth.signOut();
+    }
+    async function enableNotifications() {
+        if (!messaging || typeof Notification === "undefined") {
+            setNotifError("Push-Benachrichtigungen werden von diesem Browser nicht unterstützt.");
+            return;
+        }
+        if (!FCM_VAPID_KEY) {
+            setNotifError("Push ist noch nicht eingerichtet (VAPID-Schlüssel fehlt im Code).");
+            return;
+        }
+        setNotifBusy(true);
+        setNotifError("");
+        try {
+            const permission = await Notification.requestPermission();
+            setNotifPermission(permission);
+            if (permission !== "granted") {
+                setNotifBusy(false);
+                return;
+            }
+            const swReg = await navigator.serviceWorker.ready;
+            const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: swReg });
+            if (!token)
+                throw new Error("Kein Geräte-Token erhalten.");
+            await db.collection("accounts").doc(firebaseUser.uid).set({ notificationTokens: firebase.firestore.FieldValue.arrayUnion(token) }, { merge: true });
+            setAccount((prev) => prev ? { ...prev, notificationTokens: [...(prev.notificationTokens || []).filter((t) => t !== token), token] } : prev);
+        }
+        catch (e) {
+            setNotifError(e.message || "Benachrichtigungen konnten nicht aktiviert werden.");
+        }
+        finally {
+            setNotifBusy(false);
+        }
+    }
+    async function disableNotifications() {
+        if (!messaging)
+            return;
+        setNotifBusy(true);
+        setNotifError("");
+        try {
+            const swReg = await navigator.serviceWorker.ready;
+            const token = await messaging.getToken({ vapidKey: FCM_VAPID_KEY, serviceWorkerRegistration: swReg }).catch(() => null);
+            if (token) {
+                await db.collection("accounts").doc(firebaseUser.uid).set({ notificationTokens: firebase.firestore.FieldValue.arrayRemove(token) }, { merge: true });
+                await messaging.deleteToken().catch(() => {});
+                setAccount((prev) => prev ? { ...prev, notificationTokens: (prev.notificationTokens || []).filter((t) => t !== token) } : prev);
+            }
+        }
+        finally {
+            setNotifBusy(false);
+        }
     }
     async function persistPlayerFields(playerId, changes) {
         setPlayers((prev) => prev.map((p) => (p.id === playerId ? { ...p, ...changes } : p)));
@@ -4851,7 +4948,12 @@ function SpielerAkte() {
             React.createElement("span", { className: "flex items-center gap-2 min-w-0" },
                 React.createElement(IconInfo, { size: 14, className: "shrink-0" }),
                 React.createElement("span", { className: "truncate" }, "Angemeldet als ", React.createElement("strong", { className: "font-semibold" }, account.label || (isTrainer ? "Trainer" : "Spieler-Zugang")))),
-            React.createElement("button", { onClick: handleLogout, className: "underline shrink-0 hover:text-amber-950 transition" }, "Abmelden")),
+            React.createElement("div", { className: "flex items-center gap-3 shrink-0" },
+                messaging && (React.createElement("button", { onClick: () => (notifPermission === "granted" ? disableNotifications() : enableNotifications()), disabled: notifBusy, className: "flex items-center gap-1.5 underline hover:text-amber-950 transition disabled:opacity-50", title: notifPermission === "granted" ? "Benachrichtigungen deaktivieren" : "Benachrichtigungen aktivieren" },
+                    React.createElement(notifPermission === "granted" ? IconBell : IconBellOff, { size: 13 }),
+                    notifPermission === "granted" ? "Push an" : notifPermission === "denied" ? "Push blockiert" : "Push aktivieren")),
+                React.createElement("button", { onClick: handleLogout, className: "underline hover:text-amber-950 transition" }, "Abmelden"))),
+        notifError && (React.createElement("div", { className: "bg-red-50 border-b border-red-200 px-4 sm:px-6 py-1.5 text-xs text-red-700" }, notifError)),
         React.createElement("div", { className: "flex flex-col md:flex-row flex-1 relative" },
             isTrainer && mobileSidebarOpen && (React.createElement("div", { className: "fixed inset-0 bg-slate-900/50 backdrop-blur-[2px] z-30 md:hidden rsk-backdrop-in", onClick: () => setMobileSidebarOpen(false) })),
             isTrainer && (React.createElement("aside", { className: `fixed md:relative inset-y-0 left-0 z-40 md:z-auto w-[85%] max-w-xs md:max-w-none md:w-80 border-b md:border-b-0 md:border-r border-stone-200 bg-white p-4 flex flex-col gap-3 transform md:transform-none transition-transform duration-300 ease-out ${mobileSidebarOpen ? "translate-x-0" : "-translate-x-full"} overflow-y-auto pb-safe` },
