@@ -1199,6 +1199,38 @@ function prepareOcrCanvas(sourceCanvas, block, padding) {
             d[i + 2] = 255 - d[i + 2];
         }
     }
+    // Danach ist der Hintergrund nur ein mittleres Grau (Graustufe der
+    // ursprünglichen Kästchenfarbe), kein reines Weiß - für Tesseract bei
+    // kleiner Schrift zu wenig Kontrast. Deshalb per Otsu-Schwellenwert hart
+    // auf Schwarz/Weiß binarisieren (Standard-Trick zur OCR-Verbesserung).
+    const hist = new Array(256).fill(0);
+    for (let i = 0; i < d.length; i += 4)
+        hist[d[i]]++;
+    const total = d.length / 4;
+    let sumAll = 0;
+    for (let t = 0; t < 256; t++)
+        sumAll += t * hist[t];
+    let sumB = 0, wB = 0, maxVar = 0, threshold = 128;
+    for (let t = 0; t < 256; t++) {
+        wB += hist[t];
+        if (wB === 0)
+            continue;
+        const wF = total - wB;
+        if (wF === 0)
+            break;
+        sumB += t * hist[t];
+        const mB = sumB / wB;
+        const mF = (sumAll - sumB) / wF;
+        const varBetween = wB * wF * (mB - mF) * (mB - mF);
+        if (varBetween > maxVar) {
+            maxVar = varBetween;
+            threshold = t;
+        }
+    }
+    for (let i = 0; i < d.length; i += 4) {
+        const v = d[i] > threshold ? 255 : 0;
+        d[i] = d[i + 1] = d[i + 2] = v;
+    }
     cctx.putImageData(imgData, 0, 0);
     return cropCanvas;
 }
@@ -1280,8 +1312,13 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
         await worker.load();
         await worker.loadLanguage("deu");
         await worker.initialize("deu");
-        if (window.Tesseract.PSM)
-            await worker.setParameters({ tessedit_pageseg_mode: window.Tesseract.PSM.SINGLE_BLOCK });
+        // Erlaubte Zeichen einschraenken auf das, was in den Kaestchen realistisch
+        // vorkommt (Titel-Kuerzel, Zeiten) - verhindert, dass Tesseract bei
+        // unklaren Pixeln auf exotische Symbole wie "]" oder "{" raet.
+        await worker.setParameters({
+            ...(window.Tesseract.PSM ? { tessedit_pageseg_mode: window.Tesseract.PSM.SINGLE_BLOCK } : {}),
+            tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÄÖÜäöü0123456789:.,-+/ ",
+        });
     }
     const results = [];
     try {
