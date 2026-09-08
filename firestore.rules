@@ -1,0 +1,117 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() { return request.auth != null; }
+    function account() {
+      return get(/databases/$(database)/documents/accounts/$(request.auth.uid)).data;
+    }
+    function isTrainer() {
+      return isSignedIn() && account().role == 'trainer';
+    }
+    function myPlayerId() {
+      return isSignedIn() ? account().playerId : null;
+    }
+    function playerTeamId() {
+      return isSignedIn() && myPlayerId() != null
+        ? get(/databases/$(database)/documents/players/$(myPlayerId())).data.teamId
+        : null;
+    }
+
+    // Gemeinsame Strukturdaten: Teams, Statistik-Kategorien, Test-Arten.
+    // Für alle eingeloggten Nutzer lesbar, nur Trainer dürfen ändern.
+    match /club/meta {
+      allow read: if isSignedIn();
+      allow write: if isTrainer();
+    }
+
+    // Zugangsdaten-Zuordnung (Rolle + ggf. verknüpfte Spieler-ID).
+    // Jeder darf seinen EIGENEN Account-Eintrag lesen, Trainer dürfen alle lesen/schreiben.
+    match /accounts/{uid} {
+      allow read: if isSignedIn() && (request.auth.uid == uid || isTrainer());
+      allow write: if isTrainer() || request.auth.uid == uid;
+    }
+
+    // Öffentlichere Spieler-Daten: Stammdaten, Statistiken, Videos.
+    // Trainer: voller Zugriff. Verknüpfter Spieler-Zugang: lesen, und beim
+    // eigenen Profil ausschließlich die Onboarding-/Kontaktfelder schreiben
+    // (Team, Position, Trikotnummer, Status, Statistiken etc. bleiben
+    // Trainer-Sache).
+    match /players/{playerId} {
+      allow read: if isTrainer() || myPlayerId() == playerId;
+      allow write: if isTrainer()
+        || (myPlayerId() == playerId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
+              'birthdate', 'city', 'district', 'school', 'height', 'weight',
+              'handedness', 'previousClub', 'phone', 'email',
+              'emergencyContactName', 'emergencyContactPhone', 'onboardingCompleted'
+            ]));
+    }
+
+    // Private Trainer-Daten pro Spieler: Notizen, Tests, Anwesenheit.
+    // Ausschließlich Trainer, niemals der Spieler-Zugang selbst.
+    match /playerPrivate/{playerId} {
+      allow read, write: if isTrainer();
+    }
+
+    // Wellness-/Belastungs-Check-ins: Spieler tragen ihren eigenen Check-in selbst ein
+    // (Wochenrhythmus), niemals den eines anderen Spielers. Trainer sehen und
+    // verwalten alle Einträge (z. B. zum Löschen falscher/doppelter Einträge).
+    match /playerWellness/{playerId} {
+      allow read: if isTrainer() || myPlayerId() == playerId;
+      allow write: if isTrainer() || myPlayerId() == playerId;
+    }
+
+    // Noten-Umfrage: Fächer/Zeugnisnoten/Klausurnoten trägt der Spieler für sich
+    // selbst ein (inkl. Umbenennen von Fächern). Trainer sehen und verwalten alle
+    // Einträge (z. B. "Beobachtung"-Markierung, Korrekturen, Löschen).
+    match /playerGrades/{playerId} {
+      allow read: if isTrainer() || myPlayerId() == playerId;
+      allow write: if isTrainer() || myPlayerId() == playerId;
+    }
+
+    // Kalender: Team-Termine sind für Trainer und Spieler desselben Teams lesbar
+    // (Ausnahmen wie "für diesen Spieler ausgeblendet" filtert die App zusätzlich
+    // beim Anzeigen, ist aber nicht sicherheitskritisch - reine Trainingszeiten).
+    // Individuelle Termine sind nur für Trainer und ausdrücklich eingeladene
+    // Spieler lesbar. Anlegen/Ändern ausschließlich Trainer.
+    match /calendarEvents/{eventId} {
+      allow read: if isTrainer()
+        || resource.data.teamId == playerTeamId()
+        || myPlayerId() in resource.data.includedPlayerIds;
+      allow write: if isTrainer();
+    }
+
+    // Team-Notizen/Dateien: gehören zu einem Team, aber ein Spieler-Zugang
+    // sieht nur die Notizen, die ein Trainer ausdrücklich für ihn freigegeben hat
+    // (sharedWithPlayerIds). Trainer sehen und verwalten alles.
+    match /teamNotes/{noteId} {
+      allow read: if isTrainer()
+        || myPlayerId() in resource.data.sharedWithPlayerIds
+        || (resource.data.sharedWithAll == true && resource.data.teamId == playerTeamId());
+      allow write: if isTrainer();
+    }
+
+    // Rotationspläne: reines Vorbereitungs-Werkzeug für Trainer, keine Spieler-Sicht nötig.
+    match /rotationPlans/{planId} {
+      allow read, write: if isTrainer();
+    }
+
+    // Player Development Plan, aufgeteilt in drei Dokumente pro Zyklus (gleiche ID):
+    // - devPlanPlayer: vom Spieler selbst ausgefüllt, der Spieler darf sein eigenes schreiben
+    // - devPlanTrainer: vom Trainer ausgefüllt, für den Spieler erst nach Freigabe lesbar
+    // - devPlanCombined: im Meeting gemeinsam ausgefüllt, nur Trainer schreibt, beide lesen
+    match /devPlanPlayer/{id} {
+      allow read: if isTrainer() || myPlayerId() == resource.data.playerId;
+      allow write: if isTrainer() || myPlayerId() == resource.data.playerId;
+    }
+    match /devPlanTrainer/{id} {
+      allow read: if isTrainer() || (myPlayerId() == resource.data.playerId && resource.data.released == true);
+      allow write: if isTrainer();
+    }
+    match /devPlanCombined/{id} {
+      allow read: if isTrainer() || myPlayerId() == resource.data.playerId;
+      allow write: if isTrainer();
+    }
+  }
+}
