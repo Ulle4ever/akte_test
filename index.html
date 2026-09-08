@@ -92,6 +92,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-auth-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-check-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -123,7 +124,20 @@ const firebaseConfig = {
    "Benachrichtigungen aktivieren"-Button nicht.
    ============================================================ */
 const FCM_VAPID_KEY = "BC8pVHOBPgHYq5JeGwDuzK7MQeqesffIrnApdpVdcMgVrr8k8sImfvdfgVAWgEE1dynjyqKG7d6-K6Yr0fgeJx0";
+/* ============================================================
+   APP CHECK (zusaetzlicher Schutz gegen Bots/Skripte, siehe
+   APPCHECK-SETUP.md fuer die Anleitung, wie man den Site-Key
+   bekommt). Ohne Site-Key bleibt App Check einfach inaktiv -
+   die App funktioniert dann genau wie vorher, kein Zwang.
+   ============================================================ */
+const APPCHECK_SITE_KEY = "";
 firebase.initializeApp(firebaseConfig);
+if (APPCHECK_SITE_KEY) {
+    try {
+        firebase.appCheck().activate(APPCHECK_SITE_KEY, true);
+    }
+    catch (e) { /* App Check optional - Fehler hier darf die App nicht blockieren */ }
+}
 const db = firebase.firestore();
 const auth = firebase.auth();
 // Messaging ist nicht in jedem Browser/Kontext verfuegbar (z.B. Safari < 16.4,
