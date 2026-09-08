@@ -1130,7 +1130,15 @@ function detectColoredBlocks(canvas) {
                     stack[sp++] = nb;
                 }
             }
-            if (count > 300 && maxX - minX > 20 && maxY - minY > 15) {
+            // Schwarzer/grauer Text ausserhalb der farbigen Kaestchen (z.B. ein
+            // "OPTIONAL"-Label ueber einem Termin) besteht aus Pixeln, die nicht
+            // "fast weiss" sind - wuerde ohne diese Pruefung faelschlich als
+            // eigener Termin-Block erkannt. Echte Termin-Kaestchen haben eine
+            // klar gesaettigte Farbe (Orange/Lila/Blau usw.), reiner Text ist
+            // dagegen (fast) grau - R/G/B liegen nah beieinander.
+            const avgR = rSum / count, avgG = gSum / count, avgB = bSum / count;
+            const saturation = Math.max(avgR, avgG, avgB) - Math.min(avgR, avgG, avgB);
+            if (count > 300 && maxX - minX > 20 && maxY - minY > 15 && saturation > 30) {
                 blocks.push({ minX, maxX, minY, maxY, count });
             }
         }
@@ -1157,7 +1165,14 @@ function prepareOcrCanvas(sourceCanvas, block, padding) {
     const w = ex - sx, h = ey - sy;
     // Auf eine Mindesthöhe hochskalieren - Tesseract erkennt kleine, per Screenshot
     // verkleinerte Schrift in den Kästchen sonst sehr schlecht.
-    const scale = Math.max(1, Math.min(4, 120 / h));
+    let scale = Math.max(1, Math.min(4, 120 / h));
+    // Schmale Kaestchen (z.B. zwei ueberlappende Termine nebeneinander) bleiben
+    // nach dem rein hoehenbasierten Hochskalieren oft trotzdem zu schmal fuer
+    // zuverlaessiges OCR - deshalb zusaetzlich auf eine Mindestbreite skalieren.
+    const minOutW = 200;
+    if (w * scale < minOutW) {
+        scale = Math.min(6, minOutW / w);
+    }
     const outW = Math.round(w * scale), outH = Math.round(h * scale);
     const cropCanvas = document.createElement("canvas");
     cropCanvas.width = outW;
