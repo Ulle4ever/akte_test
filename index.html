@@ -261,12 +261,6 @@ const IconKey = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M10.5 12.5 20 3" }),
     React.createElement("path", { d: "M17 6l2 2" }),
     React.createElement("path", { d: "M14 9l2 2" }));
-const IconGift = (p) => React.createElement(Icon, { ...p },
-    React.createElement("rect", { x: "3", y: "8", width: "18", height: "4", rx: "1" }),
-    React.createElement("path", { d: "M12 8v13" }),
-    React.createElement("path", { d: "M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" }),
-    React.createElement("path", { d: "M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8" }),
-    React.createElement("path", { d: "M16.5 8a2.5 2.5 0 0 0 0-5C14 3 12 8 12 8" }));
 const IconInfo = (p) => React.createElement(Icon, { ...p },
     React.createElement("circle", { cx: "12", cy: "12", r: "9" }),
     React.createElement("line", { x1: "12", y1: "11", x2: "12", y2: "16" }),
@@ -3666,21 +3660,6 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
             reasons.push("Stress hoch");
         return reasons.join(" · ") || "Auffällig";
     }
-    function nextBirthdayInfo(birthdateStr) {
-        if (!birthdateStr)
-            return null;
-        const parts = birthdateStr.split("-").map(Number);
-        if (parts.length !== 3 || parts.some((n) => Number.isNaN(n)))
-            return null;
-        const [by, bm, bd] = parts;
-        const now = new Date();
-        now.setHours(0, 0, 0, 0);
-        let next = new Date(now.getFullYear(), bm - 1, bd);
-        if (next < now)
-            next = new Date(now.getFullYear() + 1, bm - 1, bd);
-        const days = Math.round((next - now) / 86400000);
-        return { days, age: next.getFullYear() - by };
-    }
     function openNewEvent() {
         setEditingEvent(null);
         setShowEventForm(true);
@@ -3753,19 +3732,6 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
         React.createElement("div", { className: "mt-3 space-y-1.5" }, attentionRows.length === 0
             ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Alles im grünen Bereich - keine Auffälligkeiten.")
             : attentionRows));
-    const birthdaysUpcoming = players
-        .map((p) => ({ player: p, info: nextBirthdayInfo(p.birthdate) }))
-        .filter((x) => x.info && x.info.days <= 30)
-        .sort((a, b) => a.info.days - b.info.days)
-        .slice(0, 5);
-    const birthdaysCard = React.createElement("div", { className: `${cardClass} p-5` },
-        React.createElement(SectionLabel, null, "Geburtstage"),
-        React.createElement("div", { className: "mt-3 space-y-1.5" }, birthdaysUpcoming.length === 0
-            ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "In den nächsten 30 Tagen hat niemand Geburtstag.")
-            : birthdaysUpcoming.map(({ player: p, info }) => React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition" },
-                React.createElement(IconGift, { size: 14, className: "text-[#0a96d4] shrink-0" }),
-                React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, p.name),
-                React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, info.days === 0 ? "Heute 🎉" : info.days === 1 ? "Morgen" : `in ${info.days} Tagen`)))));
     return (React.createElement("div", { className: "space-y-6 rsk-fade-in" },
         React.createElement("div", { className: "rounded-3xl bg-gradient-to-br from-white via-stone-50 to-white border border-stone-100 p-6 sm:p-8 relative overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]" },
             React.createElement("div", { className: "pointer-events-none absolute -top-16 -right-16 w-56 h-56 rounded-full bg-[#eb1e23]/10 blur-3xl" }),
@@ -3785,7 +3751,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
         attentionCard,
         React.createElement("div", { className: "grid lg:grid-cols-3 gap-6 items-start" },
             React.createElement("div", { className: "lg:col-span-2" }, terminCard),
-            React.createElement("div", { className: "space-y-6" }, teamsCard, birthdaysCard))));
+            React.createElement("div", { className: "space-y-6" }, teamsCard))));
 }
 function polarPoint(cx, cy, r, angleDeg) {
     const rad = (angleDeg * Math.PI) / 180;
