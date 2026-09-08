@@ -1194,11 +1194,14 @@ async function ocrBlock(worker, sourceCanvas, block, padding) {
 }
 function guessCategoryFromTitle(title) {
     const t = (title || "").toUpperCase();
-    if (/\bAT\b/.test(t))
+    // Kuerzel (mit Wortgrenzen, damit z.B. "STATISTIK" nicht faelschlich als
+    // "AT"/"IT" erkannt wird) UND die ausgeschriebenen Woerter - Trainer tippen
+    // oft "Individualtraining"/"Athletiktraining" ohne Abkuerzung.
+    if (/\bAT\b/.test(t) || t.includes("ATHLETIK"))
         return "at";
-    if (/\b(IT|INDI|IND)\b/.test(t))
+    if (/\b(IT|INDI|IND)\b/.test(t) || t.includes("INDIVIDUAL"))
         return "it";
-    if (/\bTT\b/.test(t))
+    if (/\bTT\b/.test(t) || t.includes("TEAMTRAINING"))
         return "tt";
     return "tt";
 }
@@ -1212,9 +1215,17 @@ function parseBlockText(rawText) {
         startTime = `${timeMatch[1].padStart(2, "0")}:${startMin}`;
         endTime = `${timeMatch[3].padStart(2, "0")}:${timeMatch[4]}`;
     }
+    // Zeit und Titel stehen normalerweise in eigenen Zeilen - manchmal landet die
+    // Uhrzeit aber (per OCR) in derselben Zeile wie der Titel. Deshalb hier gezielt
+    // nur die Zeitangabe aus jeder Zeile herausschneiden, statt gleich die ganze
+    // Zeile zu verwerfen (das wuerde sonst den Titel mit-loeschen).
+    const rangeRe = /\d{1,2}[.:]?\d{0,2}\s*(?:bis|-|–|bs)\s*\d{1,2}[.:]\d{2}/i;
+    const soloTimeRe = /^\d{1,2}[.:]\d{2}$/;
     const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean);
-    const titleLines = lines.filter((l) => !/\d{1,2}[.:]\d{2}/.test(l) && !/^(bis|-|–|bs)$/i.test(l));
-    const title = (titleLines.join(" ").trim() || lines[0] || "Termin").trim();
+    const titleLines = lines
+        .map((l) => l.replace(rangeRe, "").trim())
+        .filter((l) => l && !soloTimeRe.test(l) && !/^(bis|-|–|bs)$/i.test(l));
+    const title = (titleLines.join(" ").replace(/\s+/g, " ").trim() || lines[0] || "Termin").trim();
     return { title, startTime, endTime };
 }
 async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, onProgress) {
