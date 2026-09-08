@@ -1373,6 +1373,98 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Änderungen speichern" : "Spieler anlegen")));
 }
+/* Formular, das der Spieler/die Eltern selbst ausfüllen - bewusst ohne
+   Team/Position/Rückennummer/Status (die bleiben Trainer-Sache). Wird sowohl
+   beim allerersten Login (Pflicht, kein Abbrechen) als auch später über
+   "Meine Daten bearbeiten" (freiwillig, mit Abbrechen) verwendet. */
+function PlayerSelfProfileForm({ initial, mandatory, onSubmit, onClose }) {
+    const [birthdate, setBirthdate] = useState(initial?.birthdate || "");
+    const [city, setCity] = useState(initial?.city || "");
+    const [district, setDistrict] = useState(initial?.district || "");
+    const [school, setSchool] = useState(initial?.school || "");
+    const [height, setHeight] = useState(initial?.height ?? "");
+    const [weight, setWeight] = useState(initial?.weight ?? "");
+    const [handedness, setHandedness] = useState(initial?.handedness || "");
+    const [previousClub, setPreviousClub] = useState(initial?.previousClub || "");
+    const [phone, setPhone] = useState(initial?.phone || "");
+    const [email, setEmail] = useState(initial?.email || "");
+    const [emergencyContactName, setEmergencyContactName] = useState(initial?.emergencyContactName || "");
+    const [emergencyContactPhone, setEmergencyContactPhone] = useState(initial?.emergencyContactPhone || "");
+    const [error, setError] = useState("");
+    const [busy, setBusy] = useState(false);
+    async function handleSubmit(e) {
+        e.preventDefault();
+        if (!phone.trim() || !city.trim() || !emergencyContactName.trim() || !emergencyContactPhone.trim()) {
+            setError("Bitte Telefonnummer, Wohnort und Notfallkontakt (Name + Telefon) ausfüllen - der Rest ist optional.");
+            return;
+        }
+        setError("");
+        setBusy(true);
+        try {
+            await onSubmit({
+                birthdate,
+                city: city.trim(),
+                district: district.trim(),
+                school: school.trim(),
+                height: height === "" ? "" : Number(height),
+                weight: weight === "" ? "" : Number(weight),
+                handedness,
+                previousClub: previousClub.trim(),
+                phone: phone.trim(),
+                email: email.trim(),
+                emergencyContactName: emergencyContactName.trim(),
+                emergencyContactPhone: emergencyContactPhone.trim(),
+                onboardingCompleted: true,
+            });
+        }
+        finally {
+            setBusy(false);
+        }
+    }
+    return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
+        React.createElement(SectionLabel, null, "Kontakt"),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Telefonnummer *" },
+                React.createElement("input", { type: "tel", className: inputClass, value: phone, onChange: (e) => setPhone(e.target.value), placeholder: "z. B. 0151 23456789" })),
+            React.createElement(Field, { label: "E-Mail" },
+                React.createElement("input", { type: "email", className: inputClass, value: email, onChange: (e) => setEmail(e.target.value), placeholder: "optional" }))),
+        React.createElement(SectionLabel, null, "Notfallkontakt"),
+        React.createElement("p", { className: "text-xs text-slate-400 -mt-2" }, "Wer soll im Notfall beim Training/Spiel erreichbar sein?"),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Name *" },
+                React.createElement("input", { className: inputClass, value: emergencyContactName, onChange: (e) => setEmergencyContactName(e.target.value), placeholder: "z. B. Mutter/Vater" })),
+            React.createElement(Field, { label: "Telefon *" },
+                React.createElement("input", { type: "tel", className: inputClass, value: emergencyContactPhone, onChange: (e) => setEmergencyContactPhone(e.target.value) }))),
+        React.createElement(SectionLabel, null, "Persönliche Daten"),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Geburtsdatum" },
+                React.createElement("input", { type: "date", className: inputClass, value: birthdate, onChange: (e) => setBirthdate(e.target.value) })),
+            React.createElement(Field, { label: "Schule" },
+                React.createElement("input", { className: inputClass, value: school, onChange: (e) => setSchool(e.target.value) }))),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Wohnort (Stadt) *" },
+                React.createElement("input", { className: inputClass, value: city, onChange: (e) => setCity(e.target.value), placeholder: "z. B. Köln" })),
+            React.createElement(Field, { label: "Stadtteil" },
+                React.createElement("input", { className: inputClass, value: district, onChange: (e) => setDistrict(e.target.value), placeholder: "z. B. Ehrenfeld" }))),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Größe (cm)" },
+                React.createElement("input", { type: "number", className: inputClass, value: height, onChange: (e) => setHeight(e.target.value), min: "0", max: "260" })),
+            React.createElement(Field, { label: "Gewicht (kg)" },
+                React.createElement("input", { type: "number", className: inputClass, value: weight, onChange: (e) => setWeight(e.target.value), min: "0", max: "250" }))),
+        React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+            React.createElement(Field, { label: "Starke Hand" },
+                React.createElement("select", { className: inputClass, value: handedness, onChange: (e) => setHandedness(e.target.value) },
+                    React.createElement("option", { value: "" }, "Unbekannt"),
+                    React.createElement("option", { value: "rechts" }, "Rechts"),
+                    React.createElement("option", { value: "links" }, "Links"),
+                    React.createElement("option", { value: "beidhaendig" }, "Beidhändig"))),
+            React.createElement(Field, { label: "Letzter Verein" },
+                React.createElement("input", { className: inputClass, value: previousClub, onChange: (e) => setPreviousClub(e.target.value) }))),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("div", { className: "flex gap-2 pt-1" },
+            !mandatory && onClose && React.createElement("button", { type: "button", onClick: onClose, className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold" }, "Abbrechen"),
+            React.createElement("button", { type: "submit", disabled: busy, className: "flex-1 bg-[#eb1e23] hover:bg-[#be2228] disabled:opacity-60 text-white rounded-lg py-2.5 text-sm font-semibold" }, busy ? "Wird gespeichert…" : "Speichern"))));
+}
 function SectionLabel({ children }) {
     return React.createElement("p", { className: "flex items-center gap-1.5 text-xs font-bold text-slate-500 uppercase tracking-wider pt-1" },
         React.createElement("span", { className: "w-[3px] h-3.5 rounded-full bg-[#eb1e23] shrink-0" }),
@@ -4525,6 +4617,19 @@ function SpielerAkte() {
         .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
         .sort((a, b) => a.name.localeCompare(b.name));
     const selectedPlayer = players.find((p) => p.id === selectedPlayerId) || null;
+    /* Erstes Login eines Spieler-Zugangs: Profil-Pflichtfenster, solange die
+       eigenen Daten (Kontakt/Notfallkontakt/Wohnort etc.) noch nicht einmal
+       ausgefüllt wurden. Trainer sind davon nie betroffen. */
+    if (!isTrainer && selectedPlayer && selectedPlayer.id === account.playerId && selectedPlayer.onboardingCompleted === false) {
+        return (React.createElement("div", { className: "min-h-[100dvh] bg-stone-50 flex items-center justify-center p-4 sm:p-6" },
+            React.createElement("div", { className: "w-full max-w-lg rsk-fade-in" },
+                React.createElement("div", { className: "flex flex-col items-center text-center mb-5" },
+                    React.createElement("img", { src: LOGO_DATA_URI, alt: "Rheinstars Köln", className: "h-14 w-14 object-contain mb-3" }),
+                    React.createElement("h1", { className: "font-display text-xl text-slate-900" }, "Willkommen, ", splitName(selectedPlayer.name).first || selectedPlayer.name, "!"),
+                    React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Bevor es losgeht, brauchen wir noch ein paar Angaben von dir - dauert nur eine Minute.")),
+                React.createElement("div", { className: `${cardClass} p-5 sm:p-6` },
+                    React.createElement(PlayerSelfProfileForm, { initial: selectedPlayer, mandatory: true, onSubmit: (changes) => persistPlayerFields(selectedPlayer.id, changes) })))));
+    }
     const selectedTeam = selectedPlayer ? teams.find((t) => t.id === selectedPlayer.teamId) : null;
     const breadcrumbItems = [];
     if (isTrainer) {
@@ -4633,7 +4738,7 @@ function SpielerAkte() {
     }
     function handleAddPlayer(player) {
         const newId = uid();
-        createPlayerDoc(newId, { ...player, stats: [], videos: [] });
+        createPlayerDoc(newId, { ...player, stats: [], videos: [], onboardingCompleted: false });
         selectPlayer(newId);
     }
     function handleEditPlayer(changes) {
@@ -5111,7 +5216,10 @@ function SpielerAkte() {
                                 React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Bearbeiten" },
                                     React.createElement(IconEdit, { size: 16 })),
                                 React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg hover:bg-red-50 text-red-400", "aria-label": "L\u00F6schen" },
-                                    React.createElement(IconTrash, { size: 16 }))))),
+                                    React.createElement(IconTrash, { size: 16 })))),
+                            !isTrainer && selectedPlayer.id === account.playerId && (React.createElement("button", { onClick: () => setModal("selfProfile"), className: "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border border-stone-200 text-slate-600 hover:bg-stone-50 transition shrink-0" },
+                                React.createElement(IconEdit, { size: 13 }),
+                                " Meine Daten bearbeiten"))),
                         (() => {
                             const bioItems = [
                                 { label: "Geburtsdatum", value: selectedPlayer.birthdate ? fmtDate(selectedPlayer.birthdate) : "" },
@@ -5398,6 +5506,9 @@ function SpielerAkte() {
                 { label: "Status", value: STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label || "–" },
                 { label: "Schule", value: selectedPlayer.school || "–" },
                 { label: "Wohnort", value: wohnort },
+                { label: "Telefon", value: selectedPlayer.phone || "–" },
+                { label: "E-Mail", value: selectedPlayer.email || "–" },
+                { label: "Notfallkontakt", value: selectedPlayer.emergencyContactName ? `${selectedPlayer.emergencyContactName}${selectedPlayer.emergencyContactPhone ? " · " + selectedPlayer.emergencyContactPhone : ""}` : "–" },
             ].map((b) => React.createElement("div", { key: b.label, className: "bg-stone-50 rounded-xl p-3.5 min-w-0" },
                 React.createElement("p", { className: "text-[10px] text-slate-400 uppercase tracking-wide mb-0.5" }, b.label),
                 React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, b.value)));
@@ -5448,6 +5559,8 @@ function SpielerAkte() {
             React.createElement(PlayerForm, { teams: teams, onSubmit: handleAddPlayer, onClose: () => setModal(null) }))),
         modal === "editPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Spieler bearbeiten", onClose: () => setModal(null) },
             React.createElement(PlayerForm, { teams: teams, initial: selectedPlayer, onSubmit: handleEditPlayer, onClose: () => setModal(null) }))),
+        modal === "selfProfile" && selectedPlayer && (React.createElement(Modal, { title: "Meine Daten bearbeiten", onClose: () => setModal(null) },
+            React.createElement(PlayerSelfProfileForm, { initial: selectedPlayer, mandatory: false, onSubmit: async (changes) => { await persistPlayerFields(selectedPlayer.id, changes); setModal(null); }, onClose: () => setModal(null) }))),
         modal === "stat" && (React.createElement(Modal, { title: "Spielstatistik hinzuf\u00FCgen", onClose: () => setModal(null), wide: true },
             React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statCategories: statCategories }))),
         modal === "editStat" && editingStat && (React.createElement(Modal, { title: "Spielstatistik bearbeiten", onClose: () => { setModal(null); setEditingStat(null); }, wide: true },
