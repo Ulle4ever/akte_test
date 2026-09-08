@@ -3631,7 +3631,8 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
                     item.label));
             }))))));
 }
-function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm }) {
+const ATTENDANCE_WARN_THRESHOLD = 80;
+function TrainerDashboard({ events, teams, players, wellnessData, privateData, devPlanWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
     const [showEventForm, setShowEventForm] = useState(false);
     const [editingEvent, setEditingEvent] = useState(null);
     const days = [];
@@ -3717,21 +3718,45 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
                 React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, t.name),
                 React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, players.filter((p) => p.teamId === t.id).length, " Spieler"),
                 React.createElement(IconArrowLeft, { size: 12, className: "text-slate-300 group-hover:text-[#0a96d4] rotate-180 shrink-0" }))))));
+    const incompleteProfilePlayers = players.filter((p) => p.onboardingCompleted !== true);
+    const lowAttendancePlayers = players
+        .map((p) => {
+            const latest = sortByDateDesc(privateData?.[p.id]?.attendance || [])[0];
+            if (!latest || !latest.einheitenGesamt)
+                return null;
+            const quote = Math.round((latest.anwesend / latest.einheitenGesamt) * 1000) / 10;
+            return quote < ATTENDANCE_WARN_THRESHOLD ? { player: p, quote } : null;
+        })
+        .filter(Boolean);
+    const devPlanWaitingRows = (devPlanWaiting || [])
+        .map((w) => ({ waiting: w, player: players.find((p) => p.id === w.playerId) }))
+        .filter((x) => x.player);
+    const ICON_BY_KIND = { injury: IconAlert, wellness: IconHeart, profile: IconEdit, attendance: IconActivity, devplan: IconClipboard };
     const attentionRows = [
-        ...outPlayers.map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury" })),
-        ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", reason: wellnessFlagReason(entry) })),
+        ...outPlayers.map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury", label: STATUS_OPTIONS.find((s) => s.value === p.status)?.label || "Verletzt/Reha" })),
+        ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", label: wellnessFlagReason(entry) })),
+        ...incompleteProfilePlayers.map((p) => ({ id: "profile-" + p.id, player: p, kind: "profile", label: "Profil unvollständig" })),
+        ...lowAttendancePlayers.map(({ player, quote }) => ({ id: "attendance-" + player.id, player, kind: "attendance", label: `${quote}% Anwesenheit` })),
+        ...devPlanWaitingRows.map(({ player, waiting }) => ({ id: "devplan-" + waiting.id, player, kind: "devplan", label: "Wartet auf deine Freigabe" })),
     ].map((item) => React.createElement("button", { key: item.id, onClick: () => onSelectPlayer(item.player.id), className: "w-full flex items-center gap-2.5 bg-red-50 hover:bg-red-100 border-l-2 border-[#eb1e23] rounded-xl px-3 py-2 text-left transition" },
-        React.createElement(item.kind === "injury" ? IconAlert : IconHeart, { size: 14, className: "text-[#eb1e23] shrink-0" }),
+        React.createElement(ICON_BY_KIND[item.kind] || IconAlert, { size: 14, className: "text-[#eb1e23] shrink-0" }),
         React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.player.name),
         React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(item.player.teamId)),
-        React.createElement("span", { className: "text-xs text-[#eb1e23] font-medium shrink-0 max-w-[40%] truncate" }, item.kind === "injury" ? (STATUS_OPTIONS.find((s) => s.value === item.player.status)?.label || "Verletzt/Reha") : item.reason)));
+        React.createElement("span", { className: "text-xs text-[#eb1e23] font-medium shrink-0 max-w-[40%] truncate" }, item.label)));
+    const scheduleConflicts = groupConflictsByEventPair(findScheduleConflicts(events, players, CONFLICT_MIN_OVERLAP_MINUTES));
+    const conflictBanner = scheduleConflicts.length > 0 && React.createElement("button", { onClick: onGoToAllUnits, className: "w-full flex items-center gap-2.5 bg-amber-50 hover:bg-amber-100 border-l-2 border-amber-500 rounded-xl px-3 py-2.5 text-left transition" },
+        React.createElement(IconAlert, { size: 14, className: "text-amber-600 shrink-0" }),
+        React.createElement("span", { className: "text-sm font-semibold text-amber-800 flex-1" }, scheduleConflicts.length, " Terminüberschneidung", scheduleConflicts.length > 1 ? "en" : "", " gefunden"),
+        React.createElement("span", { className: "text-xs font-medium text-amber-700 shrink-0" }, "In „Alle Einheiten“ ansehen →"));
     const attentionCard = React.createElement("div", { className: `${cardClass} p-5` },
         React.createElement("div", { className: "flex items-center justify-between" },
             React.createElement(SectionLabel, null, "Braucht Aufmerksamkeit"),
             attentionRows.length > 0 && React.createElement("span", { className: "text-xs font-bold px-2 py-0.5 rounded-full bg-red-50 text-[#eb1e23]" }, attentionRows.length)),
-        React.createElement("div", { className: "mt-3 space-y-1.5" }, attentionRows.length === 0
-            ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Alles im grünen Bereich - keine Auffälligkeiten.")
-            : attentionRows));
+        React.createElement("div", { className: "mt-3 space-y-1.5" },
+            conflictBanner,
+            attentionRows.length === 0 && !conflictBanner
+                ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Alles im grünen Bereich - keine Auffälligkeiten.")
+                : attentionRows));
     return (React.createElement("div", { className: "space-y-6 rsk-fade-in" },
         React.createElement("div", { className: "rounded-3xl bg-gradient-to-br from-white via-stone-50 to-white border border-stone-100 p-6 sm:p-8 relative overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]" },
             React.createElement("div", { className: "pointer-events-none absolute -top-16 -right-16 w-56 h-56 rounded-full bg-[#eb1e23]/10 blur-3xl" }),
@@ -4061,6 +4086,7 @@ function SpielerAkte() {
     const [wellnessData, setWellnessData] = useState({}); // { [playerId]: { entries: [] } }, Trainer: alle, Spieler: nur eigene
     const [gradesData, setGradesData] = useState({}); // { [playerId]: { subjects: [] } }, Trainer: alle, Spieler: nur eigene
     const [calendarEvents, setCalendarEvents] = useState([]);
+    const [devPlanWaiting, setDevPlanWaiting] = useState([]); // Zyklen, die der Spieler freigegeben hat, der Trainer aber noch nicht (fuer Dashboard-Hinweis)
     const [teamNotes, setTeamNotes] = useState([]);
     const [loginEmail, setLoginEmail] = useState("");
     const [loginPassword, setLoginPassword] = useState("");
@@ -4192,6 +4218,22 @@ function SpielerAkte() {
                     const tnSnap = await db.collection("teamNotes").get();
                     if (!cancelled)
                         setTeamNotes(tnSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+                    try {
+                        const [devPlayerSnap, devTrainerSnap] = await Promise.all([
+                            db.collection("devPlanPlayer").get(),
+                            db.collection("devPlanTrainer").get(),
+                        ]);
+                        const trainerReleased = new Set(devTrainerSnap.docs.filter((d) => d.data().released).map((d) => d.id));
+                        const waiting = devPlayerSnap.docs
+                            .filter((d) => d.data().released && !trainerReleased.has(d.id))
+                            .map((d) => ({ id: d.id, playerId: d.data().playerId, date: d.data().date }));
+                        if (!cancelled)
+                            setDevPlanWaiting(waiting);
+                    }
+                    catch (e) {
+                        if (!cancelled)
+                            setDevPlanWaiting([]);
+                    }
                 }
                 else if (account.role === "player" && account.playerId) {
                     const pSnap = await db.collection("players").doc(account.playerId).get();
@@ -5208,7 +5250,7 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard") })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, privateData: privateData, devPlanWaiting: devPlanWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
