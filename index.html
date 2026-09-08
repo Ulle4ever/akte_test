@@ -3256,7 +3256,7 @@ function groupConflictsByEventPair(conflicts) {
     return Array.from(map.values());
 }
 const CONFLICT_MIN_OVERLAP_MINUTES = 10;
-function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd }) {
+function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd, eventAttendance, onSetAttendance }) {
     const [teamFilter, setTeamFilter] = useState("all");
     const [typeFilter, setTypeFilter] = useState("all");
     const [rangeMode, setRangeMode] = useState("week");
@@ -3378,15 +3378,30 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd }) {
         React.createElement("button", { onClick: openNew, className: "ml-auto flex items-center gap-1.5 text-sm font-medium bg-slate-900 text-white rounded-lg px-3 py-2 hover:bg-slate-800" },
             React.createElement(IconPlus, { size: 14 }),
             " Einheit anlegen"));
+    function cycleAttendance(current) {
+        if (current === "present")
+            return "absent";
+        if (current === "absent")
+            return null;
+        return "present";
+    }
     function playerChip(event, player, kind) {
         const isExcludedChip = kind === "team" && (event.excludedPlayerIds || []).includes(player.id);
-        const baseClass = "inline-flex items-center gap-1 text-xs font-medium rounded-full pl-2.5 pr-1.5 py-1 transition";
+        const baseClass = "inline-flex items-center gap-1 text-xs font-medium rounded-full pl-1.5 pr-1.5 py-1 transition";
         const styleClass = isExcludedChip
             ? "bg-stone-100 text-slate-400 line-through"
             : kind === "extra" ? "bg-sky-50 text-sky-700" : "bg-emerald-50 text-emerald-700";
         const toggleTitle = kind === "team" ? (isExcludedChip ? "Wieder einschließen" : "Für diese Einheit ausschließen") : "Aus dieser Einheit entfernen";
         const onToggle = kind === "team" ? () => toggleTeamPlayerExcluded(event, player.id) : () => removeIncludedPlayer(event, player.id);
+        const status = !isExcludedChip ? (eventAttendance?.[event.id]?.[player.id] || null) : null;
+        const attendanceBtn = !isExcludedChip && React.createElement("button", {
+            type: "button",
+            onClick: () => onSetAttendance(event.id, player.id, cycleAttendance(status)),
+            title: status === "present" ? "War da - klicken für: hat gefehlt" : status === "absent" ? "Hat gefehlt - klicken zum Zurücksetzen" : "Anwesenheit markieren",
+            className: `rounded-full w-4 h-4 flex items-center justify-center shrink-0 border ${status === "present" ? "bg-emerald-500 border-emerald-500 text-white" : status === "absent" ? "bg-red-500 border-red-500 text-white" : "bg-white border-stone-300 text-transparent hover:border-slate-400"}`,
+        }, status === "present" ? React.createElement(IconCheck, { size: 9 }) : status === "absent" ? React.createElement(IconX, { size: 9 }) : React.createElement(IconCheck, { size: 9 }));
         return React.createElement("span", { key: player.id, className: `${baseClass} ${styleClass}` },
+            attendanceBtn,
             player.name,
             React.createElement("button", { type: "button", onClick: onToggle, title: toggleTitle, className: "hover:text-red-500 rounded-full w-4 h-4 flex items-center justify-center" },
                 React.createElement(IconX, { size: 10 })));
@@ -3396,7 +3411,11 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd }) {
         const isExpanded = expandedIds.has(event.id);
         const teamPlayers = team ? allPlayers.filter((p) => p.teamId === team.id) : [];
         const extraPlayers = allPlayers.filter((p) => (event.includedPlayerIds || []).includes(p.id) && p.teamId !== team?.id);
-        const attendeeCount = getEventAttendees(event, allPlayers).length;
+        const attendees = getEventAttendees(event, allPlayers);
+        const attendeeCount = attendees.length;
+        const marksForEvent = eventAttendance?.[event.id] || {};
+        const markedCount = attendees.filter((p) => marksForEvent[p.id]).length;
+        const presentCount = attendees.filter((p) => marksForEvent[p.id] === "present").length;
         const headerLine = React.createElement("button", { type: "button", onClick: () => toggleExpanded(event.id), className: "w-full flex items-center justify-between gap-3 text-left" },
             React.createElement("div", { className: "min-w-0 flex items-center gap-2.5" },
                 React.createElement(IconArrowDown, { size: 12, className: `text-slate-300 shrink-0 transition-transform ${isExpanded ? "" : "-rotate-90"}` }),
@@ -3404,7 +3423,9 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd }) {
                 event.time && React.createElement("span", { className: "text-sm font-semibold text-slate-800 shrink-0" }, event.time, event.endTime ? `–${event.endTime}` : ""),
                 React.createElement("span", { className: "text-sm text-slate-700 truncate" }, event.title),
                 React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, team ? team.name : "Individuell")),
-            React.createElement("span", { className: "text-xs font-semibold text-slate-400 shrink-0" }, attendeeCount, " Spieler"));
+            React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
+                markedCount > 0 && React.createElement("span", { className: "text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5" }, presentCount, "/", markedCount, " da"),
+                React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, attendeeCount, " Spieler")));
         if (!isExpanded)
             return React.createElement("div", { key: event.id, className: "bg-stone-50 rounded-xl px-3.5 py-2.5" }, headerLine);
         const teamChips = teamPlayers.map((p) => playerChip(event, p, "team"));
@@ -3714,7 +3735,8 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
             }))))));
 }
 const ATTENDANCE_WARN_THRESHOLD = 80;
-function TrainerDashboard({ events, teams, players, wellnessData, privateData, devPlanWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
+const ATTENDANCE_MIN_MARKED = 3; // erst ab so vielen markierten Einheiten ueberhaupt eine Quote bilden
+function TrainerDashboard({ events, teams, players, wellnessData, eventAttendance, devPlanWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
     const [showEventForm, setShowEventForm] = useState(false);
     const [editingEvent, setEditingEvent] = useState(null);
     const days = [];
@@ -3801,12 +3823,26 @@ function TrainerDashboard({ events, teams, players, wellnessData, privateData, d
                 React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, players.filter((p) => p.teamId === t.id).length, " Spieler"),
                 React.createElement(IconArrowLeft, { size: 12, className: "text-slate-300 group-hover:text-[#0a96d4] rotate-180 shrink-0" }))))));
     const incompleteProfilePlayers = players.filter((p) => p.onboardingCompleted !== true);
+    // Anwesenheitsquote aus den direkt in "Alle Einheiten" markierten Da/Fehlt-
+    // Status berechnen (nur vergangene Einheiten, erst ab ein paar markierten
+    // Terminen ueberhaupt werten - sonst waere eine einzelne verpasste Einheit
+    // gleich "0%").
+    const todayKey = today();
+    const pastEvents = events.filter((e) => e.date && e.date < todayKey);
     const lowAttendancePlayers = players
         .map((p) => {
-            const latest = sortByDateDesc(privateData?.[p.id]?.attendance || [])[0];
-            if (!latest || !latest.einheitenGesamt)
+            let present = 0, marked = 0;
+            pastEvents.forEach((e) => {
+                const status = eventAttendance?.[e.id]?.[p.id];
+                if (!status)
+                    return;
+                marked++;
+                if (status === "present")
+                    present++;
+            });
+            if (marked < ATTENDANCE_MIN_MARKED)
                 return null;
-            const quote = Math.round((latest.anwesend / latest.einheitenGesamt) * 1000) / 10;
+            const quote = Math.round((present / marked) * 1000) / 10;
             return quote < ATTENDANCE_WARN_THRESHOLD ? { player: p, quote } : null;
         })
         .filter(Boolean);
@@ -4169,6 +4205,7 @@ function SpielerAkte() {
     const [gradesData, setGradesData] = useState({}); // { [playerId]: { subjects: [] } }, Trainer: alle, Spieler: nur eigene
     const [calendarEvents, setCalendarEvents] = useState([]);
     const [devPlanWaiting, setDevPlanWaiting] = useState([]); // Zyklen, die der Spieler freigegeben hat, der Trainer aber noch nicht (fuer Dashboard-Hinweis)
+    const [eventAttendance, setEventAttendance] = useState({}); // { [eventId]: { [playerId]: "present"|"absent" } } - direkt in "Alle Einheiten" markiert
     const [teamNotes, setTeamNotes] = useState([]);
     const [loginEmail, setLoginEmail] = useState("");
     const [loginPassword, setLoginPassword] = useState("");
@@ -4316,6 +4353,15 @@ function SpielerAkte() {
                     catch (e) {
                         if (!cancelled)
                             setDevPlanWaiting([]);
+                    }
+                    try {
+                        const eaSnap = await db.collection("eventAttendance").get();
+                        if (!cancelled)
+                            setEventAttendance(Object.fromEntries(eaSnap.docs.map((d) => [d.id, d.data() || {}])));
+                    }
+                    catch (e) {
+                        if (!cancelled)
+                            setEventAttendance({});
                     }
                 }
                 else if (account.role === "player" && account.playerId) {
@@ -4595,6 +4641,23 @@ function SpielerAkte() {
     async function editCalendarEvent(id, changes) {
         setCalendarEvents((prev) => prev.map((e) => (e.id === id ? { ...e, ...changes } : e)));
         await db.collection("calendarEvents").doc(id).set(changes, { merge: true });
+    }
+    async function setPlayerAttendance(eventId, playerId, status) {
+        setEventAttendance((prev) => {
+            const next = { ...prev, [eventId]: { ...(prev[eventId] || {}) } };
+            if (status)
+                next[eventId][playerId] = status;
+            else
+                delete next[eventId][playerId];
+            return next;
+        });
+        try {
+            await db.collection("eventAttendance").doc(eventId).set({ [playerId]: status || firebase.firestore.FieldValue.delete() }, { merge: true });
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
     }
     async function deleteCalendarEvent(id) {
         setCalendarEvents((prev) => prev.filter((e) => e.id !== id));
@@ -5317,7 +5380,7 @@ function SpielerAkte() {
                             React.createElement(IconUsers, { size: 14 }),
                             " Dashboard")),
                     React.createElement(CalendarView, { events: calendarEvents, isTrainer: isTrainer, team: null, teams: teams, teamPlayers: [], allPlayers: players, contextLabel: "Alle Teams", onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearAll: clearAllCalendars }))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && showAllUnits && isTrainer && (React.createElement(AllUnitsView, { events: calendarEvents, teams: teams, allPlayers: players, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onAdd: addCalendarEvent })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && showAllUnits && isTrainer && (React.createElement(AllUnitsView, { events: calendarEvents, teams: teams, allPlayers: players, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onAdd: addCalendarEvent, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance })),
                 !selectedPlayer && !showGlobalCalendar && !showAllUnits && showVerwaltung && isTrainer && (React.createElement("div", { className: "space-y-5 rsk-fade-in" },
                     React.createElement("div", null,
                         React.createElement(SectionLabel, null, "Verwaltung"),
@@ -5333,7 +5396,7 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, privateData: privateData, devPlanWaiting: devPlanWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),

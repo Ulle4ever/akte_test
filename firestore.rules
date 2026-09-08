@@ -97,6 +97,13 @@ service cloud.firestore {
       allow read, write: if isTrainer();
     }
 
+    // Anwesenheit pro Einheit (direkt in "Alle Einheiten" markiert: Da/Fehlt).
+    // Dokument-ID = Termin-ID, Felder = Spieler-ID -> "present"/"absent".
+    // Ausschließlich Trainer-Sache, wie die anderen internen Trainer-Notizen.
+    match /eventAttendance/{eventId} {
+      allow read, write: if isTrainer();
+    }
+
     // Player Development Plan, aufgeteilt in drei Dokumente pro Zyklus (gleiche ID):
     // - devPlanPlayer: vom Spieler selbst ausgefüllt, der Spieler darf sein eigenes schreiben
     // - devPlanTrainer: vom Trainer ausgefüllt, für den Spieler erst nach Freigabe lesbar
