@@ -3482,16 +3482,42 @@ function AdvancedRechnerLiveModal({ players, teams, onConfirm, onClose }) {
                 matchedCount,
                 " Spieler importieren"))));
 }
+const HEADER_MENU_WIDTH = 256; // entspricht w-64
 function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
+    const btnRef = useRef(null);
+    const [menuPos, setMenuPos] = useState(null);
+    useEffect(() => {
+        if (!isOpen) {
+            setMenuPos(null);
+            return;
+        }
+        function computePos() {
+            const btn = btnRef.current;
+            if (!btn)
+                return;
+            const rect = btn.getBoundingClientRect();
+            const margin = 12;
+            const maxLeft = Math.max(margin, window.innerWidth - HEADER_MENU_WIDTH - margin);
+            const left = Math.min(Math.max(rect.right - HEADER_MENU_WIDTH, margin), maxLeft);
+            setMenuPos({ top: rect.bottom + 8, left });
+        }
+        computePos();
+        window.addEventListener("resize", computePos);
+        window.addEventListener("scroll", computePos, true);
+        return () => {
+            window.removeEventListener("resize", computePos);
+            window.removeEventListener("scroll", computePos, true);
+        };
+    }, [isOpen]);
     return (React.createElement("div", { className: "relative" },
-        React.createElement("button", { onClick: onToggle, className: `flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition ${isOpen ? "bg-white text-slate-900 shadow-sm" : "text-white/80 bg-white/10 hover:bg-white/20"}` },
+        React.createElement("button", { ref: btnRef, onClick: onToggle, className: `flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition ${isOpen ? "bg-white text-slate-900 shadow-sm" : "text-white/80 bg-white/10 hover:bg-white/20"}` },
             React.createElement(Icon, { size: 13 }),
             " ",
             label,
             React.createElement(IconArrowDown, { size: 11, className: `transition-transform ${isOpen ? "rotate-180" : ""}` })),
         isOpen && (React.createElement(React.Fragment, null,
             React.createElement("div", { className: "fixed inset-0 z-40", onClick: onClose }),
-            React.createElement("div", { className: "absolute right-0 top-full mt-2 w-64 bg-white rounded-xl shadow-xl border border-stone-200 py-1.5 z-50 overflow-hidden origin-top-right rsk-pop-in" }, items.map((item) => {
+            React.createElement("div", { className: "fixed w-64 bg-white rounded-xl shadow-xl border border-stone-200 py-1.5 z-50 overflow-hidden origin-top rsk-pop-in", style: menuPos ? { top: menuPos.top, left: menuPos.left } : { visibility: "hidden" } }, items.map((item) => {
                 const ItemIcon = item.icon;
                 return (React.createElement("button", { key: item.label, onClick: () => { item.onClick(); onClose(); }, className: "w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-slate-700 hover:bg-stone-50 transition text-left" },
                     React.createElement("span", { className: "w-7 h-7 rounded-full bg-red-50 text-[#eb1e23] flex items-center justify-center shrink-0" },
