@@ -4620,7 +4620,7 @@ function SpielerAkte() {
     /* Erstes Login eines Spieler-Zugangs: Profil-Pflichtfenster, solange die
        eigenen Daten (Kontakt/Notfallkontakt/Wohnort etc.) noch nicht einmal
        ausgefüllt wurden. Trainer sind davon nie betroffen. */
-    if (!isTrainer && selectedPlayer && selectedPlayer.id === account.playerId && selectedPlayer.onboardingCompleted === false) {
+    if (!isTrainer && selectedPlayer && selectedPlayer.id === account.playerId && selectedPlayer.onboardingCompleted !== true) {
         return (React.createElement("div", { className: "min-h-[100dvh] bg-stone-50 flex items-center justify-center p-4 sm:p-6" },
             React.createElement("div", { className: "w-full max-w-lg rsk-fade-in" },
                 React.createElement("div", { className: "flex flex-col items-center text-center mb-5" },
