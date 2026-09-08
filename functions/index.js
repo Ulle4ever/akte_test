@@ -28,6 +28,14 @@ function isoWeekKey(dateStr) {
     return `${d.getUTCFullYear()}-W${String(week).padStart(2, "0")}`;
 }
 
+function formatDateDE(dateStr) {
+    const parts = (dateStr || "").split("-");
+    if (parts.length !== 3)
+        return dateStr;
+    const [y, m, d] = parts;
+    return `${d}.${m}.${y}`;
+}
+
 function todayIso() {
     const d = new Date();
     return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
@@ -99,8 +107,9 @@ exports.onCalendarEventCreated = onDocumentCreated("calendarEvents/{eventId}", a
     const playerIds = getEventAttendeePlayerIds(data, allPlayers);
     if (playerIds.length === 0)
         return;
-    const timeLabel = data.time ? ` um ${data.time} Uhr` : "";
-    await sendToPlayerIds(playerIds, "Neuer Termin", `${data.title} am ${data.date}${timeLabel}`, { type: "calendarEvent", eventId: event.params.eventId });
+    const timeLabel = data.time ? ` um ${data.time}` : "";
+    const body = `"${data.title}", am ${formatDateDE(data.date)}${timeLabel}`;
+    await sendToPlayerIds(playerIds, "Neuer Termin", body, { type: "calendarEvent", eventId: event.params.eventId });
 });
 
 exports.dailyMonitoringReminder = onSchedule({ schedule: "0 18 * * *", timeZone: "Europe/Berlin" }, async () => {
