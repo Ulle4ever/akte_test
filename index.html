@@ -1221,26 +1221,45 @@ function guessCategoryFromTitle(title) {
     return "tt";
 }
 function parseBlockText(rawText) {
+    // Google-Calendar-Kaestchen sind immer gleich aufgebaut: oben der Titel
+    // (ggf. ueber mehrere Zeilen umgebrochen), darunter die Uhrzeit. Deshalb
+    // strikt von oben nach unten lesen: alles bis zur ersten Zeile, die wie
+    // eine Uhrzeit aussieht, ist Titel - ab dort beginnt die Uhrzeit.
     const cleaned = (rawText || "").replace(/\r/g, "").trim();
-    const flat = cleaned.replace(/\s+/g, " ");
-    const timeMatch = flat.match(/(\d{1,2})[.:]?(\d{2})?\s*(?:bis|-|–|bs)\s*(\d{1,2})[.:](\d{2})/i);
+    const rangeRe = /\d{1,2}[.:]?\d{0,2}\s*(?:bis|-|–|bs)\s*\d{1,2}[.:]\d{2}/i;
+    const soloTimeRe = /^\d{1,2}[.:]\d{2}$/;
+    const sepRe = /^(bis|-|–|bs)$/i;
+    // Auch eine ANGEFANGENE Zeitangabe (z.B. "18:30 bis 2" - Endzeit vom
+    // Kaestchen abgeschnitten) zaehlt schon als Uhrzeit-Zeile, damit sie nicht
+    // faelschlich mit in den Titel rutscht, selbst wenn die Uhrzeit am Ende
+    // dadurch unvollstaendig bleibt (dann in der Vorschau von Hand ergaenzen).
+    const timeStartRe = /^\d{1,2}[.:]?\d{0,2}\s*(?:bis|-|–|bs)/i;
+    function looksLikeTimeLine(l) {
+        return rangeRe.test(l) || soloTimeRe.test(l) || sepRe.test(l) || timeStartRe.test(l);
+    }
+    const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean);
+    const titleLines = [];
+    let timeStartIdx = lines.length;
+    for (let i = 0; i < lines.length; i++) {
+        if (looksLikeTimeLine(lines[i])) {
+            timeStartIdx = i;
+            break;
+        }
+        titleLines.push(lines[i]);
+    }
+    const timeSource = lines.slice(timeStartIdx).join(" ") || cleaned.replace(/\s+/g, " ");
+    const timeMatch = timeSource.match(/(\d{1,2})[.:]?(\d{2})?\s*(?:bis|-|–|bs)\s*(\d{1,2})[.:](\d{2})/i);
     let startTime = "", endTime = "";
     if (timeMatch) {
         const startMin = timeMatch[2] || "00";
         startTime = `${timeMatch[1].padStart(2, "0")}:${startMin}`;
         endTime = `${timeMatch[3].padStart(2, "0")}:${timeMatch[4]}`;
     }
-    // Zeit und Titel stehen normalerweise in eigenen Zeilen - manchmal landet die
-    // Uhrzeit aber (per OCR) in derselben Zeile wie der Titel. Deshalb hier gezielt
-    // nur die Zeitangabe aus jeder Zeile herausschneiden, statt gleich die ganze
-    // Zeile zu verwerfen (das wuerde sonst den Titel mit-loeschen).
-    const rangeRe = /\d{1,2}[.:]?\d{0,2}\s*(?:bis|-|–|bs)\s*\d{1,2}[.:]\d{2}/i;
-    const soloTimeRe = /^\d{1,2}[.:]\d{2}$/;
-    const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean);
-    const titleLines = lines
-        .map((l) => l.replace(rangeRe, "").trim())
-        .filter((l) => l && !soloTimeRe.test(l) && !/^(bis|-|–|bs)$/i.test(l));
-    const title = (titleLines.join(" ").replace(/\s+/g, " ").trim() || lines[0] || "Termin").trim();
+    // Falls ausnahmsweise alles (Titel + Uhrzeit) in einer einzigen Zeile
+    // stand, blieb titleLines oben leer - dann die erste Zeile nehmen und die
+    // Uhrzeit defensiv rausschneiden, damit sie nicht doppelt im Titel steht.
+    const rawTitle = titleLines.length > 0 ? titleLines.join(" ") : (lines[0] || "");
+    const title = rawTitle.replace(rangeRe, "").replace(/\s+/g, " ").trim() || "Termin";
     return { title, startTime, endTime };
 }
 async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, onProgress) {
