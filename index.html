@@ -1305,7 +1305,6 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [city, setCity] = useState(initial?.city || "");
     const [district, setDistrict] = useState(initial?.district || "");
     const [error, setError] = useState("");
-    const isCologne = ["köln", "koeln", "cologne"].includes(city.trim().toLowerCase());
     function handleSubmit(e) {
         e.preventDefault();
         if (!name.trim()) {
@@ -1329,7 +1328,7 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             weight: weight === "" ? "" : Number(weight),
             school: school.trim(),
             city: city.trim(),
-            district: isCologne ? district.trim() : "",
+            district: district.trim(),
         });
         onClose();
     }
@@ -1369,8 +1368,8 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
         React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: "Wohnort (Stadt)" },
                 React.createElement("input", { className: inputClass, value: city, onChange: (e) => setCity(e.target.value), placeholder: "z. B. Köln oder Düsseldorf" })),
-            isCologne && (React.createElement(Field, { label: "Stadtteil" },
-                React.createElement("input", { className: inputClass, value: district, onChange: (e) => setDistrict(e.target.value), placeholder: "z. B. Ehrenfeld" })))),
+            React.createElement(Field, { label: "Stadtteil" },
+                React.createElement("input", { className: inputClass, value: district, onChange: (e) => setDistrict(e.target.value), placeholder: "z. B. Ehrenfeld" }))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Änderungen speichern" : "Spieler anlegen")));
 }
