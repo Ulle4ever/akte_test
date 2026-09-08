@@ -261,6 +261,12 @@ const IconKey = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M10.5 12.5 20 3" }),
     React.createElement("path", { d: "M17 6l2 2" }),
     React.createElement("path", { d: "M14 9l2 2" }));
+const IconGift = (p) => React.createElement(Icon, { ...p },
+    React.createElement("rect", { x: "3", y: "8", width: "18", height: "4", rx: "1" }),
+    React.createElement("path", { d: "M12 8v13" }),
+    React.createElement("path", { d: "M19 12v7a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-7" }),
+    React.createElement("path", { d: "M7.5 8a2.5 2.5 0 0 1 0-5C10 3 12 8 12 8" }),
+    React.createElement("path", { d: "M16.5 8a2.5 2.5 0 0 0 0-5C14 3 12 8 12 8" }));
 const IconInfo = (p) => React.createElement(Icon, { ...p },
     React.createElement("circle", { cx: "12", cy: "12", r: "9" }),
     React.createElement("line", { x1: "12", y1: "11", x2: "12", y2: "16" }),
@@ -3648,15 +3654,33 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
     const wellnessThisWeek = players.map((p) => ({ player: p, entry: (wellnessData[p.id]?.entries || []).find((e) => e.weekKey === currentWeekKey) || null }));
     const checkedInWellness = wellnessThisWeek.filter((w) => w.entry);
     const flaggedWellness = checkedInWellness.filter((w) => Number(w.entry.energy) <= 2 || Number(w.entry.soreness) <= 2 || Number(w.entry.stress) >= 4 || (w.entry.pain && w.entry.pain.trim()));
-    const flaggedWellnessRows = flaggedWellness.map(({ player: p, entry }) => {
-        const hasPain = !!(entry.pain && entry.pain.trim());
-        return React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "w-full flex items-center gap-2.5 bg-red-50 hover:bg-red-100 border-l-2 border-[#eb1e23] rounded-xl px-3 py-2 text-left transition" },
-            React.createElement(IconAlert, { size: 14, className: "text-[#eb1e23] shrink-0" }),
-            React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, p.name),
-            hasPain
-                ? React.createElement("span", { className: "text-xs text-[#eb1e23] font-medium shrink-0 max-w-[45%] truncate" }, entry.pain)
-                : React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(p.teamId)));
-    });
+    function wellnessFlagReason(entry) {
+        const reasons = [];
+        if (entry.pain && entry.pain.trim())
+            reasons.push(entry.pain.trim());
+        if (Number(entry.energy) <= 2)
+            reasons.push("Energie niedrig");
+        if (Number(entry.soreness) <= 2)
+            reasons.push("Stark erschöpft");
+        if (Number(entry.stress) >= 4)
+            reasons.push("Stress hoch");
+        return reasons.join(" · ") || "Auffällig";
+    }
+    function nextBirthdayInfo(birthdateStr) {
+        if (!birthdateStr)
+            return null;
+        const parts = birthdateStr.split("-").map(Number);
+        if (parts.length !== 3 || parts.some((n) => Number.isNaN(n)))
+            return null;
+        const [by, bm, bd] = parts;
+        const now = new Date();
+        now.setHours(0, 0, 0, 0);
+        let next = new Date(now.getFullYear(), bm - 1, bd);
+        if (next < now)
+            next = new Date(now.getFullYear() + 1, bm - 1, bd);
+        const days = Math.round((next - now) / 86400000);
+        return { days, age: next.getFullYear() - by };
+    }
     function openNewEvent() {
         setEditingEvent(null);
         setShowEventForm(true);
@@ -3705,35 +3729,43 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
                                 React.createElement(IconTrash, { size: 13 })))))))));
             }),
             days.every((d) => events.filter((e) => e.date === isoDate(d)).length === 0) && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-6" }, "Keine Termine in den nächsten 7 Tagen."))));
-    const teamsSection = React.createElement("div", null,
+    const teamsCard = React.createElement("div", { className: `${cardClass} p-5` },
         React.createElement(SectionLabel, null, "Teams"),
-        React.createElement("div", { className: "grid grid-cols-2 xl:grid-cols-3 gap-3 mt-2" }, teams.map((t, i) => (React.createElement("button", { key: t.id, onClick: () => onSelectTeam(t.id), className: `${cardClass} p-4 text-left hover:shadow-md hover:-translate-y-0.5 active:scale-[0.98] active:translate-y-0 transition-all border border-transparent hover:border-[#eb1e23]/20` },
-            React.createElement("div", { className: "flex items-center gap-2.5 mb-2" },
-                React.createElement("span", { className: `w-8 h-8 rounded-xl bg-gradient-to-br ${TEAM_COLORS[i % TEAM_COLORS.length]} text-white flex items-center justify-center text-xs font-black shrink-0 shadow-sm` }, (t.name || "?").charAt(0).toUpperCase()),
-                React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, t.name)),
-            React.createElement("p", { className: "text-xs text-slate-400" },
-                players.filter((p) => p.teamId === t.id).length,
-                " Spieler"),
-            React.createElement("p", { className: "text-xs text-[#0a96d4] mt-1.5 flex items-center gap-1" },
-                React.createElement(IconCalendar, { size: 11 }),
-                " Kalender öffnen"))))));
-    const outCard = React.createElement("div", { className: `${cardClass} p-5` },
-        React.createElement(SectionLabel, null, "Verletzt / Reha"),
-        React.createElement("div", { className: "mt-3 space-y-1.5" }, outPlayers.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Aktuell niemand verletzt oder in Reha.")) : (outPlayers.map((p) => (React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition" },
-            React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-400"}` }),
-            React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, p.name),
-            React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(p.teamId))))))));
-    const monitoringCard = React.createElement("div", { className: `${cardClass} p-5` },
+        React.createElement("div", { className: "mt-3 space-y-1.5" }, teams.length === 0
+            ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch kein Team angelegt.")
+            : teams.map((t, i) => (React.createElement("button", { key: t.id, onClick: () => onSelectTeam(t.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition group" },
+                React.createElement("span", { className: `w-7 h-7 rounded-lg bg-gradient-to-br ${TEAM_COLORS[i % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, (t.name || "?").charAt(0).toUpperCase()),
+                React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, t.name),
+                React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, players.filter((p) => p.teamId === t.id).length, " Spieler"),
+                React.createElement(IconArrowLeft, { size: 12, className: "text-slate-300 group-hover:text-[#0a96d4] rotate-180 shrink-0" }))))));
+    const attentionRows = [
+        ...outPlayers.map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury" })),
+        ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", reason: wellnessFlagReason(entry) })),
+    ].map((item) => React.createElement("button", { key: item.id, onClick: () => onSelectPlayer(item.player.id), className: "w-full flex items-center gap-2.5 bg-red-50 hover:bg-red-100 border-l-2 border-[#eb1e23] rounded-xl px-3 py-2 text-left transition" },
+        React.createElement(item.kind === "injury" ? IconAlert : IconHeart, { size: 14, className: "text-[#eb1e23] shrink-0" }),
+        React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.player.name),
+        React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(item.player.teamId)),
+        React.createElement("span", { className: "text-xs text-[#eb1e23] font-medium shrink-0 max-w-[40%] truncate" }, item.kind === "injury" ? (STATUS_OPTIONS.find((s) => s.value === item.player.status)?.label || "Verletzt/Reha") : item.reason)));
+    const attentionCard = React.createElement("div", { className: `${cardClass} p-5` },
         React.createElement("div", { className: "flex items-center justify-between" },
-            React.createElement(SectionLabel, null, "Monitoring diese Woche"),
-            React.createElement("span", { className: `text-xs font-bold px-2 py-0.5 rounded-full ${checkedInWellness.length === 0 ? "bg-stone-100 text-slate-400" : "bg-gradient-to-r from-[#0a96d4] to-[#4178a0] text-white"}` },
-                checkedInWellness.length,
-                " / ",
-                players.length,
-                " eingecheckt")),
-        React.createElement("div", { className: "mt-3 space-y-1.5" }, flaggedWellnessRows.length === 0
-            ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, checkedInWellness.length === 0 ? "Noch keine Check-ins diese Woche." : "Keine Auffälligkeiten – alles im grünen Bereich.")
-            : flaggedWellnessRows));
+            React.createElement(SectionLabel, null, "Braucht Aufmerksamkeit"),
+            attentionRows.length > 0 && React.createElement("span", { className: "text-xs font-bold px-2 py-0.5 rounded-full bg-red-50 text-[#eb1e23]" }, attentionRows.length)),
+        React.createElement("div", { className: "mt-3 space-y-1.5" }, attentionRows.length === 0
+            ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Alles im grünen Bereich - keine Auffälligkeiten.")
+            : attentionRows));
+    const birthdaysUpcoming = players
+        .map((p) => ({ player: p, info: nextBirthdayInfo(p.birthdate) }))
+        .filter((x) => x.info && x.info.days <= 30)
+        .sort((a, b) => a.info.days - b.info.days)
+        .slice(0, 5);
+    const birthdaysCard = React.createElement("div", { className: `${cardClass} p-5` },
+        React.createElement(SectionLabel, null, "Geburtstage"),
+        React.createElement("div", { className: "mt-3 space-y-1.5" }, birthdaysUpcoming.length === 0
+            ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "In den nächsten 30 Tagen hat niemand Geburtstag.")
+            : birthdaysUpcoming.map(({ player: p, info }) => React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition" },
+                React.createElement(IconGift, { size: 14, className: "text-[#0a96d4] shrink-0" }),
+                React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, p.name),
+                React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, info.days === 0 ? "Heute 🎉" : info.days === 1 ? "Morgen" : `in ${info.days} Tagen`)))));
     return (React.createElement("div", { className: "space-y-6 rsk-fade-in" },
         React.createElement("div", { className: "rounded-3xl bg-gradient-to-br from-white via-stone-50 to-white border border-stone-100 p-6 sm:p-8 relative overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]" },
             React.createElement("div", { className: "pointer-events-none absolute -top-16 -right-16 w-56 h-56 rounded-full bg-[#eb1e23]/10 blur-3xl" }),
@@ -3750,9 +3782,10 @@ function TrainerDashboard({ events, teams, players, wellnessData, onSelectTeam, 
             React.createElement("div", { className: "relative grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6" }, kpiTiles)),
         showEventForm && (React.createElement(Modal, { title: editingEvent ? "Termin bearbeiten" : "Termin anlegen", onClose: () => setShowEventForm(false), wide: true },
             React.createElement(EventForm, { initialEvent: editingEvent, teams: teams, allPlayers: players, onSubmit: (vals) => { editingEvent ? onEditEvent(editingEvent.id, vals) : onAddEvent(vals); setShowEventForm(false); }, onClose: () => setShowEventForm(false) }))),
+        attentionCard,
         React.createElement("div", { className: "grid lg:grid-cols-3 gap-6 items-start" },
-            React.createElement("div", { className: "lg:col-span-2 space-y-6" }, terminCard, teamsSection),
-            React.createElement("div", { className: "space-y-6" }, outCard, monitoringCard))));
+            React.createElement("div", { className: "lg:col-span-2" }, terminCard),
+            React.createElement("div", { className: "space-y-6" }, teamsCard, birthdaysCard))));
 }
 function polarPoint(cx, cy, r, angleDeg) {
     const rad = (angleDeg * Math.PI) / 180;
