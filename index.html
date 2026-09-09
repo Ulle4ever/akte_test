@@ -504,7 +504,13 @@ const DEFAULT_TEST_TYPES = [
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
 const today = () => new Date().toISOString().slice(0, 10);
 function isoWeekKey(dateStr) {
-    const d = new Date((dateStr || today()) + "T00:00:00");
+    // Datum bewusst direkt als UTC-Mitternacht des Y-M-D bauen statt per
+    // "new Date(str + 'T00:00:00')" lokal zu parsen - sonst verschieben
+    // Zeitzonen mit Offset (z.B. Europe/Berlin) das Datum bei den folgenden
+    // UTC-Methoden um einen Tag, was Termine derselben Kalenderwoche je nach
+    // Wochentag in unterschiedliche ISO-Wochen einsortieren konnte.
+    const [y, m, day0] = (dateStr || today()).split("-").map(Number);
+    const d = new Date(Date.UTC(y, m - 1, day0));
     const day = (d.getUTCDay() + 6) % 7;
     d.setUTCDate(d.getUTCDate() - day + 3);
     const firstThursday = new Date(Date.UTC(d.getUTCFullYear(), 0, 4));
@@ -530,7 +536,7 @@ function formatWeekRange(monday) {
     const sunday = new Date(monday);
     sunday.setDate(monday.getDate() + 6);
     const fmt = (d) => d.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit" });
-    return `${fmt(monday)} – ${fmt(sunday)}.${sunday.getFullYear()}`;
+    return `${fmt(monday)} – ${fmt(sunday)}${sunday.getFullYear()}`;
 }
 const WELLNESS_SCALE_FIELDS = [
     { id: "sleep", label: "Schlafqualität", lowLabel: "Sehr schlecht", highLabel: "Ausgezeichnet" },
@@ -3206,6 +3212,16 @@ function attendanceQuote(present, absent) {
     const decided = present + absent;
     return decided > 0 ? Math.round((present / decided) * 1000) / 10 : null;
 }
+/* Schnell-Markieren: ein Klick setzt alle noch UNMARKIERTEN Spieler eines Termins
+   auf "Anwesend" - bereits gesetzte Status (z.B. eine Abwesenheit) werden nicht
+   angetastet. Danach muss der Trainer nur noch die Ausnahmen umstellen, statt
+   jeden Spieler einzeln anzuklicken. */
+function markAllPresent(event, attendees, eventAttendance, onSetAttendance) {
+    attendees.forEach((p) => {
+        if (!attendanceMark(eventAttendance, event.id, p.id).status)
+            onSetAttendance(event.id, p.id, "present", "");
+    });
+}
 /* Gemeinsame Zeile fuer die Anwesenheits-Markierung eines Spielers - genutzt in
    "Alle Einheiten" und "Anwesenheit", damit beide gleich aussehen und sich gleich
    bedienen lassen. Drei Buttons statt Durchklicken: direkt "Anwesend"/"Abwesend"/
@@ -3252,6 +3268,55 @@ function AttendanceRow({ player, mark, onSet, subtitle, trailing }) {
             placeholder: status === "injured" ? "Info (optional, z. B. Knöchel, bis wann)" : "Grund (optional, z. B. krank, Schule)",
             className: "mt-1.5 w-full text-xs rounded-lg border border-stone-300 px-2.5 py-1.5",
         }));
+}
+/* Anwesenheit-Tab in der Spieler-Akte: nicht dauerhaft alle Termine auflisten,
+   sondern nach Kalenderwoche gruppiert und einklappbar - nur die neueste Woche
+   ist standardmaessig offen. */
+function PlayerAttendanceTab({ rows }) {
+    const groups = {};
+    rows.forEach((r) => { const key = isoWeekKey(r.event.date); (groups[key] = groups[key] || []).push(r); });
+    const weekKeys = Object.keys(groups).sort().reverse();
+    // Beim ersten Rendern ist nur die neueste Woche aufgeklappt (lazy initializer,
+    // laeuft nur einmal beim Mounten - so bleibt der Rest kompakt eingeklappt).
+    const [expandedWeeks, setExpandedWeeks] = useState(() => new Set(weekKeys.slice(0, 1)));
+    function toggleWeek(key) {
+        setExpandedWeeks((prev) => {
+            const next = new Set(prev);
+            if (next.has(key))
+                next.delete(key);
+            else
+                next.add(key);
+            return next;
+        });
+    }
+    if (weekKeys.length === 0) {
+        return React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Termine markiert. Unter \"Anwesenheit\" bzw. \"Alle Einheiten\" lässt sich pro Termin Anwesend/Abwesend/Verletzt eintragen.");
+    }
+    const weekBlocks = weekKeys.map((key) => {
+        const groupRows = groups[key];
+        const present = groupRows.filter((r) => r.mark.status === "present").length;
+        const absent = groupRows.filter((r) => r.mark.status === "absent").length;
+        const injured = groupRows.filter((r) => r.mark.status === "injured").length;
+        const quote = attendanceQuote(present, absent);
+        const [year, weekNum] = key.split("-W").map(Number);
+        const monday = mondayOfIsoWeek(year, weekNum);
+        const isExpanded = expandedWeeks.has(key);
+        const header = React.createElement("button", { type: "button", onClick: () => toggleWeek(key), className: "w-full flex items-center justify-between gap-3 px-4 py-3 text-left" },
+            React.createElement("div", { className: "flex items-center gap-2.5" },
+                React.createElement(IconArrowDown, { size: 12, className: `text-slate-300 shrink-0 transition-transform ${isExpanded ? "" : "-rotate-90"}` }),
+                React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, "KW ", weekNum),
+                React.createElement("span", { className: "text-xs text-slate-400" }, formatWeekRange(monday))),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement("span", { className: "text-xs text-slate-400" }, groupRows.length, groupRows.length === 1 ? " Termin" : " Termine"),
+                quote !== null && React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${quote < ATTENDANCE_WARN_THRESHOLD ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700"}` }, quote, "%")));
+        const body = isExpanded ? React.createElement("div", { className: "border-t border-stone-100 divide-y divide-stone-100" }, groupRows.map(({ event, mark }) => React.createElement("div", { key: event.id, className: "flex items-center justify-between gap-3 px-4 py-2.5" },
+            React.createElement("div", { className: "min-w-0" },
+                React.createElement("p", { className: "text-sm text-slate-700 truncate" }, event.title),
+                React.createElement("p", { className: "text-xs text-slate-400" }, fmtDate(event.date), mark.reason ? ` · ${mark.reason}` : "")),
+            attendanceStatusBadge(mark.status)))) : null;
+        return React.createElement("div", { key: key, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-hidden" }, header, body);
+    });
+    return React.createElement("div", { className: "space-y-2.5" }, weekBlocks);
 }
 function timeToMinutes(t) {
     if (!t)
@@ -3507,6 +3572,9 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd, even
                 React.createElement("option", { value: "" }, "– Spieler wählen –"),
                 eligibleForAdd.map((p) => React.createElement("option", { key: p.id, value: p.id }, `${p.name}${p.teamId ? " (" + (teams.find((t) => t.id === p.teamId)?.name || "") + ")" : ""}`))),
             React.createElement("button", { type: "button", onClick: () => addIncludedPlayer(event, pickerPlayerId), className: "text-xs font-medium bg-slate-900 text-white rounded-lg px-2 py-1 hover:bg-slate-800" }, "OK")) : null;
+        const markAllBtn = attendees.length > 0 && attendees.some((p) => !attendanceMark(eventAttendance, event.id, p.id).status) && React.createElement("button", { type: "button", onClick: () => markAllPresent(event, attendees, eventAttendance, onSetAttendance), className: "mt-2.5 flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-2.5 py-1.5" },
+            React.createElement(IconCheck, { size: 12 }),
+            " Alle anwesend");
         const rosterSection = React.createElement("div", { className: "mt-2.5 pt-2.5 border-t border-stone-200 divide-y divide-stone-100" }, teamRows, extraRows);
         const editButtons = React.createElement("div", { className: "flex items-center gap-2 mt-2" },
             React.createElement("button", { onClick: () => openEdit(event), className: "flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-[#0a96d4]" },
@@ -3515,7 +3583,7 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd, even
             React.createElement("button", { onClick: () => onDelete(event.id), className: "flex items-center gap-1 text-xs font-medium text-slate-500 hover:text-red-500" },
                 React.createElement(IconTrash, { size: 12 }),
                 " Löschen"));
-        return React.createElement("div", { key: event.id, className: "bg-stone-50 rounded-xl px-3.5 py-2.5" }, headerLine, rosterSection, addBtn, addPicker, editButtons);
+        return React.createElement("div", { key: event.id, className: "bg-stone-50 rounded-xl px-3.5 py-2.5" }, headerLine, markAllBtn, rosterSection, addBtn, addPicker, editButtons);
     }
     const dayGroups = dateKeys.map((iso) => {
         const isToday = iso === todayIso;
@@ -3561,15 +3629,19 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd, even
         React.createElement("div", { className: "space-y-5" }, dayGroups),
         formModal);
 }
-/* Eigener "Anwesenheit"-Reiter (an Spond angelehnt): reine Anwesenhaits-Ansicht
-   ohne Termin-Verwaltung - Spieler tauchen automatisch anhand der Team-/
-   Einzel-Zuordnung des jeweiligen Termins auf (dieselbe Logik wie in
-   "Alle Einheiten"), Markieren nutzt dieselben eventAttendance-Daten. */
+/* Eigener "Anwesenheit"-Reiter (an Spond angelehnt): die aktuelle Woche steht im
+   Fokus zum Markieren (mit Vorwoche-Vergleich und "Alle anwesend"-Schnellklick),
+   die Spieler-Quoten-Tabelle ist eine einklappbare Zusatzansicht darunter - ein
+   einziger, gemeinsamer Team-Filter fuer die ganze Seite statt mehrerer Filter-
+   Zeilen. Spieler tauchen automatisch anhand der Team-/Einzel-Zuordnung des
+   jeweiligen Termins auf (dieselbe Logik wie in "Alle Einheiten"), Markieren
+   nutzt dieselben eventAttendance-Daten. */
 function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAttendance, onSelectPlayer }) {
     const [teamFilter, setTeamFilter] = useState("all");
-    const [statsRange, setStatsRange] = useState("all");
-    const [rangeMode, setRangeMode] = useState("week");
+    const [weekOffset, setWeekOffset] = useState(0);
     const [expandedIds, setExpandedIds] = useState(() => new Set());
+    const [showStats, setShowStats] = useState(false);
+    const [statsRange, setStatsRange] = useState("all");
     function toggleExpanded(id) {
         setExpandedIds((prev) => {
             const next = new Set(prev);
@@ -3579,30 +3651,6 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
                 next.add(id);
             return next;
         });
-    }
-    const todayIso = isoDate(new Date());
-    const thisMonday = startOfWeekMonday(new Date());
-    const thisSunday = new Date(thisMonday);
-    thisSunday.setDate(thisMonday.getDate() + 6);
-    const nextMonday = new Date(thisMonday);
-    nextMonday.setDate(thisMonday.getDate() + 7);
-    const nextSunday = new Date(nextMonday);
-    nextSunday.setDate(nextMonday.getDate() + 6);
-    let rangeStart = null, rangeEnd = null;
-    if (rangeMode === "week") {
-        rangeStart = isoDate(thisMonday);
-        rangeEnd = isoDate(thisSunday);
-    }
-    else if (rangeMode === "nextWeek") {
-        rangeStart = isoDate(nextMonday);
-        rangeEnd = isoDate(nextSunday);
-    }
-    else if (rangeMode === "upcoming") {
-        rangeStart = todayIso;
-        rangeEnd = null;
-    }
-    function inRange(e) {
-        return (!rangeStart || e.date >= rangeStart) && (!rangeEnd || e.date <= rangeEnd);
     }
     function teamOfEvent(e) {
         return teams.find((t) => t.id === e.teamId) || null;
@@ -3614,10 +3662,18 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
             return true;
         return getEventAttendees(e, allPlayers).some((p) => p.teamId === teamFilter);
     }
-    const filteredEvents = events.filter(inRange).filter(eventMatchesTeamFilter)
+    // Woche, die gerade zum Markieren angezeigt wird (per Pfeil-Navigation verschiebbar).
+    const realMonday = startOfWeekMonday(new Date());
+    const focusMonday = new Date(realMonday);
+    focusMonday.setDate(focusMonday.getDate() + weekOffset * 7);
+    const focusSunday = new Date(focusMonday);
+    focusSunday.setDate(focusMonday.getDate() + 6);
+    const focusStart = isoDate(focusMonday), focusEnd = isoDate(focusSunday);
+    const isCurrentWeek = weekOffset === 0;
+    const focusEvents = events.filter((e) => e.date >= focusStart && e.date <= focusEnd).filter(eventMatchesTeamFilter)
         .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
     const byDate = {};
-    filteredEvents.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+    focusEvents.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
     const dateKeys = Object.keys(byDate).sort();
     function eventRow(event) {
         const team = teamOfEvent(event);
@@ -3637,35 +3693,78 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
                 React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, attendees.length, " Spieler")));
         if (!isExpanded)
             return React.createElement("div", { key: event.id, className: "bg-stone-50 rounded-xl px-3.5 py-2.5" }, headerLine);
+        const markAllBtn = attendees.length > 0 && attendees.some((p) => !attendanceMark(eventAttendance, event.id, p.id).status) && React.createElement("button", { type: "button", onClick: () => markAllPresent(event, attendees, eventAttendance, onSetAttendance), className: "mt-2.5 flex items-center gap-1.5 text-xs font-semibold text-emerald-700 bg-emerald-50 hover:bg-emerald-100 rounded-lg px-2.5 py-1.5" },
+            React.createElement(IconCheck, { size: 12 }),
+            " Alle anwesend");
         const rows = attendees.length > 0
             ? attendees.map((p) => React.createElement(AttendanceRow, { key: p.id, player: p, mark: attendanceMark(eventAttendance, event.id, p.id), onSet: (status, reason) => onSetAttendance(event.id, p.id, status, reason) }))
             : [React.createElement("p", { key: "none", className: "text-xs text-slate-400 py-2" }, "Keine Spieler zugeordnet.")];
         return React.createElement("div", { key: event.id, className: "bg-stone-50 rounded-xl px-3.5 py-2.5" },
             headerLine,
+            markAllBtn,
             React.createElement("div", { className: "mt-2.5 pt-2.5 border-t border-stone-200 divide-y divide-stone-100" }, rows));
     }
     const dayGroups = dateKeys.map((iso) => {
-        const isToday = iso === todayIso;
+        const isToday = iso === isoDate(new Date());
         const dayHeader = React.createElement("p", { className: `text-xs font-semibold uppercase tracking-wide mb-2 ${isToday ? "text-[#eb1e23]" : "text-slate-400"}` },
             new Date(iso + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }),
             isToday && " · Heute");
         const rows = React.createElement("div", { className: "space-y-2" }, byDate[iso].map(eventRow));
         return React.createElement("div", { key: iso }, dayHeader, rows);
     });
-    const emptyState = filteredEvents.length === 0 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-10" }, "Keine Einheiten im gewählten Zeitraum.") : null;
-    const teamSelect = React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: teamFilter, onChange: (e) => setTeamFilter(e.target.value) },
-        React.createElement("option", { value: "all" }, "Alle Teams"),
-        teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)));
-    // Team-Uebersicht: Anwesend/Abwesend/Verletzt je Spieler, gefiltert nach Zeitraum
-    // (unabhaengig vom "Termine markieren"-Zeitraum weiter unten - hier geht es um
-    // eine Statistik-Periode, nicht ums Durchblaettern kommender Termine). Ein Spieler
-    // taucht nur bei den Terminen auf, denen er tatsaechlich zugeordnet war (Team-
-    // Zuordnung des jeweiligen Termins bzw. Einzel-Einladung) - spielt er diese Woche
-    // z.B. bei einem anderen Team, zaehlt das automatisch dort und nicht hier mit rein.
+    const weekEmptyState = focusEvents.length === 0 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Keine Einheiten in dieser Woche.") : null;
+    // Anwesenheitsquote fuer eine Reihe von Terminen (Team-Filter respektiert) -
+    // fuer den Diese-Woche/Vorwoche-Vergleich oben im Wochen-Fokus.
+    function quoteForEvents(evs) {
+        let present = 0, absent = 0;
+        evs.filter(eventMatchesTeamFilter).forEach((e) => {
+            getEventAttendees(e, allPlayers).forEach((p) => {
+                const status = attendanceMark(eventAttendance, e.id, p.id).status;
+                if (status === "present")
+                    present++;
+                else if (status === "absent")
+                    absent++;
+            });
+        });
+        return attendanceQuote(present, absent);
+    }
+    const realSunday = new Date(realMonday);
+    realSunday.setDate(realMonday.getDate() + 6);
+    const lastMonday = new Date(realMonday);
+    lastMonday.setDate(lastMonday.getDate() - 7);
+    const lastSunday = new Date(realMonday);
+    lastSunday.setDate(lastSunday.getDate() - 1);
+    const thisWeekQuote = quoteForEvents(events.filter((e) => e.date >= isoDate(realMonday) && e.date <= isoDate(realSunday)));
+    const lastWeekQuote = quoteForEvents(events.filter((e) => e.date >= isoDate(lastMonday) && e.date <= isoDate(lastSunday)));
+    function quoteLabel(q) {
+        return q === null ? "–" : `${q}%`;
+    }
+    const quoteCompare = React.createElement("div", { className: "flex items-center gap-2 text-xs text-slate-500 shrink-0" },
+        React.createElement("span", null, "Diese Woche ", React.createElement("strong", { className: "text-slate-800" }, quoteLabel(thisWeekQuote))),
+        React.createElement("span", { className: "text-slate-300" }, "·"),
+        React.createElement("span", null, "Vorwoche ", React.createElement("strong", { className: "text-slate-800" }, quoteLabel(lastWeekQuote))));
+    const weekNav = React.createElement("div", { className: "flex items-center gap-1.5" },
+        React.createElement("button", { type: "button", onClick: () => setWeekOffset(weekOffset - 1), className: "w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:bg-stone-100 hover:text-slate-700", "aria-label": "Vorherige Woche" },
+            React.createElement(IconArrowLeft, { size: 14 })),
+        React.createElement("button", { type: "button", onClick: () => setWeekOffset(0), className: `text-sm font-semibold rounded-lg px-2.5 py-1 ${isCurrentWeek ? "text-slate-900" : "text-slate-500 hover:text-slate-900"}` },
+            isCurrentWeek ? "Diese Woche" : formatWeekRange(focusMonday)),
+        React.createElement("button", { type: "button", onClick: () => setWeekOffset(weekOffset + 1), className: "w-7 h-7 flex items-center justify-center rounded-lg text-slate-400 hover:bg-stone-100 hover:text-slate-700", "aria-label": "Nächste Woche" },
+            React.createElement(IconArrowLeft, { size: 14, className: "rotate-180" })));
+    const weekCard = React.createElement("div", { className: `${cardClass} p-4` },
+        React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-3 mb-3" },
+            weekNav,
+            quoteCompare),
+        weekEmptyState,
+        React.createElement("div", { className: "space-y-4" }, dayGroups));
+    // Team-Uebersicht: Anwesend/Abwesend/Verletzt je Spieler, gefiltert nach Zeitraum -
+    // als einklappbare Zusatzansicht, damit die Seite nicht ueberladen wirkt. Ein
+    // Spieler taucht nur bei den Terminen auf, denen er tatsaechlich zugeordnet war -
+    // spielt er z.B. gerade bei einem anderen Team, zaehlt das dort und nicht hier.
     const thisMonthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+    const todayIso = isoDate(new Date());
     function inStatsRange(e) {
         if (statsRange === "week")
-            return e.date >= isoDate(thisMonday) && e.date <= isoDate(thisSunday);
+            return e.date >= isoDate(realMonday) && e.date <= isoDate(realSunday);
         if (statsRange === "month")
             return e.date >= thisMonthStart && e.date <= todayIso;
         return true;
@@ -3699,7 +3798,6 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
         return a.quote - b.quote;
     });
     const statsRows = playerStats.map((s) => {
-        const quoteLabel = s.quote === null ? "–" : `${s.quote}%`;
         const badgeClass = s.quote === null ? "bg-stone-100 text-slate-400" : s.quote < ATTENDANCE_WARN_THRESHOLD ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700";
         return React.createElement("tr", { key: s.player.id, onClick: () => onSelectPlayer(s.player.id), className: "border-b border-stone-100 last:border-0 hover:bg-stone-50 cursor-pointer" },
             React.createElement("td", { className: "px-3 py-2 text-sm text-slate-700 font-medium truncate max-w-[180px]" }, s.player.name),
@@ -3707,43 +3805,39 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
             React.createElement("td", { className: "px-3 py-2 text-sm text-right text-red-500" }, s.absent || "–"),
             React.createElement("td", { className: "px-3 py-2 text-sm text-right text-amber-600" }, s.injured || "–"),
             React.createElement("td", { className: "px-3 py-2 text-right" },
-                React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${badgeClass}` }, quoteLabel)));
+                React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${badgeClass}` }, quoteLabel(s.quote))));
     });
-    const teamOverviewCard = React.createElement("div", { className: `${cardClass} p-4` },
-        React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 mb-1" },
-            React.createElement("p", { className: "text-sm font-bold text-slate-900" }, "Team-Übersicht"),
-            React.createElement("div", { className: "flex items-center gap-2" },
-                teamSelect,
-                React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: statsRange, onChange: (e) => setStatsRange(e.target.value) },
-                    React.createElement("option", { value: "week" }, "Diese Woche"),
-                    React.createElement("option", { value: "month" }, "Dieser Monat"),
-                    React.createElement("option", { value: "all" }, "Gesamt")))),
-        React.createElement("p", { className: "text-xs text-slate-400 mb-3" }, "Quote = Anwesend / (Anwesend + Abwesend). \"Verletzt\" zählt nicht als Fehlen - unter ", ATTENDANCE_WARN_THRESHOLD, "% rot markiert."),
-        React.createElement("div", { className: "overflow-x-auto" },
-            React.createElement("table", { className: "w-full" },
-                React.createElement("thead", null,
-                    React.createElement("tr", { className: "border-b border-stone-200 text-slate-400 text-xs uppercase tracking-wide" },
-                        React.createElement("th", { className: "text-left px-3 py-2" }, "Spieler"),
-                        React.createElement("th", { className: "text-right px-3 py-2" }, "Anwesend"),
-                        React.createElement("th", { className: "text-right px-3 py-2" }, "Abwesend"),
-                        React.createElement("th", { className: "text-right px-3 py-2" }, "Verletzt"),
-                        React.createElement("th", { className: "text-right px-3 py-2" }, "Quote"))),
-                React.createElement("tbody", null, statsRows.length > 0 ? statsRows : React.createElement("tr", null, React.createElement("td", { colSpan: 5, className: "text-xs text-slate-400 text-center py-6" }, "Keine Spieler in dieser Auswahl."))))));
-    const eventsFilterBar = React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
-        teamSelect,
-        React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: rangeMode, onChange: (e) => setRangeMode(e.target.value) },
-            React.createElement("option", { value: "week" }, "Diese Woche"),
-            React.createElement("option", { value: "nextWeek" }, "Nächste Woche"),
-            React.createElement("option", { value: "upcoming" }, "Alle kommenden"),
-            React.createElement("option", { value: "all" }, "Alle (inkl. vergangene)")));
+    function periodBtn(value, label) {
+        return React.createElement("button", { type: "button", onClick: () => setStatsRange(value), className: `text-xs font-medium rounded-lg px-2.5 py-1.5 ${statsRange === value ? "bg-slate-900 text-white" : "bg-stone-100 text-slate-500 hover:bg-stone-200"}` }, label);
+    }
+    const statsCard = React.createElement("div", { className: `${cardClass} p-4` },
+        React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2" },
+            React.createElement("button", { type: "button", onClick: () => setShowStats(!showStats), className: "flex items-center gap-1.5 text-sm font-bold text-slate-900" },
+                React.createElement(IconArrowDown, { size: 12, className: `text-slate-400 transition-transform ${showStats ? "" : "-rotate-90"}` }),
+                "Spieler-Quoten"),
+            showStats && React.createElement("div", { className: "flex items-center gap-1" }, periodBtn("week", "Woche"), periodBtn("month", "Monat"), periodBtn("all", "Gesamt"))),
+        showStats && React.createElement("div", { className: "mt-3" },
+            React.createElement("p", { className: "text-xs text-slate-400 mb-3" }, "Quote = Anwesend / (Anwesend + Abwesend). \"Verletzt\" zählt nicht als Fehlen - unter ", ATTENDANCE_WARN_THRESHOLD, "% rot markiert."),
+            React.createElement("div", { className: "overflow-x-auto" },
+                React.createElement("table", { className: "w-full" },
+                    React.createElement("thead", null,
+                        React.createElement("tr", { className: "border-b border-stone-200 text-slate-400 text-xs uppercase tracking-wide" },
+                            React.createElement("th", { className: "text-left px-3 py-2" }, "Spieler"),
+                            React.createElement("th", { className: "text-right px-3 py-2" }, "Anwesend"),
+                            React.createElement("th", { className: "text-right px-3 py-2" }, "Abwesend"),
+                            React.createElement("th", { className: "text-right px-3 py-2" }, "Verletzt"),
+                            React.createElement("th", { className: "text-right px-3 py-2" }, "Quote"))),
+                    React.createElement("tbody", null, statsRows.length > 0 ? statsRows : React.createElement("tr", null, React.createElement("td", { colSpan: 5, className: "text-xs text-slate-400 text-center py-6" }, "Keine Spieler in dieser Auswahl.")))))));
     return React.createElement("div", { className: "space-y-4" },
-        React.createElement("div", null,
-            React.createElement(SectionLabel, null, "Anwesenheit"),
-            React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Team-Übersicht auf einen Blick, darunter Termine einzeln markieren - Spieler werden automatisch anhand der Team-/Termin-Zuordnung angezeigt.")),
-        teamOverviewCard,
-        React.createElement("div", null,
-            React.createElement("p", { className: "text-sm font-bold text-slate-900 mb-2" }, "Termine markieren"),
-            React.createElement("div", { className: "space-y-3" }, eventsFilterBar, emptyState, React.createElement("div", { className: "space-y-5" }, dayGroups))));
+        React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-3" },
+            React.createElement("div", null,
+                React.createElement(SectionLabel, null, "Anwesenheit"),
+                React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Aktuelle Woche markieren - Spieler werden automatisch anhand der Team-/Termin-Zuordnung angezeigt.")),
+            React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: teamFilter, onChange: (e) => setTeamFilter(e.target.value) },
+                React.createElement("option", { value: "all" }, "Alle Teams"),
+                teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
+        weekCard,
+        statsCard);
 }
 function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, onLoad, onCreate, onDelete, onClose }) {
     const [showForm, setShowForm] = useState(false);
@@ -5879,19 +5973,7 @@ function SpielerAkte() {
                                 React.createElement("div", { className: `${cardClass} p-4 text-center w-32` },
                                     React.createElement("p", { className: "text-2xl font-black text-amber-600" }, playerLiveAttendanceStats.injured),
                                     React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Verletzt"))),
-                            playerLiveAttendanceRows.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Termine markiert. Unter „Anwesenheit“ bzw. „Alle Einheiten“ lässt sich pro Termin Anwesend/Abwesend/Verletzt eintragen.")) : (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-x-auto" },
-                                React.createElement("table", { className: "w-full text-sm" },
-                                    React.createElement("thead", null,
-                                        React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
-                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Datum"),
-                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Termin"),
-                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Status"),
-                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Grund/Info"))),
-                                    React.createElement("tbody", null, playerLiveAttendanceRows.map(({ event, mark }) => (React.createElement("tr", { key: event.id, className: "border-b border-stone-100 last:border-0 hover:bg-stone-50" },
-                                        React.createElement("td", { className: "px-4 py-3 whitespace-nowrap" }, fmtDate(event.date)),
-                                        React.createElement("td", { className: "px-4 py-3" }, event.title),
-                                        React.createElement("td", { className: "px-4 py-3" }, attendanceStatusBadge(mark.status)),
-                                        React.createElement("td", { className: "px-4 py-3 text-slate-500" }, mark.reason || "–")))))))))),
+                            React.createElement(PlayerAttendanceTab, { rows: playerLiveAttendanceRows }))),
                         activeTab === "wellness" && (React.createElement(WellnessPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, entries: playerWellnessEntries, onAddEntry: (entry) => addWellnessEntry(selectedPlayer.id, entry), onDeleteEntry: (id) => deleteWellnessEntry(selectedPlayer.id, id) })),
                         activeTab === "noten" && (React.createElement(GradesPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, subjects: playerGradeSubjects, onSave: (subjects) => saveGradeSubjects(selectedPlayer.id, subjects), onToggleFlag: (id) => toggleGradeFlag(selectedPlayer.id, id), onRenameSubject: (id, name) => renameGradeSubject(selectedPlayer.id, id, name), onSetComment: (id, comment) => setGradeComment(selectedPlayer.id, id, comment) })),
                         activeTab === "video" && (React.createElement("div", null,
