@@ -4182,6 +4182,12 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
         .map((p) => {
             let present = 0, absent = 0;
             pastEvents.forEach((e) => {
+                // Nur zaehlen, wenn der Spieler bei diesem Termin auch tatsaechlich
+                // zugeordnet war - sonst wuerden alte Markierungen von vor einem
+                // Team-/Terminwechsel die Quote weiter verfaelschen (Inkonsistenz zu
+                // Team-Uebersicht und Spieler-Akte, die das genauso pruefen).
+                if (!getEventAttendees(e, players).some((a) => a.id === p.id))
+                    return;
                 const status = attendanceMark(eventAttendance, e.id, p.id).status;
                 if (status === "present")
                     present++;
