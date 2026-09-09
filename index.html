@@ -3853,6 +3853,10 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd, even
 function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAttendance, onSelectPlayer }) {
     const [teamFilter, setTeamFilter] = useState("all");
     const [weekOffset, setWeekOffset] = useState(0);
+    // Welcher Wochentag (0=Montag..6=Sonntag) gerade einzeln angezeigt wird - startet
+    // beim heutigen Wochentag, bleibt aber beim Wechsel der Woche (Pfeile) erhalten,
+    // damit man z.B. immer "Mittwoch" im Blick behalten kann.
+    const [selectedDayOffset, setSelectedDayOffset] = useState(() => (new Date().getDay() + 6) % 7);
     const [expandedIds, setExpandedIds] = useState(() => new Set());
     const [showStats, setShowStats] = useState(false);
     const [statsRange, setStatsRange] = useState("all");
@@ -3918,15 +3922,32 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
             markAllBtn,
             React.createElement("div", { className: "mt-2.5 pt-2.5 border-t border-stone-200 divide-y divide-stone-100" }, rows));
     }
-    const dayGroups = dateKeys.map((iso) => {
-        const isToday = iso === isoDate(new Date());
-        const dayHeader = React.createElement("p", { className: `text-xs font-semibold uppercase tracking-wide mb-2 ${isToday ? "text-[#eb1e23]" : "text-slate-400"}` },
-            new Date(iso + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }),
-            isToday && " · Heute");
-        const rows = React.createElement("div", { className: "space-y-2" }, byDate[iso].map(eventRow));
-        return React.createElement("div", { key: iso }, dayHeader, rows);
-    });
-    const weekEmptyState = focusEvents.length === 0 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Keine Einheiten in dieser Woche.") : null;
+    // Statt dauerhaft alle Tage der Woche untereinander zu zeigen: Tages-Reiter
+    // zum Durchklicken, nur der ausgewaehlte Tag wird darunter angezeigt.
+    const todayIsoForTabs = isoDate(new Date());
+    const dayTabs = React.createElement("div", { className: "grid grid-cols-7 gap-1 mb-3" }, Array.from({ length: 7 }, (_, i) => {
+        const d = new Date(focusMonday);
+        d.setDate(focusMonday.getDate() + i);
+        const iso = isoDate(d);
+        const isSelected = i === selectedDayOffset;
+        const isToday = iso === todayIsoForTabs;
+        const hasEvents = !!byDate[iso];
+        return React.createElement("button", { key: i, type: "button", onClick: () => setSelectedDayOffset(i), className: `flex flex-col items-center gap-0.5 rounded-lg py-2 transition ${isSelected ? "bg-slate-900 text-white" : isToday ? "bg-red-50 text-[#eb1e23]" : "text-slate-500 hover:bg-stone-100"}` },
+            React.createElement("span", { className: "text-[11px] font-semibold uppercase" }, d.toLocaleDateString("de-DE", { weekday: "short" })),
+            React.createElement("span", { className: "text-sm font-bold" }, d.getDate()),
+            React.createElement("span", { className: `w-1 h-1 rounded-full ${hasEvents ? (isSelected ? "bg-white" : "bg-[#eb1e23]") : "bg-transparent"}` }));
+    }));
+    const selectedDay = new Date(focusMonday);
+    selectedDay.setDate(focusMonday.getDate() + selectedDayOffset);
+    const selectedDayIso = isoDate(selectedDay);
+    const selectedDayIsToday = selectedDayIso === todayIsoForTabs;
+    const selectedDayHeader = React.createElement("p", { className: `text-xs font-semibold uppercase tracking-wide mb-2 ${selectedDayIsToday ? "text-[#eb1e23]" : "text-slate-400"}` },
+        selectedDay.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }),
+        selectedDayIsToday && " · Heute");
+    const selectedDayEvents = byDate[selectedDayIso] || [];
+    const dayContent = selectedDayEvents.length > 0
+        ? React.createElement("div", { className: "space-y-2" }, selectedDayEvents.map(eventRow))
+        : React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Keine Einheiten an diesem Tag.");
     // Anwesenheitsquote fuer eine Reihe von Terminen (Team-Filter respektiert) -
     // fuer den Diese-Woche/Vorwoche-Vergleich oben im Wochen-Fokus.
     function quoteForEvents(evs) {
@@ -3968,8 +3989,9 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
         React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-3 mb-3" },
             weekNav,
             quoteCompare),
-        weekEmptyState,
-        React.createElement("div", { className: "space-y-4" }, dayGroups));
+        dayTabs,
+        selectedDayHeader,
+        dayContent);
     // Team-Uebersicht: Anwesend/Abwesend/Verletzt je Spieler, gefiltert nach Zeitraum -
     // als einklappbare Zusatzansicht, damit die Seite nicht ueberladen wirkt. Ein
     // Spieler taucht nur bei den Terminen auf, denen er tatsaechlich zugeordnet war -
