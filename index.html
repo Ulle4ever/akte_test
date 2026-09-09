@@ -3183,6 +3183,22 @@ function getEventAttendees(event, allPlayers) {
     const isInvited = (p) => (event.includedPlayerIds || []).includes(p.id);
     return (allPlayers || []).filter((p) => (matchesTeam(p) && !isExcluded(p)) || isInvited(p));
 }
+/* Welche Teams ein Termin betrifft: das eigene Team plus die Teams aller einzeln
+   eingeladenen Spieler (falls die aus einem anderen Team kommen). Wird auf jedem
+   Termin mitgespeichert (involvedTeamIds), damit team-beschraenkte Trainer-Zugaenge
+   ihre Termine per einfacher Firestore-Query/-Regel finden koennen - inkl. der
+   Faelle, in denen einer ihrer Spieler nur einzeln bei einem anderen Team mitmacht. */
+function computeInvolvedTeamIds(teamId, includedPlayerIds, allPlayers) {
+    const ids = new Set();
+    if (teamId)
+        ids.add(teamId);
+    (includedPlayerIds || []).forEach((pid) => {
+        const p = (allPlayers || []).find((pl) => pl.id === pid);
+        if (p && p.teamId)
+            ids.add(p.teamId);
+    });
+    return Array.from(ids);
+}
 /* Anwesenheits-Markierung eines Spielers bei einem Termin: {status: "present"|"absent"|"injured"|null, reason}.
    Aeltere Eintraege (vor dem Grund-Feld) waren nur ein reiner String ("present"/"absent") -
    die werden hier transparent mitgelesen, damit nichts verloren geht. */
@@ -3842,12 +3858,13 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
         weekCard,
         statsCard);
 }
-function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, onLoad, onCreate, onDelete, onClose }) {
+function AccountManagerModal({ accounts, accountsLoaded, players, teams, currentUid, onLoad, onCreate, onDelete, onClose }) {
     const [showForm, setShowForm] = useState(false);
     const [label, setLabel] = useState("");
     const [code, setCode] = useState(() => generateCode());
     const [role, setRole] = useState("player");
     const [playerId, setPlayerId] = useState("");
+    const [trainerTeamId, setTrainerTeamId] = useState("");
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     useEffect(() => { if (!accountsLoaded)
@@ -3869,10 +3886,11 @@ function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, on
         }
         setBusy(true);
         try {
-            await onCreate({ label: label.trim(), code: code.trim(), role, playerId });
+            await onCreate({ label: label.trim(), code: code.trim(), role, playerId, teamId: role === "trainer" ? (trainerTeamId || null) : null });
             setLabel("");
             setCode(generateCode());
             setPlayerId("");
+            setTrainerTeamId("");
             setShowForm(false);
         }
         catch (err) {
@@ -3885,23 +3903,30 @@ function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, on
     function playerName(id) {
         return players.find((p) => p.id === id)?.name || "(gelöschter Spieler)";
     }
+    function teamName(id) {
+        return teams.find((t) => t.id === id)?.name || "(gelöschtes Team)";
+    }
     return (React.createElement("div", { className: "space-y-4" },
-        React.createElement("p", { className: "text-xs text-slate-500" }, "Trainer-Zug\u00E4nge sehen und bearbeiten alles. Spieler/Eltern-Zug\u00E4nge sehen nur Kalender, Videos und Basic-Stats des verkn\u00FCpften Spielers. Jeder Zugang bekommt einen eigenen Code zum Anmelden \u2013 kein Passwort, keine E-Mail n\u00F6tig."),
+        React.createElement("p", { className: "text-xs text-slate-500" }, "Trainer-Zugänge mit Vollzugriff sehen und bearbeiten alles. Ein Trainer-Zugang kann stattdessen auf ein einzelnes Team eingeschränkt werden - der sieht dann nur Spieler, Termine, Statistiken etc. dieses Teams und kann keine Zugänge oder club-weiten Vorlagen verwalten. Spieler/Eltern-Zugänge sehen nur Kalender, Videos und Basic-Stats des verknüpften Spielers. Jeder Zugang bekommt einen eigenen Code zum Anmelden – kein Passwort, keine E-Mail nötig."),
         !showForm ? (React.createElement("button", { onClick: () => setShowForm(true), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800" },
             React.createElement(IconPlus, { size: 15 }),
             " Neuen Zugang anlegen")) : (React.createElement("form", { onSubmit: handleCreate, className: "space-y-3 bg-stone-50 rounded-xl p-4" },
             React.createElement("div", { className: "grid grid-cols-2 gap-3" },
                 React.createElement(Field, { label: "Rolle" },
-                    React.createElement("select", { className: inputClass, value: role, onChange: (e) => { setRole(e.target.value); setPlayerId(""); } },
+                    React.createElement("select", { className: inputClass, value: role, onChange: (e) => { setRole(e.target.value); setPlayerId(""); setTrainerTeamId(""); } },
                         React.createElement("option", { value: "player" }, "Spieler / Eltern"),
                         React.createElement("option", { value: "trainer" }, "Trainer"))),
-                role === "player" && (React.createElement(Field, { label: "Verkn\u00FCpfter Spieler" },
+                role === "player" && (React.createElement(Field, { label: "Verknüpfter Spieler" },
                     React.createElement("select", { className: inputClass, value: playerId, onChange: (e) => setPlayerId(e.target.value) },
-                        React.createElement("option", { value: "" }, "\u2013 ausw\u00E4hlen \u2013"),
-                        players.map((p) => React.createElement("option", { key: p.id, value: p.id }, p.name)))))),
-            React.createElement(Field, { label: "Name / Bezeichnung (nur zur eigenen \u00DCbersicht)" },
+                        React.createElement("option", { value: "" }, "– auswählen –"),
+                        players.map((p) => React.createElement("option", { key: p.id, value: p.id }, p.name))))),
+                role === "trainer" && (React.createElement(Field, { label: "Zugriff" },
+                    React.createElement("select", { className: inputClass, value: trainerTeamId, onChange: (e) => setTrainerTeamId(e.target.value) },
+                        React.createElement("option", { value: "" }, "Vollzugriff (alle Teams)"),
+                        teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, "Nur " + t.name)))))),
+            React.createElement(Field, { label: "Name / Bezeichnung (nur zur eigenen Übersicht)" },
                 React.createElement("input", { type: "text", className: inputClass, value: label, onChange: (e) => setLabel(e.target.value), placeholder: role === "trainer" ? "z. B. Max Trainer" : "z. B. Eltern von Marko Cuvalo" })),
-            React.createElement(Field, { label: "Code (wird zum Anmelden ben\u00F6tigt)" },
+            React.createElement(Field, { label: "Code (wird zum Anmelden benötigt)" },
                 React.createElement("div", { className: "flex gap-2" },
                     React.createElement("input", { type: "text", className: inputClass + " font-mono tracking-wide", value: code, onChange: (e) => setCode(e.target.value) }),
                     React.createElement("button", { type: "button", onClick: () => setCode(generateCode()), className: "shrink-0 bg-stone-200 hover:bg-stone-300 text-slate-700 rounded-lg px-3 text-sm font-medium" }, "Neu generieren"))),
@@ -3909,12 +3934,12 @@ function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, on
             React.createElement("div", { className: "flex gap-2" },
                 React.createElement("button", { type: "button", onClick: () => setShowForm(false), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2 text-sm font-semibold" }, "Abbrechen"),
                 React.createElement("button", { type: "submit", disabled: busy, className: "flex-1 bg-[#eb1e23] hover:bg-[#be2228] disabled:opacity-60 text-white rounded-lg py-2 text-sm font-semibold" }, busy ? "Wird angelegt…" : "Zugang anlegen")))),
-        React.createElement("div", { className: "space-y-2" }, !accountsLoaded ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "L\u00E4dt\u2026")) : accounts.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Zug\u00E4nge angelegt.")) : (accounts.map((a) => (React.createElement("div", { key: a.uid, className: "flex items-center justify-between gap-3 bg-white rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
+        React.createElement("div", { className: "space-y-2" }, !accountsLoaded ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Lädt…")) : accounts.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Zugänge angelegt.")) : (accounts.map((a) => (React.createElement("div", { key: a.uid, className: "flex items-center justify-between gap-3 bg-white rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
             React.createElement("div", { className: "min-w-0" },
                 React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, a.label || a.email),
                 React.createElement("p", { className: "text-xs text-slate-400" },
-                    a.role === "trainer" ? "Trainer" : `Spieler-Zugang · ${playerName(a.playerId)}`,
-                    " \u00B7 Code: ",
+                    a.role === "trainer" ? (a.teamId ? `Trainer · nur ${teamName(a.teamId)}` : "Trainer · Vollzugriff") : `Spieler-Zugang · ${playerName(a.playerId)}`,
+                    " · Code: ",
                     React.createElement("span", { className: "font-mono" }, a.code))),
             a.uid !== currentUid && (React.createElement("button", { onClick: () => onDelete(a.uid), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Zugang entfernen" },
                 React.createElement(IconTrash, { size: 15 }))))))))));
@@ -4658,7 +4683,12 @@ function SpielerAkte() {
                     setMeta(metaSnap.exists ? { ...metaDefaults, ...metaSnap.data() } : metaDefaults);
                 let loadedPlayerTeamId = null;
                 if (account.role === "trainer") {
-                    const playersSnap = await db.collection("players").get();
+                    // Team-beschraenkter Trainer-Zugang (account.teamId gesetzt): alle
+                    // Abfragen werden auf das eigene Team eingeschraenkt - passend zu den
+                    // Firestore-Regeln, die serverseitig genau das Gleiche durchsetzen.
+                    const scopeTeamId = account.teamId || null;
+                    const playersQuery = scopeTeamId ? db.collection("players").where("teamId", "==", scopeTeamId) : db.collection("players");
+                    const playersSnap = await playersQuery.get();
                     const loadedPlayers = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
                     if (!cancelled)
                         setPlayers(loadedPlayers);
@@ -4687,19 +4717,36 @@ function SpielerAkte() {
                         if (!cancelled)
                             setGradesData({});
                     }
-                    const evSnap = await db.collection("calendarEvents").get();
+                    // Termine des eigenen Teams PLUS Termine anderer Teams, bei denen ein
+                    // eigener Spieler einzeln eingeladen ist (involvedTeamIds deckt beides ab).
+                    const eventsQuery = scopeTeamId ? db.collection("calendarEvents").where("involvedTeamIds", "array-contains", scopeTeamId) : db.collection("calendarEvents");
+                    const evSnap = await eventsQuery.get();
+                    const loadedEvents = evSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
                     if (!cancelled)
-                        setCalendarEvents(evSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
-                    const tnSnap = await db.collection("teamNotes").get();
+                        setCalendarEvents(loadedEvents);
+                    const teamNotesQuery = scopeTeamId ? db.collection("teamNotes").where("teamId", "==", scopeTeamId) : db.collection("teamNotes");
+                    const tnSnap = await teamNotesQuery.get();
                     if (!cancelled)
                         setTeamNotes(tnSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
                     try {
-                        const [devPlayerSnap, devTrainerSnap] = await Promise.all([
-                            db.collection("devPlanPlayer").get(),
-                            db.collection("devPlanTrainer").get(),
+                        async function fetchByPlayerIdChunks(collName) {
+                            if (!scopeTeamId)
+                                return (await db.collection(collName).get()).docs;
+                            const playerIds = loadedPlayers.map((p) => p.id);
+                            if (playerIds.length === 0)
+                                return [];
+                            const idChunks = [];
+                            for (let i = 0; i < playerIds.length; i += 30)
+                                idChunks.push(playerIds.slice(i, i + 30));
+                            const results = await Promise.all(idChunks.map((chunk) => db.collection(collName).where("playerId", "in", chunk).get()));
+                            return results.flatMap((snap) => snap.docs);
+                        }
+                        const [devPlayerDocs, devTrainerDocs] = await Promise.all([
+                            fetchByPlayerIdChunks("devPlanPlayer"),
+                            fetchByPlayerIdChunks("devPlanTrainer"),
                         ]);
-                        const trainerReleased = new Set(devTrainerSnap.docs.filter((d) => d.data().released).map((d) => d.id));
-                        const waiting = devPlayerSnap.docs
+                        const trainerReleased = new Set(devTrainerDocs.filter((d) => d.data().released).map((d) => d.id));
+                        const waiting = devPlayerDocs
                             .filter((d) => d.data().released && !trainerReleased.has(d.id))
                             .map((d) => ({ id: d.id, playerId: d.data().playerId, date: d.data().date }));
                         if (!cancelled)
@@ -4710,9 +4757,19 @@ function SpielerAkte() {
                             setDevPlanWaiting([]);
                     }
                     try {
-                        const eaSnap = await db.collection("eventAttendance").get();
-                        if (!cancelled)
-                            setEventAttendance(Object.fromEntries(eaSnap.docs.map((d) => [d.id, d.data() || {}])));
+                        if (scopeTeamId) {
+                            const eaEntries = await Promise.all(loadedEvents.map(async (e) => {
+                                const s = await db.collection("eventAttendance").doc(e.id).get();
+                                return [e.id, s.exists ? (s.data() || {}) : {}];
+                            }));
+                            if (!cancelled)
+                                setEventAttendance(Object.fromEntries(eaEntries));
+                        }
+                        else {
+                            const eaSnap = await db.collection("eventAttendance").get();
+                            if (!cancelled)
+                                setEventAttendance(Object.fromEntries(eaSnap.docs.map((d) => [d.id, d.data() || {}])));
+                        }
                     }
                     catch (e) {
                         if (!cancelled)
@@ -4952,10 +5009,10 @@ function SpielerAkte() {
         setAccounts(snap.docs.map((d) => ({ uid: d.id, ...d.data() })));
         setAccountsLoaded(true);
     }
-    async function createAccount({ label, code, role, playerId }) {
+    async function createAccount({ label, code, role, playerId, teamId }) {
         const cred = await secondaryAuth.createUserWithEmailAndPassword(codeToEmail(code), codeToPassword(code));
         const newUid = cred.user.uid;
-        const accountDoc = { label, code, role, playerId: role === "player" ? playerId : null };
+        const accountDoc = { label, code, role, playerId: role === "player" ? playerId : null, teamId: role === "trainer" ? (teamId || null) : null };
         await db.collection("accounts").doc(newUid).set(accountDoc);
         await secondaryAuth.signOut();
         setAccounts((prev) => [...prev, { uid: newUid, ...accountDoc }]);
@@ -4969,6 +5026,7 @@ function SpielerAkte() {
             title: event.title, time: event.time || "", endTime: event.endTime || "", location: event.location || "",
             type: event.type, teamId: event.teamId || null, notes: event.notes || "",
             excludedPlayerIds: event.excludedPlayerIds || [], includedPlayerIds: event.includedPlayerIds || [],
+            involvedTeamIds: computeInvolvedTeamIds(event.teamId || null, event.includedPlayerIds || [], players),
         };
         if (event.repeatUntil) {
             const dates = [];
@@ -4994,8 +5052,11 @@ function SpielerAkte() {
         setCalendarEvents((prev) => [...prev, { id: ref.id, ...newEvent }]);
     }
     async function editCalendarEvent(id, changes) {
-        setCalendarEvents((prev) => prev.map((e) => (e.id === id ? { ...e, ...changes } : e)));
-        await db.collection("calendarEvents").doc(id).set(changes, { merge: true });
+        const existing = calendarEvents.find((e) => e.id === id);
+        const merged = { ...existing, ...changes };
+        const fullChanges = { ...changes, involvedTeamIds: computeInvolvedTeamIds(merged.teamId || null, merged.includedPlayerIds || [], players) };
+        setCalendarEvents((prev) => prev.map((e) => (e.id === id ? { ...e, ...fullChanges } : e)));
+        await db.collection("calendarEvents").doc(id).set(fullChanges, { merge: true });
     }
     async function setPlayerAttendance(eventId, playerId, status, reason) {
         const value = status ? { status, reason: reason || "" } : null;
@@ -5168,7 +5229,14 @@ function SpielerAkte() {
             React.createElement(IconLoader, { className: "animate-spin text-[#eb1e23]", size: 22 })));
     }
     const isTrainer = account.role === "trainer";
+    // Team-beschraenkter Trainer-Zugang: account.teamId gesetzt -> sieht/verwaltet
+    // nur sein eigenes Team (players/calendarEvents/etc. sind bereits beim Laden
+    // entsprechend eingeschraenkt, hier nur fuer UI-Sichtbarkeit von Verwaltung/
+    // Team-Auswahl etc.). Ohne teamId: Vollzugriff-Trainer wie bisher.
+    const trainerTeamId = isTrainer ? (account.teamId || null) : null;
+    const isFullTrainer = isTrainer && !trainerTeamId;
     const teams = meta.teams;
+    const visibleTeams = trainerTeamId ? teams.filter((t) => t.id === trainerTeamId) : teams;
     const visiblePlayers = players
         .filter((p) => selectedTeamId === "all" || p.teamId === selectedTeamId)
         .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
@@ -5372,7 +5440,7 @@ function SpielerAkte() {
             const batch = db.batch();
             const newOnes = chunk.map((ev) => {
                 const ref = db.collection("calendarEvents").doc();
-                const doc = { title: ev.title, date: ev.date, time: ev.time || "", endTime: ev.endTime || "", location: ev.location || "", type: ev.type, teamId: ev.teamId || null, notes: "", excludedPlayerIds: [], includedPlayerIds: ev.includedPlayerIds || [] };
+                const doc = { title: ev.title, date: ev.date, time: ev.time || "", endTime: ev.endTime || "", location: ev.location || "", type: ev.type, teamId: ev.teamId || null, notes: "", excludedPlayerIds: [], includedPlayerIds: ev.includedPlayerIds || [], involvedTeamIds: computeInvolvedTeamIds(ev.teamId || null, ev.includedPlayerIds || [], players) };
                 batch.set(ref, doc);
                 return { id: ref.id, ...doc };
             });
@@ -5660,7 +5728,7 @@ function SpielerAkte() {
                         { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
                         { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
                     ] })),
-                React.createElement(HeaderMenu, { label: "Verwalten", icon: IconSettings, isOpen: openHeaderMenu === "settings", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "settings" ? null : "settings"), onClose: () => setOpenHeaderMenu(null), items: isTrainer
+                React.createElement(HeaderMenu, { label: "Verwalten", icon: IconSettings, isOpen: openHeaderMenu === "settings", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "settings" ? null : "settings"), onClose: () => setOpenHeaderMenu(null), items: isFullTrainer
                         ? [
                             { label: "Statistik-Kategorien", icon: IconSettings, onClick: () => setModal("statFields") },
                             { label: "Test-Arten", icon: IconClipboard, onClick: () => setModal("testTypes") },
@@ -5692,14 +5760,14 @@ function SpielerAkte() {
                     { key: "allunits", label: "Alle Einheiten", icon: IconClipboard, onClick: goAllUnits, active: showAllUnits },
                     { key: "attendance", label: "Anwesenheit", icon: IconUsers, onClick: goAttendance, active: showAttendance },
                     { key: "verwaltung", label: "Verwaltung", icon: IconSettings, onClick: goVerwaltung, active: showVerwaltung },
-                ].map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#eb1e23]/10 to-[#0a96d4]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
+                ].filter((item) => item.key !== "verwaltung" || isFullTrainer).map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#eb1e23]/10 to-[#0a96d4]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
                     React.createElement(item.icon, { size: 16, className: item.active ? "text-[#eb1e23]" : "text-slate-400" }),
                     item.label))),
                 React.createElement("div", { className: "flex gap-2" },
                     React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); setShowVerwaltung(false); setShowAllUnits(false); setShowAttendance(false); } },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
-                        teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
-                    React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
+                        visibleTeams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
+                    isFullTrainer && React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
                         React.createElement(IconPlus, { size: 16 }))),
                 React.createElement("div", { className: "relative" },
                     React.createElement(IconSearch, { size: 15, className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" }),
@@ -5740,7 +5808,7 @@ function SpielerAkte() {
                             React.createElement("button", { onClick: () => setShowTeamCalendar(false), className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
                                 React.createElement(IconUsers, { size: 14 }),
                                 " Spieler-\u00DCbersicht")),
-                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teams: teams, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearTeam: clearTeamCalendar }),
+                        React.createElement(CalendarView, { events: events, isTrainer: isTrainer, team: team, teams: visibleTeams, teamPlayers: teamPlayers, allPlayers: players, contextLabel: team?.name, onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearTeam: clearTeamCalendar }),
                         React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4 mt-4" },
                             React.createElement("div", { className: "flex items-center justify-between mb-2" },
                                 React.createElement(SectionLabel, null, "Team-Notizen"),
@@ -5774,9 +5842,9 @@ function SpielerAkte() {
                         React.createElement("button", { onClick: goHome, className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
                             React.createElement(IconUsers, { size: 14 }),
                             " Dashboard")),
-                    React.createElement(CalendarView, { events: calendarEvents, isTrainer: isTrainer, team: null, teams: teams, teamPlayers: [], allPlayers: players, contextLabel: "Alle Teams", onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearAll: clearAllCalendars }))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAttendance && showAllUnits && isTrainer && (React.createElement(AllUnitsView, { events: calendarEvents, teams: teams, allPlayers: players, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onAdd: addCalendarEvent, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance })),
-                !selectedPlayer && !showGlobalCalendar && !showAllUnits && !showAttendance && showVerwaltung && isTrainer && (React.createElement("div", { className: "space-y-5 rsk-fade-in" },
+                    React.createElement(CalendarView, { events: calendarEvents, isTrainer: isTrainer, team: null, teams: visibleTeams, teamPlayers: [], allPlayers: players, contextLabel: "Alle Teams", onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearAll: clearAllCalendars }))),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAttendance && showAllUnits && isTrainer && (React.createElement(AllUnitsView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onAdd: addCalendarEvent, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance })),
+                !selectedPlayer && !showGlobalCalendar && !showAllUnits && !showAttendance && showVerwaltung && isFullTrainer && (React.createElement("div", { className: "space-y-5 rsk-fade-in" },
                     React.createElement("div", null,
                         React.createElement(SectionLabel, null, "Verwaltung"),
                         React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Teams, Zugänge und die Vorlagen für Statistiken, Tests und Development-Pläne verwalten.")),
@@ -5791,8 +5859,8 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: teams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
@@ -6144,9 +6212,9 @@ function SpielerAkte() {
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
         modal === "player" && (React.createElement(Modal, { title: "Spieler anlegen", onClose: () => setModal(null) },
-            React.createElement(PlayerForm, { teams: teams, onSubmit: handleAddPlayer, onClose: () => setModal(null) }))),
+            React.createElement(PlayerForm, { teams: visibleTeams, onSubmit: handleAddPlayer, onClose: () => setModal(null) }))),
         modal === "editPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Spieler bearbeiten", onClose: () => setModal(null) },
-            React.createElement(PlayerForm, { teams: teams, initial: selectedPlayer, onSubmit: handleEditPlayer, onClose: () => setModal(null) }))),
+            React.createElement(PlayerForm, { teams: visibleTeams, initial: selectedPlayer, onSubmit: handleEditPlayer, onClose: () => setModal(null) }))),
         modal === "selfProfile" && selectedPlayer && (React.createElement(Modal, { title: "Meine Daten bearbeiten", onClose: () => setModal(null) },
             React.createElement(PlayerSelfProfileForm, { initial: selectedPlayer, mandatory: false, onSubmit: async (changes) => { await persistPlayerFields(selectedPlayer.id, changes); setModal(null); }, onClose: () => setModal(null) }))),
         modal === "stat" && (React.createElement(Modal, { title: "Spielstatistik hinzuf\u00FCgen", onClose: () => setModal(null), wide: true },
@@ -6164,7 +6232,7 @@ function SpielerAkte() {
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(NoteForm, { onSubmit: handleAddNote, onClose: () => setModal(null) }))),
         modal === "accounts" && (React.createElement(Modal, { title: "Zug\u00E4nge verwalten", onClose: () => setModal(null), wide: true },
-            React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onDelete: deleteAccount, onClose: () => setModal(null) }))),
+            React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, teams: teams, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onDelete: deleteAccount, onClose: () => setModal(null) }))),
         modal === "devPlanTemplates" && (React.createElement(Modal, { title: "Development-Plan-Fragen verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(DevPlanTemplateEditor, { templates: devPlanTemplates, onSave: saveDevPlanTemplates, onClose: () => setModal(null) }))),
         modal === "teamNoteDashboard" && (React.createElement(Modal, { title: "Notiz/Datei f\u00FCr Spieler", onClose: () => setModal(null), wide: true },
