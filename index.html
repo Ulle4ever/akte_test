@@ -3177,7 +3177,7 @@ function getEventAttendees(event, allPlayers) {
     const isInvited = (p) => (event.includedPlayerIds || []).includes(p.id);
     return (allPlayers || []).filter((p) => (matchesTeam(p) && !isExcluded(p)) || isInvited(p));
 }
-/* Anwesenheits-Markierung eines Spielers bei einem Termin: {status: "present"|"absent"|null, reason}.
+/* Anwesenheits-Markierung eines Spielers bei einem Termin: {status: "present"|"absent"|"injured"|null, reason}.
    Aeltere Eintraege (vor dem Grund-Feld) waren nur ein reiner String ("present"/"absent") -
    die werden hier transparent mitgelesen, damit nichts verloren geht. */
 function attendanceMark(eventAttendance, eventId, playerId) {
@@ -3188,34 +3188,68 @@ function attendanceMark(eventAttendance, eventId, playerId) {
         return { status: raw, reason: "" };
     return { status: raw.status || null, reason: raw.reason || "" };
 }
+const ATTENDANCE_STATUS_META = {
+    present: { label: "Anwesend", dot: "bg-emerald-500", badge: "bg-emerald-50 text-emerald-700" },
+    absent: { label: "Abwesend", dot: "bg-red-500", badge: "bg-red-50 text-red-600" },
+    injured: { label: "Verletzt", dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700" },
+};
+function attendanceStatusBadge(status) {
+    const meta = ATTENDANCE_STATUS_META[status];
+    if (!meta)
+        return React.createElement("span", { className: "text-xs text-slate-400" }, "Offen");
+    return React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${meta.badge}` }, meta.label);
+}
+/* Anwesenheits-Quote: nur "Anwesend" vs. "Abwesend" zaehlen (klassische Quote).
+   "Verletzt" zaehlt bewusst NICHT mit rein - ein verpasster Termin wegen
+   Verletzung ist keine Holschuld des Spielers und soll die Quote nicht verschlechtern. */
+function attendanceQuote(present, absent) {
+    const decided = present + absent;
+    return decided > 0 ? Math.round((present / decided) * 1000) / 10 : null;
+}
 /* Gemeinsame Zeile fuer die Anwesenheits-Markierung eines Spielers - genutzt in
    "Alle Einheiten" und "Anwesenheit", damit beide gleich aussehen und sich gleich
-   bedienen lassen. Zwei Buttons statt Durchklicken: direkt "Da" oder "Fehlt" waehlen,
-   nochmal auf den aktiven Button klicken setzt zurueck auf offen. Bei "Fehlt"
-   erscheint ein Freitextfeld fuer den Grund. */
+   bedienen lassen. Drei Buttons statt Durchklicken: direkt "Anwesend"/"Abwesend"/
+   "Verletzt" waehlen, nochmal auf den aktiven Button klicken setzt zurueck auf offen.
+   Bei "Abwesend" oder "Verletzt" erscheint ein Freitextfeld fuer Grund/Info. */
 function AttendanceRow({ player, mark, onSet, subtitle, trailing }) {
     const status = mark.status;
     function setStatus(next) {
         const newStatus = status === next ? null : next;
-        onSet(newStatus, newStatus === "absent" ? mark.reason : "");
+        onSet(newStatus, newStatus === "absent" || newStatus === "injured" ? mark.reason : "");
     }
-    const btnClass = (active, color) => `text-xs font-semibold rounded-lg px-3 py-1.5 border transition ${active
-        ? (color === "green" ? "bg-emerald-500 border-emerald-500 text-white" : "bg-red-500 border-red-500 text-white")
-        : "bg-white border-stone-300 text-slate-500 " + (color === "green" ? "hover:border-emerald-400 hover:text-emerald-600" : "hover:border-red-400 hover:text-red-600")}`;
+    const COLOR_CLASSES = {
+        present: "bg-emerald-500 border-emerald-500 text-white",
+        absent: "bg-red-500 border-red-500 text-white",
+        injured: "bg-amber-500 border-amber-500 text-white",
+    };
+    const HOVER_CLASSES = {
+        present: "hover:border-emerald-400 hover:text-emerald-600",
+        absent: "hover:border-red-400 hover:text-red-600",
+        injured: "hover:border-amber-400 hover:text-amber-600",
+    };
+    function statusBtn(value, label) {
+        const active = status === value;
+        return React.createElement("button", {
+            type: "button",
+            onClick: () => setStatus(value),
+            className: `text-xs font-semibold rounded-lg px-2.5 py-1.5 border transition ${active ? COLOR_CLASSES[value] : "bg-white border-stone-300 text-slate-500 " + HOVER_CLASSES[value]}`,
+        }, label);
+    }
     return React.createElement("div", { className: "py-2" },
         React.createElement("div", { className: "flex items-center gap-2" },
             React.createElement("div", { className: "min-w-0 flex-1" },
                 React.createElement("p", { className: "text-sm text-slate-700 truncate" }, player.name),
                 subtitle || null),
             React.createElement("div", { className: "flex items-center gap-1.5 shrink-0" },
-                React.createElement("button", { type: "button", onClick: () => setStatus("present"), className: btnClass(status === "present", "green") }, "Da"),
-                React.createElement("button", { type: "button", onClick: () => setStatus("absent"), className: btnClass(status === "absent", "red") }, "Fehlt")),
+                statusBtn("present", "Anwesend"),
+                statusBtn("absent", "Abwesend"),
+                statusBtn("injured", "Verletzt")),
             trailing || null),
-        status === "absent" && React.createElement("input", {
+        (status === "absent" || status === "injured") && React.createElement("input", {
             type: "text",
             value: mark.reason || "",
-            onChange: (e) => onSet("absent", e.target.value),
-            placeholder: "Grund (optional, z. B. krank, Schule)",
+            onChange: (e) => onSet(status, e.target.value),
+            placeholder: status === "injured" ? "Info (optional, z. B. Knöchel, bis wann)" : "Grund (optional, z. B. krank, Schule)",
             className: "mt-1.5 w-full text-xs rounded-lg border border-stone-300 px-2.5 py-1.5",
         }));
 }
@@ -3533,6 +3567,7 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd, even
    "Alle Einheiten"), Markieren nutzt dieselben eventAttendance-Daten. */
 function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAttendance, onSelectPlayer }) {
     const [teamFilter, setTeamFilter] = useState("all");
+    const [statsRange, setStatsRange] = useState("all");
     const [rangeMode, setRangeMode] = useState("week");
     const [expandedIds, setExpandedIds] = useState(() => new Set());
     function toggleExpanded(id) {
@@ -3618,35 +3653,42 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
         return React.createElement("div", { key: iso }, dayHeader, rows);
     });
     const emptyState = filteredEvents.length === 0 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-10" }, "Keine Einheiten im gewählten Zeitraum.") : null;
-    const filterBar = React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
-        React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: teamFilter, onChange: (e) => setTeamFilter(e.target.value) },
-            React.createElement("option", { value: "all" }, "Alle Teams"),
-            teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
-        React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: rangeMode, onChange: (e) => setRangeMode(e.target.value) },
-            React.createElement("option", { value: "week" }, "Diese Woche"),
-            React.createElement("option", { value: "nextWeek" }, "Nächste Woche"),
-            React.createElement("option", { value: "upcoming" }, "Alle kommenden"),
-            React.createElement("option", { value: "all" }, "Alle (inkl. vergangene)")));
-    // Anwesenheitsquote je Spieler, ueber alle vergangenen Termine hinweg (unabhaengig vom Zeitraum-Filter oben).
+    const teamSelect = React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: teamFilter, onChange: (e) => setTeamFilter(e.target.value) },
+        React.createElement("option", { value: "all" }, "Alle Teams"),
+        teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)));
+    // Team-Uebersicht: Anwesend/Abwesend/Verletzt je Spieler, gefiltert nach Zeitraum
+    // (unabhaengig vom "Termine markieren"-Zeitraum weiter unten - hier geht es um
+    // eine Statistik-Periode, nicht ums Durchblaettern kommender Termine). Ein Spieler
+    // taucht nur bei den Terminen auf, denen er tatsaechlich zugeordnet war (Team-
+    // Zuordnung des jeweiligen Termins bzw. Einzel-Einladung) - spielt er diese Woche
+    // z.B. bei einem anderen Team, zaehlt das automatisch dort und nicht hier mit rein.
+    const thisMonthStart = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, "0")}-01`;
+    function inStatsRange(e) {
+        if (statsRange === "week")
+            return e.date >= isoDate(thisMonday) && e.date <= isoDate(thisSunday);
+        if (statsRange === "month")
+            return e.date >= thisMonthStart && e.date <= todayIso;
+        return true;
+    }
     const relevantPlayers = teamFilter === "all" ? allPlayers : allPlayers.filter((p) => p.teamId === teamFilter);
-    const pastEvents = events.filter((e) => e.date && e.date < todayIso);
-    const statsMap = new Map(relevantPlayers.map((p) => [p.id, { player: p, present: 0, marked: 0 }]));
-    pastEvents.forEach((e) => {
-        const attendees = getEventAttendees(e, allPlayers);
-        attendees.forEach((p) => {
+    const statsEvents = events.filter(inStatsRange);
+    const statsMap = new Map(relevantPlayers.map((p) => [p.id, { player: p, present: 0, absent: 0, injured: 0 }]));
+    statsEvents.forEach((e) => {
+        getEventAttendees(e, allPlayers).forEach((p) => {
             const stat = statsMap.get(p.id);
             if (!stat)
                 return;
             const status = attendanceMark(eventAttendance, e.id, p.id).status;
-            if (!status)
-                return;
-            stat.marked++;
             if (status === "present")
                 stat.present++;
+            else if (status === "absent")
+                stat.absent++;
+            else if (status === "injured")
+                stat.injured++;
         });
     });
     const playerStats = Array.from(statsMap.values())
-        .map((s) => ({ ...s, quote: s.marked > 0 ? Math.round((s.present / s.marked) * 1000) / 10 : null }))
+        .map((s) => ({ ...s, quote: attendanceQuote(s.present, s.absent) }))
         .sort((a, b) => {
         if (a.quote === null && b.quote === null)
             return a.player.name.localeCompare(b.player.name);
@@ -3656,26 +3698,52 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
             return -1;
         return a.quote - b.quote;
     });
-    const summaryRows = playerStats.map((s) => {
+    const statsRows = playerStats.map((s) => {
         const quoteLabel = s.quote === null ? "–" : `${s.quote}%`;
         const badgeClass = s.quote === null ? "bg-stone-100 text-slate-400" : s.quote < ATTENDANCE_WARN_THRESHOLD ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700";
-        return React.createElement("button", { key: s.player.id, type: "button", onClick: () => onSelectPlayer(s.player.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition" },
-            React.createElement("span", { className: "text-sm text-slate-700 flex-1 truncate" }, s.player.name),
-            React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, s.marked > 0 ? `${s.present}/${s.marked}` : "keine Daten"),
-            React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 shrink-0 ${badgeClass}` }, quoteLabel));
+        return React.createElement("tr", { key: s.player.id, onClick: () => onSelectPlayer(s.player.id), className: "border-b border-stone-100 last:border-0 hover:bg-stone-50 cursor-pointer" },
+            React.createElement("td", { className: "px-3 py-2 text-sm text-slate-700 font-medium truncate max-w-[180px]" }, s.player.name),
+            React.createElement("td", { className: "px-3 py-2 text-sm text-right text-emerald-600" }, s.present || "–"),
+            React.createElement("td", { className: "px-3 py-2 text-sm text-right text-red-500" }, s.absent || "–"),
+            React.createElement("td", { className: "px-3 py-2 text-sm text-right text-amber-600" }, s.injured || "–"),
+            React.createElement("td", { className: "px-3 py-2 text-right" },
+                React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${badgeClass}` }, quoteLabel)));
     });
-    const summaryCard = React.createElement("div", { className: `${cardClass} p-4` },
-        React.createElement("p", { className: "text-sm font-bold text-slate-900 mb-1" }, "Anwesenheitsquote je Spieler"),
-        React.createElement("p", { className: "text-xs text-slate-400 mb-3" }, "Aus allen vergangenen, markierten Einheiten - unter ", ATTENDANCE_WARN_THRESHOLD, "% rot markiert."),
-        React.createElement("div", { className: "space-y-1.5" }, summaryRows.length > 0 ? summaryRows : React.createElement("p", { className: "text-xs text-slate-400" }, "Keine Spieler in dieser Auswahl.")));
+    const teamOverviewCard = React.createElement("div", { className: `${cardClass} p-4` },
+        React.createElement("div", { className: "flex flex-wrap items-center justify-between gap-2 mb-1" },
+            React.createElement("p", { className: "text-sm font-bold text-slate-900" }, "Team-Übersicht"),
+            React.createElement("div", { className: "flex items-center gap-2" },
+                teamSelect,
+                React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: statsRange, onChange: (e) => setStatsRange(e.target.value) },
+                    React.createElement("option", { value: "week" }, "Diese Woche"),
+                    React.createElement("option", { value: "month" }, "Dieser Monat"),
+                    React.createElement("option", { value: "all" }, "Gesamt")))),
+        React.createElement("p", { className: "text-xs text-slate-400 mb-3" }, "Quote = Anwesend / (Anwesend + Abwesend). \"Verletzt\" zählt nicht als Fehlen - unter ", ATTENDANCE_WARN_THRESHOLD, "% rot markiert."),
+        React.createElement("div", { className: "overflow-x-auto" },
+            React.createElement("table", { className: "w-full" },
+                React.createElement("thead", null,
+                    React.createElement("tr", { className: "border-b border-stone-200 text-slate-400 text-xs uppercase tracking-wide" },
+                        React.createElement("th", { className: "text-left px-3 py-2" }, "Spieler"),
+                        React.createElement("th", { className: "text-right px-3 py-2" }, "Anwesend"),
+                        React.createElement("th", { className: "text-right px-3 py-2" }, "Abwesend"),
+                        React.createElement("th", { className: "text-right px-3 py-2" }, "Verletzt"),
+                        React.createElement("th", { className: "text-right px-3 py-2" }, "Quote"))),
+                React.createElement("tbody", null, statsRows.length > 0 ? statsRows : React.createElement("tr", null, React.createElement("td", { colSpan: 5, className: "text-xs text-slate-400 text-center py-6" }, "Keine Spieler in dieser Auswahl."))))));
+    const eventsFilterBar = React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
+        teamSelect,
+        React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: rangeMode, onChange: (e) => setRangeMode(e.target.value) },
+            React.createElement("option", { value: "week" }, "Diese Woche"),
+            React.createElement("option", { value: "nextWeek" }, "Nächste Woche"),
+            React.createElement("option", { value: "upcoming" }, "Alle kommenden"),
+            React.createElement("option", { value: "all" }, "Alle (inkl. vergangene)")));
     return React.createElement("div", { className: "space-y-4" },
         React.createElement("div", null,
             React.createElement(SectionLabel, null, "Anwesenheit"),
-            React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Wer war bei welcher Einheit dabei? Spieler werden automatisch anhand der Team-/Termin-Zuordnung angezeigt - einfach anklicken zum Markieren.")),
-        summaryCard,
-        filterBar,
-        emptyState,
-        React.createElement("div", { className: "space-y-5" }, dayGroups));
+            React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Team-Übersicht auf einen Blick, darunter Termine einzeln markieren - Spieler werden automatisch anhand der Team-/Termin-Zuordnung angezeigt.")),
+        teamOverviewCard,
+        React.createElement("div", null,
+            React.createElement("p", { className: "text-sm font-bold text-slate-900 mb-2" }, "Termine markieren"),
+            React.createElement("div", { className: "space-y-3" }, eventsFilterBar, emptyState, React.createElement("div", { className: "space-y-5" }, dayGroups))));
 }
 function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, onLoad, onCreate, onDelete, onClose }) {
     const [showForm, setShowForm] = useState(false);
@@ -4007,27 +4075,26 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
                 React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, players.filter((p) => p.teamId === t.id).length, " Spieler"),
                 React.createElement(IconArrowLeft, { size: 12, className: "text-slate-300 group-hover:text-[#0a96d4] rotate-180 shrink-0" }))))));
     const incompleteProfilePlayers = players.filter((p) => p.onboardingCompleted !== true);
-    // Anwesenheitsquote aus den direkt in "Alle Einheiten" markierten Da/Fehlt-
-    // Status berechnen (nur vergangene Einheiten, erst ab ein paar markierten
+    // Anwesenheitsquote aus den direkt in "Alle Einheiten"/"Anwesenheit" markierten
+    // Status berechnen (nur vergangene Einheiten, erst ab ein paar entschiedenen
     // Terminen ueberhaupt werten - sonst waere eine einzelne verpasste Einheit
-    // gleich "0%").
+    // gleich "0%"). "Verletzt" zaehlt bewusst nicht als Fehlen mit rein.
     const todayKey = today();
     const pastEvents = events.filter((e) => e.date && e.date < todayKey);
     const lowAttendancePlayers = players
         .map((p) => {
-            let present = 0, marked = 0;
+            let present = 0, absent = 0;
             pastEvents.forEach((e) => {
                 const status = attendanceMark(eventAttendance, e.id, p.id).status;
-                if (!status)
-                    return;
-                marked++;
                 if (status === "present")
                     present++;
+                else if (status === "absent")
+                    absent++;
             });
-            if (marked < ATTENDANCE_MIN_MARKED)
+            if (present + absent < ATTENDANCE_MIN_MARKED)
                 return null;
-            const quote = Math.round((present / marked) * 1000) / 10;
-            return quote < ATTENDANCE_WARN_THRESHOLD ? { player: p, quote } : null;
+            const quote = attendanceQuote(present, absent);
+            return quote !== null && quote < ATTENDANCE_WARN_THRESHOLD ? { player: p, quote } : null;
         })
         .filter(Boolean);
     const devPlanWaitingRows = (devPlanWaiting || [])
@@ -5056,6 +5123,24 @@ function SpielerAkte() {
     const playerNotes = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.notes || []) : [];
     const playerGradeSubjects = selectedPlayer ? (gradesData[selectedPlayer.id]?.subjects || []) : [];
     const playerAttendance = selectedPlayer && isTrainer ? sortByDateDesc(privateData[selectedPlayer.id]?.attendance || []) : [];
+    // Live-Anwesenheitshistorie dieses Spielers aus den in "Anwesenheit"/"Alle Einheiten"
+    // markierten Terminen (ersetzt die alte CSV-Import-Ansicht im "Anwesenheit"-Tab).
+    const playerLiveAttendanceRows = selectedPlayer && isTrainer
+        ? calendarEvents
+            .filter((e) => e.date && e.date <= today() && getEventAttendees(e, players).some((p) => p.id === selectedPlayer.id))
+            .map((e) => ({ event: e, mark: attendanceMark(eventAttendance, e.id, selectedPlayer.id) }))
+            .sort((a, b) => (b.event.date + (b.event.time || "")).localeCompare(a.event.date + (a.event.time || "")))
+        : [];
+    const playerLiveAttendanceStats = playerLiveAttendanceRows.reduce((acc, r) => {
+        if (r.mark.status === "present")
+            acc.present++;
+        else if (r.mark.status === "absent")
+            acc.absent++;
+        else if (r.mark.status === "injured")
+            acc.injured++;
+        return acc;
+    }, { present: 0, absent: 0, injured: 0 });
+    const playerLiveAttendanceQuote = attendanceQuote(playerLiveAttendanceStats.present, playerLiveAttendanceStats.absent);
     const playerWellnessEntries = selectedPlayer ? sortByDateDesc(wellnessData[selectedPlayer.id]?.entries || []) : [];
     const avg = (key) => (playerStats.length ? fmtNum(playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length, 1) : "–");
     const totalPct = (madeKey, attKey) => {
@@ -5676,13 +5761,10 @@ function SpielerAkte() {
                                     React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#eb1e23] to-[#be2228]" }),
                                     React.createElement("p", { className: "text-2xl font-black text-[#eb1e23] mt-1" }, playerStats.length),
                                     React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Spiele erfasst")),
-                                playerAttendance[0] && (React.createElement("div", { className: `${cardClass} p-4 text-center w-full md:w-48 hover:shadow-md transition-shadow relative overflow-hidden` },
+                                isTrainer && playerLiveAttendanceRows.length > 0 && (React.createElement("div", { className: `${cardClass} p-4 text-center w-full md:w-48 hover:shadow-md transition-shadow relative overflow-hidden` },
                                     React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#0a96d4] to-[#0a6fa0]" }),
-                                    React.createElement("p", { className: "text-2xl font-black text-[#0a96d4] mt-1" }, playerAttendance[0].einheitenGesamt ? `${Math.round((playerAttendance[0].anwesend / playerAttendance[0].einheitenGesamt) * 1000) / 10}%` : "–"),
-                                    React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" },
-                                        "Anwesenheit (Stand ",
-                                        fmtDate(playerAttendance[0].date),
-                                        ")")))),
+                                    React.createElement("p", { className: "text-2xl font-black text-[#0a96d4] mt-1" }, playerLiveAttendanceQuote === null ? "–" : `${playerLiveAttendanceQuote}%`),
+                                    React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Anwesenheit")))),
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Auf einen Blick"),
                                 React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3 mt-1.5" }, [
@@ -5783,27 +5865,33 @@ function SpielerAkte() {
                                         React.createElement("button", { onClick: () => deleteItem("tests", t.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                             React.createElement(IconTrash, { size: 14 })))));
                             }))))),
-                        activeTab === "anwesenheit" && (React.createElement("div", null, playerAttendance.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Anwesenheitsdaten importiert. \u00DCber \"Anwesenheit importieren\" oben im Header l\u00E4sst sich eine CSV-Datei einlesen.")) : (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-x-auto" },
-                            React.createElement("table", { className: "w-full text-sm" },
-                                React.createElement("thead", null,
-                                    React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
-                                        React.createElement("th", { className: "text-left px-4 py-3" }, "Stand vom"),
-                                        React.createElement("th", { className: "text-right px-4 py-3" }, "Anwesend"),
-                                        React.createElement("th", { className: "text-right px-4 py-3" }, "Abwesend"),
-                                        React.createElement("th", { className: "text-right px-4 py-3" }, "Entschuldigt"),
-                                        React.createElement("th", { className: "text-right px-4 py-3" }, "Einheiten"),
-                                        React.createElement("th", { className: "text-right px-4 py-3" }, "Quote"),
-                                        React.createElement("th", { className: "px-4 py-3" }))),
-                                React.createElement("tbody", null, playerAttendance.map((a) => (React.createElement("tr", { key: a.id, className: "border-b border-stone-100 last:border-0 hover:bg-stone-50" },
-                                    React.createElement("td", { className: "px-4 py-3 whitespace-nowrap" }, fmtDate(a.date)),
-                                    React.createElement("td", { className: "px-4 py-3 text-right font-semibold" }, a.anwesend),
-                                    React.createElement("td", { className: "px-4 py-3 text-right" }, a.abwesend),
-                                    React.createElement("td", { className: "px-4 py-3 text-right" }, a.entschuldigt),
-                                    React.createElement("td", { className: "px-4 py-3 text-right" }, a.einheitenGesamt),
-                                    React.createElement("td", { className: "px-4 py-3 text-right font-medium" }, a.einheitenGesamt ? `${Math.round((a.anwesend / a.einheitenGesamt) * 1000) / 10}%` : "–"),
-                                    React.createElement("td", { className: "px-3 py-3 text-right" },
-                                        React.createElement("button", { onClick: () => deleteItem("attendance", a.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
-                                            React.createElement(IconTrash, { size: 14 })))))))))))),
+                        activeTab === "anwesenheit" && (React.createElement("div", { className: "space-y-4" },
+                            React.createElement("div", { className: "flex flex-wrap gap-3" },
+                                React.createElement("div", { className: `${cardClass} p-4 text-center w-32` },
+                                    React.createElement("p", { className: "text-2xl font-black text-slate-900" }, playerLiveAttendanceQuote === null ? "–" : `${playerLiveAttendanceQuote}%`),
+                                    React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Quote")),
+                                React.createElement("div", { className: `${cardClass} p-4 text-center w-32` },
+                                    React.createElement("p", { className: "text-2xl font-black text-emerald-600" }, playerLiveAttendanceStats.present),
+                                    React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Anwesend")),
+                                React.createElement("div", { className: `${cardClass} p-4 text-center w-32` },
+                                    React.createElement("p", { className: "text-2xl font-black text-red-500" }, playerLiveAttendanceStats.absent),
+                                    React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Abwesend")),
+                                React.createElement("div", { className: `${cardClass} p-4 text-center w-32` },
+                                    React.createElement("p", { className: "text-2xl font-black text-amber-600" }, playerLiveAttendanceStats.injured),
+                                    React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Verletzt"))),
+                            playerLiveAttendanceRows.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Termine markiert. Unter „Anwesenheit“ bzw. „Alle Einheiten“ lässt sich pro Termin Anwesend/Abwesend/Verletzt eintragen.")) : (React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-x-auto" },
+                                React.createElement("table", { className: "w-full text-sm" },
+                                    React.createElement("thead", null,
+                                        React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
+                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Datum"),
+                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Termin"),
+                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Status"),
+                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Grund/Info"))),
+                                    React.createElement("tbody", null, playerLiveAttendanceRows.map(({ event, mark }) => (React.createElement("tr", { key: event.id, className: "border-b border-stone-100 last:border-0 hover:bg-stone-50" },
+                                        React.createElement("td", { className: "px-4 py-3 whitespace-nowrap" }, fmtDate(event.date)),
+                                        React.createElement("td", { className: "px-4 py-3" }, event.title),
+                                        React.createElement("td", { className: "px-4 py-3" }, attendanceStatusBadge(mark.status)),
+                                        React.createElement("td", { className: "px-4 py-3 text-slate-500" }, mark.reason || "–")))))))))),
                         activeTab === "wellness" && (React.createElement(WellnessPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, entries: playerWellnessEntries, onAddEntry: (entry) => addWellnessEntry(selectedPlayer.id, entry), onDeleteEntry: (id) => deleteWellnessEntry(selectedPlayer.id, id) })),
                         activeTab === "noten" && (React.createElement(GradesPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, subjects: playerGradeSubjects, onSave: (subjects) => saveGradeSubjects(selectedPlayer.id, subjects), onToggleFlag: (id) => toggleGradeFlag(selectedPlayer.id, id), onRenameSubject: (id, name) => renameGradeSubject(selectedPlayer.id, id, name), onSetComment: (id, comment) => setGradeComment(selectedPlayer.id, id, comment) })),
                         activeTab === "video" && (React.createElement("div", null,
