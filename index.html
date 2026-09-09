@@ -3312,7 +3312,8 @@ function PlayerAttendanceTab({ rows }) {
         const body = isExpanded ? React.createElement("div", { className: "border-t border-stone-100 divide-y divide-stone-100" }, groupRows.map(({ event, mark }) => React.createElement("div", { key: event.id, className: "flex items-center justify-between gap-3 px-4 py-2.5" },
             React.createElement("div", { className: "min-w-0" },
                 React.createElement("p", { className: "text-sm text-slate-700 truncate" }, event.title),
-                React.createElement("p", { className: "text-xs text-slate-400" }, fmtDate(event.date), mark.reason ? ` · ${mark.reason}` : "")),
+                React.createElement("p", { className: "text-xs text-slate-400" }, fmtDate(event.date)),
+                mark.reason && React.createElement("p", { className: `text-sm font-medium mt-0.5 ${mark.status === "injured" ? "text-amber-700" : "text-red-600"}` }, mark.reason)),
             attendanceStatusBadge(mark.status)))) : null;
         return React.createElement("div", { key: key, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] overflow-hidden" }, header, body);
     });
@@ -3765,6 +3766,8 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
     function inStatsRange(e) {
         if (statsRange === "week")
             return e.date >= isoDate(realMonday) && e.date <= isoDate(realSunday);
+        if (statsRange === "lastWeek")
+            return e.date >= isoDate(lastMonday) && e.date <= isoDate(lastSunday);
         if (statsRange === "month")
             return e.date >= thisMonthStart && e.date <= todayIso;
         return true;
@@ -3815,7 +3818,7 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
             React.createElement("button", { type: "button", onClick: () => setShowStats(!showStats), className: "flex items-center gap-1.5 text-sm font-bold text-slate-900" },
                 React.createElement(IconArrowDown, { size: 12, className: `text-slate-400 transition-transform ${showStats ? "" : "-rotate-90"}` }),
                 "Spieler-Quoten"),
-            showStats && React.createElement("div", { className: "flex items-center gap-1" }, periodBtn("week", "Woche"), periodBtn("month", "Monat"), periodBtn("all", "Gesamt"))),
+            showStats && React.createElement("div", { className: "flex items-center gap-1" }, periodBtn("week", "Diese Woche"), periodBtn("lastWeek", "Letzte Woche"), periodBtn("month", "Monat"), periodBtn("all", "Gesamt"))),
         showStats && React.createElement("div", { className: "mt-3" },
             React.createElement("p", { className: "text-xs text-slate-400 mb-3" }, "Quote = Anwesend / (Anwesend + Abwesend). \"Verletzt\" zählt nicht als Fehlen - unter ", ATTENDANCE_WARN_THRESHOLD, "% rot markiert."),
             React.createElement("div", { className: "overflow-x-auto" },
