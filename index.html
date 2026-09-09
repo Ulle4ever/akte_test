@@ -1163,6 +1163,122 @@ function assignColumnsByWidth(blocks, numDays) {
     const colWidth = span / numDays;
     return blocks.map((b) => ({ ...b, column: Math.min(numDays - 1, Math.max(0, Math.floor((((b.minX + b.maxX) / 2) - minX) / colWidth))) }));
 }
+/* Zweiter Erkennungsweg neben den farbigen Kaestchen: echte Tabellen-Screenshots
+   (Excel/Sheets-Export mit Wochentags-Kopfzeile und sichtbaren Rasterlinien).
+   Dort haben viele Termine GAR KEINE Farbe (weisser Zellenhintergrund) und
+   wuerden von detectColoredBlocks komplett uebersehen, weil die nur nach
+   gesaettigten Farbflaechen sucht. Stattdessen hier direkt die Rasterlinien
+   selbst finden (duenne graue/schwarze Linien, die fast die volle Breite bzw.
+   Hoehe durchlaufen) und daraus die Zellgrenzen ableiten - unabhaengig davon,
+   ob eine Zelle eingefaerbt ist oder nicht. */
+function isGridLineColor(r, g, b) {
+    const maxc = Math.max(r, g, b), minc = Math.min(r, g, b);
+    // Grau/schwarz (Linie oder graue Kopfzeilen-Flaeche), aber nicht reines Weiss
+    // und nicht zu bunt (das waeren dann eingefaerbte Termin-Zellen, keine Linie).
+    const grayish = maxc < 235 && (maxc - minc) < 20;
+    // ODER einfach deutlich dunkler als alles andere im Bild: eine duenne
+    // Rahmenlinie, die ueber eine eingefaerbte Termin-Zelle laeuft, wird beim
+    // Skalieren/Komprimieren des Screenshots oft mit der Fuellfarbe verwischt
+    // und ist dann nicht mehr rein grau - aber immer noch klar dunkler als die
+    // Fuellfarbe selbst (die ist typischerweise hell/mittelhell).
+    const luma = 0.299 * r + 0.587 * g + 0.114 * b;
+    return grayish || luma < 140;
+}
+function extractLinePositions(isLine, length) {
+    const positions = [];
+    let inRun = false, runStart = 0;
+    for (let i = 0; i < length; i++) {
+        if (isLine[i] && !inRun) {
+            inRun = true;
+            runStart = i;
+        }
+        if (!isLine[i] && inRun) {
+            inRun = false;
+            positions.push(runStart, i - 1);
+        }
+    }
+    if (inRun)
+        positions.push(runStart, length - 1);
+    const sorted = Array.from(new Set(positions)).sort((a, b) => a - b);
+    const merged = [];
+    sorted.forEach((v) => {
+        if (merged.length && v - merged[merged.length - 1] <= 2)
+            return;
+        merged.push(v);
+    });
+    return merged;
+}
+function detectGridLines(canvas) {
+    const width = canvas.width, height = canvas.height;
+    const ctx = canvas.getContext("2d");
+    const { data } = ctx.getImageData(0, 0, width, height);
+    const rowIsLine = new Uint8Array(height);
+    const colIsLine = new Uint8Array(width);
+    const rowCount = new Int32Array(height);
+    const colCount = new Int32Array(width);
+    for (let y = 0; y < height; y++) {
+        for (let x = 0; x < width; x++) {
+            const p = (y * width + x) * 4;
+            if (isGridLineColor(data[p], data[p + 1], data[p + 2])) {
+                rowCount[y]++;
+                colCount[x]++;
+            }
+        }
+    }
+    for (let y = 0; y < height; y++)
+        rowIsLine[y] = rowCount[y] > width * 0.5 ? 1 : 0;
+    for (let x = 0; x < width; x++)
+        colIsLine[x] = colCount[x] > height * 0.5 ? 1 : 0;
+    return {
+        rowLines: extractLinePositions(rowIsLine, height),
+        colLines: extractLinePositions(colIsLine, width),
+    };
+}
+function hasVisibleContent(canvas, block) {
+    const ctx = canvas.getContext("2d");
+    // Ein paar Pixel Rand weglassen - direkt an der Zellgrenze faerbt die
+    // (leicht verwischte) Rasterlinie sonst auch komplett leere Zellen ein
+    // bisschen ein und wuerde faelschlich als "hat Inhalt" durchgehen.
+    const inset = 3;
+    const w = block.maxX - block.minX - inset * 2, h = block.maxY - block.minY - inset * 2;
+    if (w <= 0 || h <= 0)
+        return false;
+    const { data } = ctx.getImageData(block.minX + inset, block.minY + inset, w, h);
+    let dark = 0;
+    for (let i = 0; i < data.length; i += 4) {
+        if (!isNearWhite(data[i], data[i + 1], data[i + 2]))
+            dark++;
+    }
+    return dark / (data.length / 4) > 0.015;
+}
+/* Aus den erkannten Rasterlinien die einzelnen Zellen bilden - die erste
+   Zeilen-Bande (Kopfzeile mit den Wochentagsnamen) wird uebersprungen, ihre
+   Spaltengrenzen aber fuer alle folgenden Zeilen weiterverwendet. Leere
+   Zellen (kein Text/Inhalt) werden gleich verworfen, um unnoetiges OCR zu
+   vermeiden. */
+function detectGridCells(canvas, rowLines, colLines) {
+    const cells = [];
+    for (let r = 1; r < rowLines.length - 1; r++) {
+        const minY = rowLines[r], maxY = rowLines[r + 1];
+        if (maxY - minY < 10)
+            continue;
+        for (let c = 0; c < colLines.length - 1; c++) {
+            const minX = colLines[c], maxX = colLines[c + 1];
+            if (maxX - minX < 10)
+                continue;
+            // Etwas nach innen einruecken: prepareOcrCanvas() polstert den
+            // Ausschnitt fuer die OCR spaeter noch zusaetzlich nach AUSSEN -
+            // ohne dieses Einruecken wuerde das die Rasterlinie selbst mit
+            // einschliessen, die Tesseract dann leicht als Buchstaben (z.B.
+            // ein stoerendes "l") missversteht.
+            const inset = 3;
+            const block = { minX: minX + inset, maxX: maxX - inset, minY: minY + inset, maxY: maxY - inset, column: c };
+            if (block.maxX - block.minX > 4 && block.maxY - block.minY > 4 && hasVisibleContent(canvas, block))
+                cells.push(block);
+        }
+    }
+    return cells;
+}
 function prepareOcrCanvas(sourceCanvas, block, padding) {
     const sx = Math.max(0, block.minX - padding);
     const sy = Math.max(0, block.minY - padding);
@@ -1249,55 +1365,92 @@ function guessCategoryFromTitle(title) {
     const t = (title || "").toUpperCase();
     // Kuerzel (mit Wortgrenzen, damit z.B. "STATISTIK" nicht faelschlich als
     // "AT"/"IT" erkannt wird) UND die ausgeschriebenen Woerter - Trainer tippen
-    // oft "Individualtraining"/"Athletiktraining" ohne Abkuerzung.
-    if (/\bAT\b/.test(t) || t.includes("ATHLETIK"))
+    // oft "Individualtraining"/"Athletiktraining" ohne Abkuerzung. Zusaetzlich
+    // ein paar Begriffe aus englischsprachigen Trainingsplaenen (z.B. Tabellen-
+    // Screenshots): LIFT = Athletik/Kraft, GAME = Spiel, MEETING/MEDICAL/DINNER
+    // sind organisatorische Termine ohne echtes Training -> Sonstiges.
+    if (/\bAT\b/.test(t) || t.includes("ATHLETIK") || t.includes("LIFT"))
         return "at";
     if (/\b(IT|INDI|IND)\b/.test(t) || t.includes("INDIVIDUAL"))
         return "it";
     if (/\bTT\b/.test(t) || t.includes("TEAMTRAINING"))
         return "tt";
+    if (t.includes("GAME") || t.includes("SPIEL"))
+        return "spiel";
+    if (t.includes("MEETING") || t.includes("MEDICAL") || t.includes("DINNER"))
+        return "individuell";
     return "tt";
 }
 function parseBlockText(rawText) {
-    // Google-Calendar-Kaestchen sind immer gleich aufgebaut: oben der Titel
-    // (ggf. ueber mehrere Zeilen umgebrochen), darunter die Uhrzeit. Deshalb
-    // strikt von oben nach unten lesen: alles bis zur ersten Zeile, die wie
-    // eine Uhrzeit aussieht, ist Titel - ab dort beginnt die Uhrzeit.
+    // Je nach Screenshot-Quelle steht die Uhrzeit mal UEBER dem Titel (Tabellen-
+    // Export: "10:00" / "Lift / Individuals"), mal DARUNTER (Google-Calendar-
+    // Kaestchen: "Teamtraining" / "18:00-19:30"), und manchmal beides in einer
+    // Zeile ("16:00 Walk In"). Deshalb nicht mehr strikt von oben nach unten
+    // lesen, sondern jede Zeile einzeln pruefen: die ERSTE Zeile, die wie eine
+    // Uhrzeit aussieht, liefert die Uhrzeit (egal an welcher Position) - alle
+    // anderen Zeilen (bzw. der Rest einer gemischten Zeile) ergeben den Titel.
     const cleaned = (rawText || "").replace(/\r/g, "").trim();
-    const rangeRe = /\d{1,2}[.:]?\d{0,2}\s*(?:bis|-|–|bs)\s*\d{1,2}[.:]\d{2}/i;
-    const soloTimeRe = /^\d{1,2}[.:]\d{2}$/;
-    const sepRe = /^(bis|-|–|bs)$/i;
-    // Auch eine ANGEFANGENE Zeitangabe (z.B. "18:30 bis 2" - Endzeit vom
-    // Kaestchen abgeschnitten) zaehlt schon als Uhrzeit-Zeile, damit sie nicht
-    // faelschlich mit in den Titel rutscht, selbst wenn die Uhrzeit am Ende
-    // dadurch unvollstaendig bleibt (dann in der Vorschau von Hand ergaenzen).
-    const timeStartRe = /^\d{1,2}[.:]?\d{0,2}\s*(?:bis|-|–|bs)/i;
-    function looksLikeTimeLine(l) {
-        return rangeRe.test(l) || soloTimeRe.test(l) || sepRe.test(l) || timeStartRe.test(l);
-    }
+    const rangeRe = /(\d{1,2})[.:]?(\d{0,2})\s*(?:bis|-|–|bs)\s*(\d{1,2})[.:](\d{2})/i;
+    const soloTimeRe = /^(\d{1,2})[.:](\d{2})$/;
+    const leadingTimeRe = /^(\d{1,2})[.:](\d{2})\s+(.+)$/;
+    // Manchmal liest die Bilderkennung vor der eigentlichen Uhrzeit noch ein,
+    // zwei stoerende Zeichen mit (z.B. ein Rest einer Rasterlinie, der als "l"
+    // gelesen wird) - dann greift leadingTimeRe nicht mehr (Zeile faengt ja
+    // nicht mit einer Ziffer an). Als Ausweichloesung: bis zu drei fuehrende
+    // Nicht-Ziffern-Zeichen ignorieren, wenn direkt danach eine Uhrzeit folgt.
+    const noisyLeadingTimeRe = /^.{0,3}?(\d{1,2})[.:](\d{2})\s*(.*)$/;
+    // Eine ANGEFANGENE Zeitangabe (z.B. "18:30 bis 2" - Endzeit vom Kaestchen
+    // abgeschnitten) liefert zwar keine Endzeit, soll aber trotzdem nicht als
+    // Rest-Text im Titel landen.
+    const danglingRe = /^(bis|-|–|bs)\s*\d*[.:]?\d*$/i;
     const lines = cleaned.split("\n").map((l) => l.trim()).filter(Boolean);
-    const titleLines = [];
-    let timeStartIdx = lines.length;
-    for (let i = 0; i < lines.length; i++) {
-        if (looksLikeTimeLine(lines[i])) {
-            timeStartIdx = i;
-            break;
+    const titleParts = [];
+    let startTime = "", endTime = "", consumedTime = false;
+    for (const line of lines) {
+        if (!consumedTime) {
+            const rangeMatch = line.match(rangeRe);
+            if (rangeMatch) {
+                const startMin = rangeMatch[2] || "00";
+                startTime = `${rangeMatch[1].padStart(2, "0")}:${startMin}`;
+                endTime = `${rangeMatch[3].padStart(2, "0")}:${rangeMatch[4]}`;
+                consumedTime = true;
+                const remainder = line.replace(rangeRe, "").trim();
+                if (remainder && !danglingRe.test(remainder))
+                    titleParts.push(remainder);
+                continue;
+            }
+            if (soloTimeRe.test(line)) {
+                const m = line.match(soloTimeRe);
+                startTime = `${m[1].padStart(2, "0")}:${m[2]}`;
+                consumedTime = true;
+                continue;
+            }
+            const leadingMatch = line.match(leadingTimeRe);
+            if (leadingMatch) {
+                startTime = `${leadingMatch[1].padStart(2, "0")}:${leadingMatch[2]}`;
+                consumedTime = true;
+                const remainder = leadingMatch[3].trim();
+                if (remainder && !danglingRe.test(remainder))
+                    titleParts.push(remainder);
+                continue;
+            }
+            if (danglingRe.test(line)) {
+                consumedTime = true;
+                continue;
+            }
+            const noisyMatch = line.match(noisyLeadingTimeRe);
+            if (noisyMatch) {
+                startTime = `${noisyMatch[1].padStart(2, "0")}:${noisyMatch[2]}`;
+                consumedTime = true;
+                const remainder = noisyMatch[3].trim();
+                if (remainder && !danglingRe.test(remainder))
+                    titleParts.push(remainder);
+                continue;
+            }
         }
-        titleLines.push(lines[i]);
+        titleParts.push(line);
     }
-    const timeSource = lines.slice(timeStartIdx).join(" ") || cleaned.replace(/\s+/g, " ");
-    const timeMatch = timeSource.match(/(\d{1,2})[.:]?(\d{2})?\s*(?:bis|-|–|bs)\s*(\d{1,2})[.:](\d{2})/i);
-    let startTime = "", endTime = "";
-    if (timeMatch) {
-        const startMin = timeMatch[2] || "00";
-        startTime = `${timeMatch[1].padStart(2, "0")}:${startMin}`;
-        endTime = `${timeMatch[3].padStart(2, "0")}:${timeMatch[4]}`;
-    }
-    // Falls ausnahmsweise alles (Titel + Uhrzeit) in einer einzigen Zeile
-    // stand, blieb titleLines oben leer - dann die erste Zeile nehmen und die
-    // Uhrzeit defensiv rausschneiden, damit sie nicht doppelt im Titel steht.
-    const rawTitle = titleLines.length > 0 ? titleLines.join(" ") : (lines[0] || "");
-    const title = rawTitle.replace(rangeRe, "").replace(/\s+/g, " ").trim() || "Termin";
+    const title = titleParts.join(" ").replace(/\s+/g, " ").trim() || "Termin";
     return { title, startTime, endTime };
 }
 async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, onProgress) {
@@ -1307,8 +1460,24 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
     canvas.height = imgEl.naturalHeight;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(imgEl, 0, 0);
-    const rawBlocks = detectColoredBlocks(canvas);
-    const blocks = assignColumnsByWidth(rawBlocks, numDays);
+    // Zwei grundverschiedene Screenshot-Arten kommen vor: (1) Google-Calendar-
+    // Wochenansicht mit frei schwebenden farbigen Kaestchen auf weissem Grund,
+    // ohne sichtbare Rasterlinien, oder (2) ein Tabellen-Export (Excel/Sheets)
+    // mit Wochentags-Kopfzeile und durchgezogenen Rasterlinien, wo auch nicht
+    // eingefaerbte (weisse) Zellen echte Termine enthalten koennen. Deshalb
+    // zuerst nach einem Raster suchen; nur wenn keins gefunden wird (keine
+    // durchgehenden Linien), auf die reine Farbflaechen-Erkennung zurueckfallen.
+    const { rowLines, colLines } = detectGridLines(canvas);
+    const gridColumns = colLines.length - 1;
+    const gridRows = rowLines.length - 1;
+    let blocks;
+    if (gridColumns >= Math.max(2, numDays - 1) && gridColumns <= numDays + 2 && gridRows >= 2) {
+        blocks = detectGridCells(canvas, rowLines, colLines);
+    }
+    else {
+        const rawBlocks = detectColoredBlocks(canvas);
+        blocks = assignColumnsByWidth(rawBlocks, numDays);
+    }
     blocks.sort((a, b) => a.column - b.column || a.minY - b.minY);
     // Ein Worker für alle Kästchen wiederverwenden (deutlich schneller als pro
     // Kästchen neu zu laden) und auf "ein einzelner Textblock" statt volle
@@ -1326,7 +1495,7 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
             tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÄÖÜäöü0123456789:.,-+/ ",
         });
     }
-    const results = [];
+    const rawResults = [];
     try {
         for (let i = 0; i < blocks.length; i++) {
             const block = blocks[i];
@@ -1334,16 +1503,44 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
                 onProgress(i + 1, blocks.length);
             const text = worker ? await ocrBlock(worker, canvas, block, 4) : (await window.Tesseract.recognize(prepareOcrCanvas(canvas, block, 4), "deu")).data.text;
             const { title, startTime, endTime } = parseBlockText(text);
-            const date = new Date(mondayDate);
-            date.setDate(mondayDate.getDate() + block.column);
-            results.push({ id: `blk-${i}`, title, date: isoDate(date), time: startTime, endTime });
+            rawResults.push({ block, title, startTime, endTime });
         }
     }
     finally {
         if (worker)
             await worker.terminate();
     }
-    return results;
+    // Bei Tabellen-Exporten (Raster-Zellen statt Farbkaestchen) stehen Uhrzeit
+    // und Titel manchmal in zwei getrennten Tabellenzeilen statt in einer
+    // gemeinsamen Zelle. Eine Zelle, die NUR eine blanke Uhrzeit enthielt (kein
+    // eigener Titel -> "Termin"-Fallback), gehoert dann zur unmittelbar
+    // folgenden Zelle derselben Spalte, wenn die einen echten Titel ohne
+    // eigene Uhrzeit hat - beide zu einem Termin zusammenfuehren.
+    const merged = [];
+    for (let i = 0; i < rawResults.length; i++) {
+        const cur = rawResults[i];
+        if (cur.__used)
+            continue;
+        const next = rawResults[i + 1];
+        // "Termin" (echter Leer-Fallback) oder ein/zwei einzelne Zeichen (typisches
+        // OCR-Rauschen, z.B. ein Rest der Rasterlinie, der als "l" gelesen wurde)
+        // zaehlen beide als "diese Zelle enthielt nur die Uhrzeit, sonst nichts".
+        const isBareTime = (cur.title === "Termin" || cur.title.length <= 2) && cur.startTime;
+        const canMerge = isBareTime && next && next.block.column === cur.block.column
+            && next.block.minY <= cur.block.maxY + 6 && next.title !== "Termin" && !next.startTime;
+        if (canMerge) {
+            merged.push({ block: cur.block, title: next.title, startTime: cur.startTime, endTime: cur.endTime });
+            next.__used = true;
+        }
+        else {
+            merged.push(cur);
+        }
+    }
+    return merged.map((r, i) => {
+        const date = new Date(mondayDate);
+        date.setDate(mondayDate.getDate() + r.block.column);
+        return { id: `blk-${i}`, title: r.title, date: isoDate(date), time: r.startTime, endTime: r.endTime };
+    });
 }
 const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2.5 sm:py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#eb1e23] focus:border-[#eb1e23] transition";
 const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
