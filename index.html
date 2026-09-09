@@ -3493,6 +3493,178 @@ function AllUnitsView({ events, teams, allPlayers, onEdit, onDelete, onAdd, even
         React.createElement("div", { className: "space-y-5" }, dayGroups),
         formModal);
 }
+/* Eigener "Anwesenheit"-Reiter (an Spond angelehnt): reine Anwesenhaits-Ansicht
+   ohne Termin-Verwaltung - Spieler tauchen automatisch anhand der Team-/
+   Einzel-Zuordnung des jeweiligen Termins auf (dieselbe Logik wie in
+   "Alle Einheiten"), Markieren nutzt dieselben eventAttendance-Daten. */
+function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAttendance, onSelectPlayer }) {
+    const [teamFilter, setTeamFilter] = useState("all");
+    const [rangeMode, setRangeMode] = useState("week");
+    const [expandedIds, setExpandedIds] = useState(() => new Set());
+    function toggleExpanded(id) {
+        setExpandedIds((prev) => {
+            const next = new Set(prev);
+            if (next.has(id))
+                next.delete(id);
+            else
+                next.add(id);
+            return next;
+        });
+    }
+    const todayIso = isoDate(new Date());
+    const thisMonday = startOfWeekMonday(new Date());
+    const thisSunday = new Date(thisMonday);
+    thisSunday.setDate(thisMonday.getDate() + 6);
+    const nextMonday = new Date(thisMonday);
+    nextMonday.setDate(thisMonday.getDate() + 7);
+    const nextSunday = new Date(nextMonday);
+    nextSunday.setDate(nextMonday.getDate() + 6);
+    let rangeStart = null, rangeEnd = null;
+    if (rangeMode === "week") {
+        rangeStart = isoDate(thisMonday);
+        rangeEnd = isoDate(thisSunday);
+    }
+    else if (rangeMode === "nextWeek") {
+        rangeStart = isoDate(nextMonday);
+        rangeEnd = isoDate(nextSunday);
+    }
+    else if (rangeMode === "upcoming") {
+        rangeStart = todayIso;
+        rangeEnd = null;
+    }
+    function inRange(e) {
+        return (!rangeStart || e.date >= rangeStart) && (!rangeEnd || e.date <= rangeEnd);
+    }
+    function teamOfEvent(e) {
+        return teams.find((t) => t.id === e.teamId) || null;
+    }
+    function eventMatchesTeamFilter(e) {
+        if (teamFilter === "all")
+            return true;
+        if (e.teamId === teamFilter)
+            return true;
+        return getEventAttendees(e, allPlayers).some((p) => p.teamId === teamFilter);
+    }
+    const filteredEvents = events.filter(inRange).filter(eventMatchesTeamFilter)
+        .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+    const byDate = {};
+    filteredEvents.forEach((e) => { (byDate[e.date] = byDate[e.date] || []).push(e); });
+    const dateKeys = Object.keys(byDate).sort();
+    function cycleAttendance(current) {
+        if (current === "present")
+            return "absent";
+        if (current === "absent")
+            return null;
+        return "present";
+    }
+    function attendanceChip(event, player) {
+        const status = eventAttendance?.[event.id]?.[player.id] || null;
+        return React.createElement("button", {
+            key: player.id,
+            type: "button",
+            onClick: () => onSetAttendance(event.id, player.id, cycleAttendance(status)),
+            title: status === "present" ? "War da - klicken für: hat gefehlt" : status === "absent" ? "Hat gefehlt - klicken zum Zurücksetzen" : "Anwesenheit markieren",
+            className: `inline-flex items-center gap-1.5 text-xs font-medium rounded-full pl-1.5 pr-2.5 py-1 transition ${status === "present" ? "bg-emerald-50 text-emerald-700" : status === "absent" ? "bg-red-50 text-red-600" : "bg-stone-100 text-slate-500 hover:bg-stone-200"}`,
+        },
+            React.createElement("span", { className: `rounded-full w-4 h-4 flex items-center justify-center shrink-0 border ${status === "present" ? "bg-emerald-500 border-emerald-500 text-white" : status === "absent" ? "bg-red-500 border-red-500 text-white" : "bg-white border-stone-300 text-transparent"}` },
+                status === "absent" ? React.createElement(IconX, { size: 9 }) : React.createElement(IconCheck, { size: 9 })),
+            player.name);
+    }
+    function eventRow(event) {
+        const team = teamOfEvent(event);
+        const isExpanded = expandedIds.has(event.id);
+        const attendees = getEventAttendees(event, allPlayers);
+        const marks = eventAttendance?.[event.id] || {};
+        const markedCount = attendees.filter((p) => marks[p.id]).length;
+        const presentCount = attendees.filter((p) => marks[p.id] === "present").length;
+        const headerLine = React.createElement("button", { type: "button", onClick: () => toggleExpanded(event.id), className: "w-full flex items-center justify-between gap-3 text-left" },
+            React.createElement("div", { className: "min-w-0 flex items-center gap-2.5" },
+                React.createElement(IconArrowDown, { size: 12, className: `text-slate-300 shrink-0 transition-transform ${isExpanded ? "" : "-rotate-90"}` }),
+                React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${EVENT_TYPE_STYLES[event.type]?.dot || "bg-slate-400"}` }),
+                event.time && React.createElement("span", { className: "text-sm font-semibold text-slate-800 shrink-0" }, event.time, event.endTime ? `–${event.endTime}` : ""),
+                React.createElement("span", { className: "text-sm text-slate-700 truncate" }, event.title),
+                React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, team ? team.name : "Individuell")),
+            React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
+                markedCount > 0 && React.createElement("span", { className: "text-xs font-semibold text-emerald-600 bg-emerald-50 rounded-full px-2 py-0.5" }, presentCount, "/", markedCount, " da"),
+                React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, attendees.length, " Spieler")));
+        if (!isExpanded)
+            return React.createElement("div", { key: event.id, className: "bg-stone-50 rounded-xl px-3.5 py-2.5" }, headerLine);
+        const chips = attendees.length > 0
+            ? attendees.map((p) => attendanceChip(event, p))
+            : [React.createElement("p", { key: "none", className: "text-xs text-slate-400" }, "Keine Spieler zugeordnet.")];
+        return React.createElement("div", { key: event.id, className: "bg-stone-50 rounded-xl px-3.5 py-2.5" },
+            headerLine,
+            React.createElement("div", { className: "flex flex-wrap items-center gap-1.5 mt-2.5 pt-2.5 border-t border-stone-200" }, chips));
+    }
+    const dayGroups = dateKeys.map((iso) => {
+        const isToday = iso === todayIso;
+        const dayHeader = React.createElement("p", { className: `text-xs font-semibold uppercase tracking-wide mb-2 ${isToday ? "text-[#eb1e23]" : "text-slate-400"}` },
+            new Date(iso + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit", year: "numeric" }),
+            isToday && " · Heute");
+        const rows = React.createElement("div", { className: "space-y-2" }, byDate[iso].map(eventRow));
+        return React.createElement("div", { key: iso }, dayHeader, rows);
+    });
+    const emptyState = filteredEvents.length === 0 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-10" }, "Keine Einheiten im gewählten Zeitraum.") : null;
+    const filterBar = React.createElement("div", { className: "flex flex-wrap items-center gap-2" },
+        React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: teamFilter, onChange: (e) => setTeamFilter(e.target.value) },
+            React.createElement("option", { value: "all" }, "Alle Teams"),
+            teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
+        React.createElement("select", { className: "text-sm rounded-lg border border-stone-300 px-2.5 py-2", value: rangeMode, onChange: (e) => setRangeMode(e.target.value) },
+            React.createElement("option", { value: "week" }, "Diese Woche"),
+            React.createElement("option", { value: "nextWeek" }, "Nächste Woche"),
+            React.createElement("option", { value: "upcoming" }, "Alle kommenden"),
+            React.createElement("option", { value: "all" }, "Alle (inkl. vergangene)")));
+    // Anwesenheitsquote je Spieler, ueber alle vergangenen Termine hinweg (unabhaengig vom Zeitraum-Filter oben).
+    const relevantPlayers = teamFilter === "all" ? allPlayers : allPlayers.filter((p) => p.teamId === teamFilter);
+    const pastEvents = events.filter((e) => e.date && e.date < todayIso);
+    const statsMap = new Map(relevantPlayers.map((p) => [p.id, { player: p, present: 0, marked: 0 }]));
+    pastEvents.forEach((e) => {
+        const attendees = getEventAttendees(e, allPlayers);
+        const marks = eventAttendance?.[e.id] || {};
+        attendees.forEach((p) => {
+            const stat = statsMap.get(p.id);
+            if (!stat)
+                return;
+            const status = marks[p.id];
+            if (!status)
+                return;
+            stat.marked++;
+            if (status === "present")
+                stat.present++;
+        });
+    });
+    const playerStats = Array.from(statsMap.values())
+        .map((s) => ({ ...s, quote: s.marked > 0 ? Math.round((s.present / s.marked) * 1000) / 10 : null }))
+        .sort((a, b) => {
+        if (a.quote === null && b.quote === null)
+            return a.player.name.localeCompare(b.player.name);
+        if (a.quote === null)
+            return 1;
+        if (b.quote === null)
+            return -1;
+        return a.quote - b.quote;
+    });
+    const summaryRows = playerStats.map((s) => {
+        const quoteLabel = s.quote === null ? "–" : `${s.quote}%`;
+        const badgeClass = s.quote === null ? "bg-stone-100 text-slate-400" : s.quote < ATTENDANCE_WARN_THRESHOLD ? "bg-red-50 text-red-600" : "bg-emerald-50 text-emerald-700";
+        return React.createElement("button", { key: s.player.id, type: "button", onClick: () => onSelectPlayer(s.player.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition" },
+            React.createElement("span", { className: "text-sm text-slate-700 flex-1 truncate" }, s.player.name),
+            React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, s.marked > 0 ? `${s.present}/${s.marked}` : "keine Daten"),
+            React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 shrink-0 ${badgeClass}` }, quoteLabel));
+    });
+    const summaryCard = React.createElement("div", { className: `${cardClass} p-4` },
+        React.createElement("p", { className: "text-sm font-bold text-slate-900 mb-1" }, "Anwesenheitsquote je Spieler"),
+        React.createElement("p", { className: "text-xs text-slate-400 mb-3" }, "Aus allen vergangenen, markierten Einheiten - unter ", ATTENDANCE_WARN_THRESHOLD, "% rot markiert."),
+        React.createElement("div", { className: "space-y-1.5" }, summaryRows.length > 0 ? summaryRows : React.createElement("p", { className: "text-xs text-slate-400" }, "Keine Spieler in dieser Auswahl.")));
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("div", null,
+            React.createElement(SectionLabel, null, "Anwesenheit"),
+            React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Wer war bei welcher Einheit dabei? Spieler werden automatisch anhand der Team-/Termin-Zuordnung angezeigt - einfach anklicken zum Markieren.")),
+        summaryCard,
+        filterBar,
+        emptyState,
+        React.createElement("div", { className: "space-y-5" }, dayGroups));
+}
 function AccountManagerModal({ accounts, accountsLoaded, players, currentUid, onLoad, onCreate, onDelete, onClose }) {
     const [showForm, setShowForm] = useState(false);
     const [label, setLabel] = useState("");
@@ -4161,6 +4333,7 @@ function SpielerAkte() {
     const [showGlobalCalendar, setShowGlobalCalendar] = useState(false);
     const [showVerwaltung, setShowVerwaltung] = useState(false);
     const [showAllUnits, setShowAllUnits] = useState(false);
+    const [showAttendance, setShowAttendance] = useState(false);
     const [selectedPlayerId, setSelectedPlayerId] = useState(null);
     const [activeTab, setActiveTab] = useState("uebersicht");
     const [expandedCats, setExpandedCats] = useState(() => new Set());
@@ -4844,6 +5017,9 @@ function SpielerAkte() {
         else if (showAllUnits) {
             breadcrumbItems.push({ label: "Alle Einheiten", onClick: null });
         }
+        else if (showAttendance) {
+            breadcrumbItems.push({ label: "Anwesenheit", onClick: null });
+        }
         else if (selectedPlayer) {
             if (selectedTeam)
                 breadcrumbItems.push({ label: selectedTeam.name, onClick: () => { setSelectedPlayerId(null); setSelectedTeamId(selectedTeam.id); setShowTeamCalendar(false); setShowGlobalCalendar(false); } });
@@ -4882,6 +5058,7 @@ function SpielerAkte() {
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
         setShowAllUnits(false);
+        setShowAttendance(false);
         setMobileSidebarOpen(false);
     }
     function goHome() {
@@ -4891,6 +5068,7 @@ function SpielerAkte() {
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
         setShowAllUnits(false);
+        setShowAttendance(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -4901,6 +5079,7 @@ function SpielerAkte() {
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
         setShowAllUnits(false);
+        setShowAttendance(false);
         setMobileSidebarOpen(false);
     }
     function goVerwaltung() {
@@ -4910,6 +5089,7 @@ function SpielerAkte() {
         setShowGlobalCalendar(false);
         setShowVerwaltung(true);
         setShowAllUnits(false);
+        setShowAttendance(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -4920,6 +5100,7 @@ function SpielerAkte() {
         setShowVerwaltung(false);
         setShowGlobalCalendar(true);
         setShowAllUnits(false);
+        setShowAttendance(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -4930,6 +5111,18 @@ function SpielerAkte() {
         setShowGlobalCalendar(false);
         setShowVerwaltung(false);
         setShowAllUnits(true);
+        setShowAttendance(false);
+        setConfirmDeletePlayer(false);
+        setMobileSidebarOpen(false);
+    }
+    function goAttendance() {
+        setSelectedPlayerId(null);
+        setSelectedTeamId("all");
+        setShowTeamCalendar(false);
+        setShowGlobalCalendar(false);
+        setShowVerwaltung(false);
+        setShowAllUnits(false);
+        setShowAttendance(true);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -5293,15 +5486,16 @@ function SpielerAkte() {
                     React.createElement("button", { onClick: () => setMobileSidebarOpen(false), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Schließen" },
                         React.createElement(IconX, { size: 18 }))),
                 React.createElement("div", { className: "flex flex-col gap-1 pb-3 mb-1 border-b border-stone-200" }, [
-                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !showAllUnits && !selectedPlayerId && selectedTeamId === "all" },
+                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !selectedPlayerId && selectedTeamId === "all" },
                     { key: "calendar", label: "Kalender", icon: IconCalendar, onClick: goGlobalCalendar, active: showGlobalCalendar },
                     { key: "allunits", label: "Alle Einheiten", icon: IconClipboard, onClick: goAllUnits, active: showAllUnits },
+                    { key: "attendance", label: "Anwesenheit", icon: IconUsers, onClick: goAttendance, active: showAttendance },
                     { key: "verwaltung", label: "Verwaltung", icon: IconSettings, onClick: goVerwaltung, active: showVerwaltung },
                 ].map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#eb1e23]/10 to-[#0a96d4]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
                     React.createElement(item.icon, { size: 16, className: item.active ? "text-[#eb1e23]" : "text-slate-400" }),
                     item.label))),
                 React.createElement("div", { className: "flex gap-2" },
-                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); setShowVerwaltung(false); setShowAllUnits(false); } },
+                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); setShowVerwaltung(false); setShowAllUnits(false); setShowAttendance(false); } },
                         React.createElement("option", { value: "all" }, "Alle Teams"),
                         teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
                     React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
@@ -5380,8 +5574,8 @@ function SpielerAkte() {
                             React.createElement(IconUsers, { size: 14 }),
                             " Dashboard")),
                     React.createElement(CalendarView, { events: calendarEvents, isTrainer: isTrainer, team: null, teams: teams, teamPlayers: [], allPlayers: players, contextLabel: "Alle Teams", onAdd: addCalendarEvent, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onClearAll: clearAllCalendars }))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && showAllUnits && isTrainer && (React.createElement(AllUnitsView, { events: calendarEvents, teams: teams, allPlayers: players, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onAdd: addCalendarEvent, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance })),
-                !selectedPlayer && !showGlobalCalendar && !showAllUnits && showVerwaltung && isTrainer && (React.createElement("div", { className: "space-y-5 rsk-fade-in" },
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAttendance && showAllUnits && isTrainer && (React.createElement(AllUnitsView, { events: calendarEvents, teams: teams, allPlayers: players, onEdit: editCalendarEvent, onDelete: deleteCalendarEvent, onAdd: addCalendarEvent, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance })),
+                !selectedPlayer && !showGlobalCalendar && !showAllUnits && !showAttendance && showVerwaltung && isTrainer && (React.createElement("div", { className: "space-y-5 rsk-fade-in" },
                     React.createElement("div", null,
                         React.createElement(SectionLabel, null, "Verwaltung"),
                         React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Teams, Zugänge und die Vorlagen für Statistiken, Tests und Development-Pläne verwalten.")),
@@ -5396,7 +5590,8 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: teams, players: players, wellnessData: wellnessData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: teams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
