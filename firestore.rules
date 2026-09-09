@@ -11,14 +11,18 @@ service cloud.firestore {
     }
     // Team-beschraenkter Trainer-Zugang: account().teamId gesetzt -> darf nur sein
     // eigenes Team sehen/verwalten. Kein teamId-Feld (oder null) -> Vollzugriff.
+    // Wichtig: erst mit 'in' pruefen, ob das Feld ueberhaupt existiert - direkter
+    // Zugriff auf ein fehlendes Map-Feld wirft in Firestore-Regeln einen Fehler
+    // (nicht einfach null), was sonst JEDE Anfrage bestehender Trainer-Zugaenge
+    // ohne teamId-Feld mit "Missing or insufficient permissions" abgelehnt haette.
     function trainerTeamId() {
-      return isTrainer() ? account().teamId : null;
+      return isTrainer() && ('teamId' in account()) ? account().teamId : null;
     }
     function isFullTrainer() {
       return isTrainer() && trainerTeamId() == null;
     }
     function myPlayerId() {
-      return isSignedIn() ? account().playerId : null;
+      return isSignedIn() && ('playerId' in account()) ? account().playerId : null;
     }
     function playerTeamId() {
       return isSignedIn() && myPlayerId() != null
