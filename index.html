@@ -2115,11 +2115,11 @@ function StatForm({ onSubmit, onClose, statCategories, initialEntry }) {
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Eintrag speichern")));
 }
-function TestForm({ onSubmit, onClose, testTypes }) {
-    const [testType, setTestType] = useState(testTypes[0]?.label || "");
-    const [date, setDate] = useState(today());
-    const [result, setResult] = useState("");
-    const [unit, setUnit] = useState("");
+function TestForm({ onSubmit, onClose, testTypes, initialEntry }) {
+    const [testType, setTestType] = useState(initialEntry?.testType || testTypes[0]?.label || "");
+    const [date, setDate] = useState(initialEntry?.date || today());
+    const [result, setResult] = useState(initialEntry?.result ?? "");
+    const [unit, setUnit] = useState(initialEntry?.unit || "");
     const [error, setError] = useState("");
     function handleSubmit(e) {
         e.preventDefault();
@@ -2131,7 +2131,7 @@ function TestForm({ onSubmit, onClose, testTypes }) {
             setError("Bitte ein Ergebnis eingeben.");
             return;
         }
-        onSubmit({ date, testType: testType.trim(), result: Number(result), unit: unit.trim() });
+        onSubmit({ ...(initialEntry ? { id: initialEntry.id } : {}), date, testType: testType.trim(), result: Number(result), unit: unit.trim() });
         onClose();
     }
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
@@ -2144,7 +2144,7 @@ function TestForm({ onSubmit, onClose, testTypes }) {
             React.createElement(Field, { label: "Einheit" },
                 React.createElement("input", { className: inputClass, value: unit, onChange: (e) => setUnit(e.target.value), placeholder: "sek, cm, kg" }))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
-        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Testergebnis speichern")));
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initialEntry ? "Änderungen speichern" : "Testergebnis speichern")));
 }
 function VideoForm({ onSubmit, onClose, defaultType }) {
     const [date, setDate] = useState(today());
@@ -5097,6 +5097,7 @@ function SpielerAkte() {
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [editingStat, setEditingStat] = useState(null);
     const [editingTeam, setEditingTeam] = useState(null);
+    const [editingTest, setEditingTest] = useState(null);
     const [videoDefaultType, setVideoDefaultType] = useState(null);
     function toggleVideo(id) {
         setExpandedVideos((prev) => {
@@ -5980,6 +5981,10 @@ function SpielerAkte() {
         const cur = privateData[selectedPlayer.id]?.tests || [];
         persistPrivateFields(selectedPlayer.id, { tests: [...cur, { id: uid(), ...entry }] });
     }
+    function handleEditTest(entry) {
+        const cur = privateData[selectedPlayer.id]?.tests || [];
+        persistPrivateFields(selectedPlayer.id, { tests: cur.map((t) => (t.id === entry.id ? { ...t, ...entry } : t)) });
+    }
     function handleAddVideo(entry) {
         persistPlayerFields(selectedPlayer.id, { videos: [...(selectedPlayer.videos || []), { id: uid(), ...entry }] });
     }
@@ -6668,6 +6673,8 @@ function SpielerAkte() {
                                             diff > 0 ? React.createElement(IconTrendUp, { size: 13 }) : React.createElement(IconTrendDown, { size: 13 }),
                                             " ",
                                             Math.abs(diff))),
+                                        React.createElement("button", { onClick: () => { setEditingTest(t); setModal("editTest"); }, className: "text-slate-300 hover:text-[#C43E0E]", "aria-label": "Eintrag bearbeiten" },
+                                            React.createElement(IconEdit, { size: 14 })),
                                         React.createElement("button", { onClick: () => deleteItem("tests", t.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag l\u00F6schen" },
                                             React.createElement(IconTrash, { size: 14 })))));
                             }))))),
@@ -6866,6 +6873,8 @@ function SpielerAkte() {
             React.createElement(SimpleListManager, { items: testTypes, onAdd: addTestType, onRename: renameTestType, onDelete: deleteTestType, onMove: moveTestType, onClose: () => setModal(null), addPlaceholder: "Neue Testart, z. B. T-Test", description: "Diese Liste erscheint als Auswahl im Athletik-Test-Formular. \u00C4nderungen wirken nur auf Anzeige/neue Eintr\u00E4ge." }))),
         modal === "test" && (React.createElement(Modal, { title: "Athletik-Test hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(TestForm, { onSubmit: handleAddTest, onClose: () => setModal(null), testTypes: testTypes }))),
+        modal === "editTest" && editingTest && (React.createElement(Modal, { title: "Athletik-Test bearbeiten", onClose: () => { setModal(null); setEditingTest(null); } },
+            React.createElement(TestForm, { onSubmit: handleEditTest, onClose: () => { setModal(null); setEditingTest(null); }, testTypes: testTypes, initialEntry: editingTest }))),
         modal === "video" && (React.createElement(Modal, { title: "Video verkn\u00FCpfen", onClose: () => setModal(null) },
             React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null), defaultType: videoDefaultType }))),
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
