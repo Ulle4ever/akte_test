@@ -1576,10 +1576,25 @@ function Field({ label, children }) {
         React.createElement("label", { className: labelClass }, label),
         children));
 }
-function TeamForm({ onSubmit, onClose }) {
-    const [name, setName] = useState("");
-    const [altersklasse, setAltersklasse] = useState("");
-    const [trainer, setTrainer] = useState("");
+function TeamsManager({ teams, onEdit, onClose }) {
+    return (React.createElement("div", { className: "space-y-2" },
+        teams.length === 0 && React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Teams angelegt."),
+        teams.map((t) => (React.createElement("div", { key: t.id, className: "flex items-center justify-between gap-3 bg-stone-50 rounded-xl px-3 py-2.5" },
+            React.createElement("div", { className: "min-w-0" },
+                React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, t.name),
+                React.createElement("p", { className: "text-xs text-slate-400" }, t.altersklasse || "Keine Altersklasse hinterlegt", t.trainer && ` · ${t.trainer}`)),
+            React.createElement("button", { onClick: () => onEdit(t), className: "shrink-0 p-2 rounded-lg hover:bg-stone-200 text-slate-500", "aria-label": "Bearbeiten" },
+                React.createElement(IconEdit, { size: 15 }))))),
+        React.createElement("button", { onClick: onClose, className: "w-full text-sm text-slate-500 hover:text-slate-700 pt-2" }, "Schließen")));
+}
+const ALTERSKLASSE_OPTIONS = ["U12", "U14", "U16", "U18", "JBBL", "NBBL"];
+// Altersklassen, fuer die der DBB-Scores-Statistik-Import angeboten wird (JBBL/NBBL
+// haben eigene, ausfuehrlichere Statistiken und brauchen den Import nicht).
+const DBB_SCORES_ALTERSKLASSEN = ["U12", "U14"];
+function TeamForm({ initial, onSubmit, onClose }) {
+    const [name, setName] = useState(initial?.name || "");
+    const [altersklasse, setAltersklasse] = useState(initial?.altersklasse || "");
+    const [trainer, setTrainer] = useState(initial?.trainer || "");
     const [error, setError] = useState("");
     function handleSubmit(e) {
         e.preventDefault();
@@ -1587,18 +1602,20 @@ function TeamForm({ onSubmit, onClose }) {
             setError("Bitte einen Teamnamen eingeben.");
             return;
         }
-        onSubmit({ name: name.trim(), altersklasse: altersklasse.trim(), trainer: trainer.trim() });
+        onSubmit({ name: name.trim(), altersklasse, trainer: trainer.trim() });
         onClose();
     }
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
         React.createElement(Field, { label: "Teamname" },
             React.createElement("input", { className: inputClass, value: name, onChange: (e) => { setName(e.target.value); setError(""); }, placeholder: "z. B. U16 Herren", autoFocus: true }),
             error && React.createElement("p", { className: "text-xs text-red-600 mt-1" }, error)),
-        React.createElement(Field, { label: "Altersklasse" },
-            React.createElement("input", { className: inputClass, value: altersklasse, onChange: (e) => setAltersklasse(e.target.value), placeholder: "z. B. U16" })),
+        React.createElement(Field, { label: "Altersklasse / Liga" },
+            React.createElement("select", { className: inputClass, value: altersklasse, onChange: (e) => setAltersklasse(e.target.value) },
+                React.createElement("option", { value: "" }, "– bitte wählen –"),
+                ALTERSKLASSE_OPTIONS.map((a) => React.createElement("option", { key: a, value: a }, a)))),
         React.createElement(Field, { label: "Cheftrainer" },
             React.createElement("input", { className: inputClass, value: trainer, onChange: (e) => setTrainer(e.target.value), placeholder: "Name" })),
-        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, "Team anlegen")));
+        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Speichern" : "Team anlegen")));
 }
 function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [name, setName] = useState(initial?.name || "");
@@ -4778,6 +4795,7 @@ function SpielerAkte() {
     const [openHeaderMenu, setOpenHeaderMenu] = useState(null);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
     const [editingStat, setEditingStat] = useState(null);
+    const [editingTeam, setEditingTeam] = useState(null);
     const [videoDefaultType, setVideoDefaultType] = useState(null);
     function toggleVideo(id) {
         setExpandedVideos((prev) => {
@@ -5631,6 +5649,9 @@ function SpielerAkte() {
         const newTeam = { id: uid(), ...team };
         persistMeta({ teams: [...meta.teams, newTeam] });
     }
+    function handleEditTeam(id, changes) {
+        persistMeta({ teams: meta.teams.map((t) => (t.id === id ? { ...t, ...changes } : t)) });
+    }
     function handleAddPlayer(player) {
         const newId = uid();
         createPlayerDoc(newId, { ...player, stats: [], videos: [], onboardingCompleted: false });
@@ -6082,6 +6103,7 @@ function SpielerAkte() {
                         React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Teams, Zugänge und die Vorlagen für Statistiken, Tests und Development-Pläne verwalten.")),
                     React.createElement("div", { className: "grid grid-cols-2 lg:grid-cols-3 gap-4" }, [
                         { key: "team", label: "Neues Team anlegen", desc: "Team für die Spieler-Zuordnung anlegen.", icon: IconUsers, grad: "from-slate-900 to-[#8A2C0A]", onClick: () => setModal("team") },
+                        { key: "teams", label: "Teams verwalten", desc: "Altersklasse/Liga, Name und Cheftrainer bestehender Teams bearbeiten.", icon: IconSettings, grad: "from-slate-700 to-slate-900", onClick: () => setModal("teams") },
                         { key: "accounts", label: "Zugänge verwalten", desc: "Trainer- und Spieler-Zugänge anlegen oder entfernen.", icon: IconLock, grad: "from-[#C43E0E] to-[#8A2C0A]", onClick: () => setModal("accounts") },
                         { key: "statFields", label: "Statistik-Kategorien", desc: "Felder für Spielstatistiken bearbeiten.", icon: IconSettings, grad: "from-slate-700 to-slate-900", onClick: () => setModal("statFields") },
                         { key: "testTypes", label: "Test-Arten", desc: "Auswahlliste für Athletik-Tests pflegen.", icon: IconClipboard, grad: "from-[#FF6A2B] to-[#C43E0E]", onClick: () => setModal("testTypes") },
@@ -6444,6 +6466,10 @@ function SpielerAkte() {
         })()))))),
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
+        modal === "teams" && (React.createElement(Modal, { title: "Teams verwalten", onClose: () => setModal(null) },
+            React.createElement(TeamsManager, { teams: visibleTeams, onEdit: (t) => { setEditingTeam(t); setModal("editTeam"); }, onClose: () => setModal(null) }))),
+        modal === "editTeam" && editingTeam && (React.createElement(Modal, { title: "Team bearbeiten", onClose: () => { setModal(null); setEditingTeam(null); } },
+            React.createElement(TeamForm, { initial: editingTeam, onSubmit: (changes) => handleEditTeam(editingTeam.id, changes), onClose: () => { setModal(null); setEditingTeam(null); } }))),
         modal === "player" && (React.createElement(Modal, { title: "Spieler anlegen", onClose: () => setModal(null) },
             React.createElement(PlayerForm, { teams: visibleTeams, onSubmit: handleAddPlayer, onClose: () => setModal(null) }))),
         modal === "editPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Spieler bearbeiten", onClose: () => setModal(null) },
