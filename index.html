@@ -6,8 +6,8 @@
 <title>BB-Player File</title>
 <link rel="manifest" href="manifest.json" />
 <meta name="theme-color" content="#C43E0E" />
-<link rel="icon" href="icon-192.png" />
-<link rel="apple-touch-icon" href="apple-touch-icon.png" />
+<link rel="icon" href="icon-192.png?v=2" />
+<link rel="apple-touch-icon" href="apple-touch-icon.png?v=2" />
 <meta name="mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-capable" content="yes" />
 <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
@@ -4378,9 +4378,9 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
         setShowEventForm(true);
     }
     const hour = new Date().getHours();
-    const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Willkommen zurueck" : "Guten Abend";
+    const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Willkommen zurück" : "Guten Abend";
     const kpiTiles = [
-        { label: "Teams", value: teams.length, icon: IconUsers, grad: "from-[#C43E0E] to-[#8A2C0A]" },
+        { label: "Teams", value: teams.length, icon: IconUsers, grad: "from-slate-700 to-slate-900" },
         { label: "Spieler gesamt", value: players.length, icon: IconUsers, grad: "from-slate-700 to-slate-900" },
         { label: "Verletzt / Reha", value: outPlayers.length, icon: IconAlert, grad: outPlayers.length > 0 ? "from-amber-500 to-amber-700" : "from-emerald-500 to-emerald-700" },
         { label: "Monitoring-Check-ins", value: `${checkedInWellness.length}/${players.length}`, icon: IconHeart, grad: "from-[#C43E0E] to-[#A8350C]" },
@@ -6079,11 +6079,11 @@ function SpielerAkte() {
                         React.createElement(SectionLabel, null, "Verwaltung"),
                         React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Teams, Zugänge und die Vorlagen für Statistiken, Tests und Development-Pläne verwalten.")),
                     React.createElement("div", { className: "grid grid-cols-2 lg:grid-cols-3 gap-4" }, [
-                        { key: "team", label: "Neues Team anlegen", desc: "Team für die Spieler-Zuordnung anlegen.", icon: IconUsers, grad: "from-[#C43E0E] to-[#8A2C0A]", onClick: () => setModal("team") },
+                        { key: "team", label: "Neues Team anlegen", desc: "Team für die Spieler-Zuordnung anlegen.", icon: IconUsers, grad: "from-slate-700 to-slate-900", onClick: () => setModal("team") },
                         { key: "accounts", label: "Zugänge verwalten", desc: "Trainer- und Spieler-Zugänge anlegen oder entfernen.", icon: IconLock, grad: "from-[#C43E0E] to-[#8A2C0A]", onClick: () => setModal("accounts") },
-                        { key: "statFields", label: "Statistik-Kategorien", desc: "Felder für Spielstatistiken bearbeiten.", icon: IconSettings, grad: "from-slate-600 to-slate-900", onClick: () => setModal("statFields") },
-                        { key: "testTypes", label: "Test-Arten", desc: "Auswahlliste für Athletik-Tests pflegen.", icon: IconClipboard, grad: "from-emerald-500 to-emerald-800", onClick: () => setModal("testTypes") },
-                        { key: "devPlanTemplates", label: "Development-Plan-Fragen", desc: "Fragebögen für Spieler/Trainer-Bogen anpassen.", icon: IconClipboard, grad: "from-violet-500 to-violet-800", onClick: () => setModal("devPlanTemplates") },
+                        { key: "statFields", label: "Statistik-Kategorien", desc: "Felder für Spielstatistiken bearbeiten.", icon: IconSettings, grad: "from-slate-700 to-slate-900", onClick: () => setModal("statFields") },
+                        { key: "testTypes", label: "Test-Arten", desc: "Auswahlliste für Athletik-Tests pflegen.", icon: IconClipboard, grad: "from-slate-700 to-slate-900", onClick: () => setModal("testTypes") },
+                        { key: "devPlanTemplates", label: "Development-Plan-Fragen", desc: "Fragebögen für Spieler/Trainer-Bogen anpassen.", icon: IconClipboard, grad: "from-slate-700 to-slate-900", onClick: () => setModal("devPlanTemplates") },
                     ].map((x) => React.createElement("button", { key: x.key, onClick: x.onClick, className: `${cardClass} p-5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all` },
                         React.createElement("span", { className: `w-10 h-10 rounded-xl bg-gradient-to-br ${x.grad} text-white flex items-center justify-center mb-3` },
                             React.createElement(x.icon, { size: 17 })),
@@ -6169,14 +6169,14 @@ function SpielerAkte() {
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Auf einen Blick"),
                                 React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3 mt-1.5" }, [
-                                    { label: "Punkte", id: "punkte", color: "from-[#C43E0E] to-[#A8350C]" },
-                                    { label: "Rebounds", id: "rebounds", color: "from-[#C43E0E] to-[#8A2C0A]" },
-                                    { label: "Assists", id: "assists", color: "from-emerald-500 to-emerald-700" },
-                                    { label: "Turnover", id: "turnovers", color: "from-amber-500 to-amber-700" },
-                                    { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]), color: "from-violet-500 to-violet-700" },
+                                    { label: "Punkte", id: "punkte", hero: true },
+                                    { label: "Rebounds", id: "rebounds", hero: false },
+                                    { label: "Assists", id: "assists", hero: false },
+                                    { label: "Turnover", id: "turnovers", hero: false },
+                                    { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]), hero: false },
                                 ].filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 text-center relative overflow-hidden" },
-                                    React.createElement("span", { className: `absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${x.color}` }),
-                                    React.createElement("p", { className: "text-lg font-bold text-slate-700 mt-1" }, avg(x.id)),
+                                    React.createElement("span", { className: `absolute top-0 left-0 right-0 h-1 ${x.hero ? "bg-[#C43E0E]" : "bg-slate-200"}` }),
+                                    React.createElement("p", { className: `text-lg font-bold mt-1 ${x.hero ? "text-[#C43E0E]" : "text-slate-700"}` }, avg(x.id)),
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Details"),
