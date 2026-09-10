@@ -6237,6 +6237,13 @@ function SpielerAkte() {
         }
     }
     const statCategories = meta.statCategories || DEFAULT_STAT_CATEGORIES;
+    // Abgespeckte Akte (U12-U18): nur die Felder zeigen/anbieten, die DBB
+    // Scores tatsaechlich liefert - alle anderen (Rebounds, Assists, Hustle-
+    // Stats, Advanced usw.) sind fuer diese Altersklassen nicht relevant.
+    const ABGESPECKT_STAT_LABELS = ["punkte", "freiwürfe", "fouls", "fouls (pf)", "2-punkte-körbe", "3-punkte-körbe", "plus/minus"];
+    const displayStatCategories = isAbgespeckteAkte
+        ? statCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => ABGESPECKT_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0)
+        : statCategories;
     function addStatCategory(label) {
         persistMeta({ statCategories: [...statCategories, { id: uid(), label, fields: [] }] });
     }
@@ -6611,7 +6618,7 @@ function SpielerAkte() {
                                             React.createElement("th", { className: "text-left px-4 py-3" }, "Datum"),
                                             React.createElement("th", { className: "text-left px-4 py-3" }, "Gegner"),
                                             React.createElement("th", { className: "text-right px-4 py-3" }, "Min"),
-                                            statCategories.map((cat) => cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement(React.Fragment, { key: f.id },
+                                            displayStatCategories.map((cat) => cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement(React.Fragment, { key: f.id },
                                                 React.createElement("th", { className: "text-right px-4 py-3", title: f.label }, f.label),
                                                 React.createElement("th", { className: "text-right px-4 py-3", title: `${f.label} Quote` },
                                                     f.label,
@@ -6621,7 +6628,7 @@ function SpielerAkte() {
                                         React.createElement("td", { className: "px-4 py-3 whitespace-nowrap" }, fmtDate(s.date)),
                                         React.createElement("td", { className: "px-4 py-3" }, s.gegner || "–"),
                                         React.createElement("td", { className: "px-4 py-3 text-right" }, s.minuten || 0),
-                                        statCategories.map((cat) => cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement(React.Fragment, { key: f.id },
+                                        displayStatCategories.map((cat) => cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement(React.Fragment, { key: f.id },
                                             React.createElement("td", { className: "px-4 py-3 text-right whitespace-nowrap" },
                                                 s[`${f.id}_m`] || 0,
                                                 "/",
@@ -6842,9 +6849,9 @@ function SpielerAkte() {
         modal === "selfProfile" && selectedPlayer && (React.createElement(Modal, { title: "Meine Daten bearbeiten", onClose: () => setModal(null) },
             React.createElement(PlayerSelfProfileForm, { initial: selectedPlayer, mandatory: false, onSubmit: async (changes) => { await persistPlayerFields(selectedPlayer.id, changes); setModal(null); }, onClose: () => setModal(null) }))),
         modal === "stat" && (React.createElement(Modal, { title: "Spielstatistik hinzuf\u00FCgen", onClose: () => setModal(null), wide: true },
-            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statCategories: statCategories }))),
+            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statCategories: displayStatCategories }))),
         modal === "editStat" && editingStat && (React.createElement(Modal, { title: "Spielstatistik bearbeiten", onClose: () => { setModal(null); setEditingStat(null); }, wide: true },
-            React.createElement(StatForm, { onSubmit: handleEditStat, onClose: () => { setModal(null); setEditingStat(null); }, statCategories: statCategories, initialEntry: editingStat }))),
+            React.createElement(StatForm, { onSubmit: handleEditStat, onClose: () => { setModal(null); setEditingStat(null); }, statCategories: displayStatCategories, initialEntry: editingStat }))),
         modal === "statFields" && (React.createElement(Modal, { title: "Statistik-Kategorien verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(StatCategoriesManager, { categories: statCategories, onAddCat: addStatCategory, onRenameCat: renameStatCategory, onDeleteCat: deleteStatCategory, onMoveCat: moveStatCategory, onAddField: addStatFieldToCategory, onRenameField: renameStatFieldInCategory, onDeleteField: deleteStatFieldFromCategory, onMoveField: moveStatFieldInCategory, onClose: () => setModal(null) }))),
         modal === "testTypes" && (React.createElement(Modal, { title: "Test-Arten verwalten", onClose: () => setModal(null) },
