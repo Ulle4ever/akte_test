@@ -1553,6 +1553,136 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
         return { id: `blk-${i}`, title: r.title, date: isoDate(date), time: r.startTime, endTime: r.endTime };
     });
 }
+/* ============================================================
+   DBB-SCORES-SCREENSHOT-IMPORT (fuer U12/U14/U16/U18 - JBBL/NBBL
+   haben eigene, ausfuehrlichere Statistik-Quellen).
+   Die DBB-Scores-App zeigt pro Spiel eine Spieler-Tabelle mit
+   Trikot-Nummer (blauer Kreis) + Name links und 4 Werte-Spalten
+   rechts, weil die App selbst keine breitere Ansicht anbietet
+   muessen Trainer zwei Screenshots hochladen: einmal
+   Minuten/Punkte/Feldwuerfe/FW%, einmal 2Pkt/3Pkt/Fouls/Plus-Minus.
+   Beide Tabellen haben exakt das gleiche Zeilenraster (Trikot-Kreis
+   in derselben Spalte, feste Zeilenhoehe), nur die 4 Werte-Spalten
+   rechts unterscheiden sich - deshalb werden Zeilen anhand des
+   blauen Trikot-Kreises erkannt statt anhand von Trennlinien.
+   ============================================================ */
+function findDbbRowBands(canvas) {
+    const W = canvas.width, H = canvas.height;
+    const data = canvas.getContext("2d").getImageData(0, 0, W, H).data;
+    const badgeX = Math.round(W * 0.0908);
+    function isBlue(r, g, b) { return b > 150 && b > r + 30 && b > g + 10 && r < 140; }
+    const runs = [];
+    let inRun = false, start = 0;
+    for (let y = 0; y < H; y++) {
+        const i = (y * W + badgeX) * 4;
+        const blue = isBlue(data[i], data[i + 1], data[i + 2]);
+        if (blue && !inRun) { inRun = true; start = y; }
+        if (!blue && inRun) { inRun = false; if (y - start > 10) runs.push([start, y]); }
+    }
+    if (inRun) runs.push([start, H]);
+    if (runs.length < 2)
+        return [];
+    const badgeH = runs[0][1] - runs[0][0];
+    const rowH = runs[1][0] - runs[0][0];
+    const pad = (rowH - badgeH) / 2;
+    return runs.map(([bTop]) => ({ top: Math.round(bTop - pad), bottom: Math.round(bTop - pad + rowH) }));
+}
+function findDbbHeaderRegion(canvas, rowBands) {
+    const W = canvas.width;
+    const data = canvas.getContext("2d").getImageData(0, 0, W, canvas.height).data;
+    const headerTop = rowBands.length ? Math.max(0, rowBands[0].top - 97) : 415;
+    const headerBottom = rowBands.length ? rowBands[0].top : 515;
+    // Drei Abtastzeilen ueber die Kopfzeilen-Hoehe verteilt: die "SPIELER/IN"-
+    // Beschriftung links ist nur an einzelnen Textstrichen dunkel, die echte
+    // dunkle Spalten-Kopfzeile rechts ist ueber ihre gesamte Hoehe durchgehend
+    // dunkel gefuellt - so lassen sich beide zuverlaessig unterscheiden.
+    const ys = [0.2, 0.5, 0.8].map((f) => Math.round(headerTop + (headerBottom - headerTop) * f));
+    function luma(x, y) { const i = (y * W + x) * 4; return 0.299 * data[i] + 0.587 * data[i + 1] + 0.114 * data[i + 2]; }
+    // Gleitender Mittelwert statt Pixel-fuer-Pixel-Test: einzelne helle Kanten-
+    // /Antialiasing-Pixel innerhalb der dunklen Kopfzeile duerfen die Erkennung
+    // nicht abbrechen lassen (sonst rutscht die Grenze zu weit nach rechts).
+    const win = 30;
+    let nameColEnd = Math.round(W * 0.5);
+    for (let x = 0; x < W - win; x++) {
+        let sum = 0;
+        for (const y of ys) {
+            for (let k = 0; k < win; k += 3)
+                sum += luma(x + k, y);
+        }
+        const avg = sum / (ys.length * Math.ceil(win / 3));
+        if (avg < 140) { nameColEnd = x; break; }
+    }
+    return { minX: nameColEnd, minY: headerTop, maxX: W, maxY: headerBottom };
+}
+async function findDbbColumnBands(worker, canvas, headerRegion) {
+    const crop = prepareOcrCanvas(canvas, headerRegion, 4);
+    const scale = crop.width / (headerRegion.maxX - headerRegion.minX + 8);
+    await worker.setParameters({ tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz%/+- " });
+    const result = await worker.recognize(crop);
+    const words = (result.data.words || [])
+        // Sehr schmale "Woerter" sind fast immer OCR-Rauschen an der Kante des
+        // Zuschnitts (z.B. ein einzelnes Antialiasing-Pixel), keine echte Spalte.
+        .filter((w) => w.text && w.text.trim() && (w.bbox.x1 - w.bbox.x0) > 15)
+        .map((w) => (headerRegion.minX - 4) + (w.bbox.x0 + w.bbox.x1) / 2 / scale)
+        .sort((a, b) => a - b);
+    if (words.length === 0)
+        return [];
+    const bands = [];
+    for (let i = 0; i < words.length; i++) {
+        const prevMid = i === 0 ? headerRegion.minX : (words[i - 1] + words[i]) / 2;
+        const nextMid = i === words.length - 1 ? headerRegion.maxX : (words[i] + words[i + 1]) / 2;
+        bands.push({ minX: Math.round(prevMid), maxX: Math.round(nextMid) });
+    }
+    return bands;
+}
+async function extractDbbScoresScreenshot(imgEl, columnLabels, onProgress) {
+    await loadTesseractScript();
+    const canvas = document.createElement("canvas");
+    canvas.width = imgEl.naturalWidth;
+    canvas.height = imgEl.naturalHeight;
+    canvas.getContext("2d").drawImage(imgEl, 0, 0);
+    const rowBands = findDbbRowBands(canvas);
+    if (rowBands.length === 0)
+        return { rows: [], error: "Konnte keine Spielerzeilen erkennen. Ist der Screenshot vollstaendig und unbeschnitten?" };
+    const worker = typeof window.Tesseract.createWorker === "function" ? await window.Tesseract.createWorker() : null;
+    if (worker) {
+        await worker.load();
+        await worker.loadLanguage("deu");
+        await worker.initialize("deu");
+    }
+    if (!worker)
+        return { rows: [], error: "Bilderkennungs-Bibliothek konnte nicht initialisiert werden." };
+    try {
+        const headerRegion = findDbbHeaderRegion(canvas, rowBands);
+        const colBands = await findDbbColumnBands(worker, canvas, headerRegion);
+        if (colBands.length !== columnLabels.length) {
+            return { rows: [], error: `Es wurden ${colBands.length} statt ${columnLabels.length} Spalten erkannt - bitte prüfen, ob der Screenshot die Spalten ${columnLabels.join(", ")} unbeschnitten zeigt, und erneut hochladen.` };
+        }
+        const nameRegion = { minX: Math.round(canvas.width * 0.14), maxX: headerRegion.minX - 8 };
+        const rows = [];
+        for (let i = 0; i < rowBands.length; i++) {
+            const band = rowBands[i];
+            if (onProgress)
+                onProgress(i + 1, rowBands.length);
+            await worker.setParameters({ tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÄÖÜäöüß- " });
+            const nameText = (await worker.recognize(prepareOcrCanvas(canvas, { minX: nameRegion.minX, minY: band.top, maxX: nameRegion.maxX, maxY: band.bottom }, 2))).data.text.trim().replace(/\s+/g, " ");
+            if (!nameText)
+                continue;
+            const values = {};
+            await worker.setParameters({ tessedit_char_whitelist: "0123456789:.%/-+ " });
+            for (let c = 0; c < colBands.length; c++) {
+                const cell = { minX: colBands[c].minX, minY: band.top, maxX: colBands[c].maxX, maxY: band.bottom };
+                const text = (await worker.recognize(prepareOcrCanvas(canvas, cell, 2))).data.text.trim().replace(/\s+/g, " ");
+                values[columnLabels[c]] = text;
+            }
+            rows.push({ name: nameText, values });
+        }
+        return { rows, error: rows.length === 0 ? "Keine Spielerzeilen gefunden." : null };
+    }
+    finally {
+        await worker.terminate();
+    }
+}
 const inputClass = "w-full rounded-lg border border-stone-300 px-3 py-2.5 sm:py-2 text-sm text-slate-900 focus:outline-none focus:ring-2 focus:ring-[#C43E0E] focus:border-[#C43E0E] transition";
 const labelClass = "block text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1";
 const shadowClass = "shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)]";
@@ -1590,7 +1720,7 @@ function TeamsManager({ teams, onEdit, onClose }) {
 const ALTERSKLASSE_OPTIONS = ["U12", "U14", "U16", "U18", "JBBL", "NBBL"];
 // Altersklassen, fuer die der DBB-Scores-Statistik-Import angeboten wird (JBBL/NBBL
 // haben eigene, ausfuehrlichere Statistiken und brauchen den Import nicht).
-const DBB_SCORES_ALTERSKLASSEN = ["U12", "U14"];
+const DBB_SCORES_ALTERSKLASSEN = ["U12", "U14", "U16", "U18"];
 function TeamForm({ initial, onSubmit, onClose }) {
     const [name, setName] = useState(initial?.name || "");
     const [altersklasse, setAltersklasse] = useState(initial?.altersklasse || "");
@@ -3157,6 +3287,174 @@ function AdvancedStatsImportModal({ players, teams, onConfirm, onClose }) {
             React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0 || !date, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
                 matchedCount,
                 " Spieler importieren"))));
+}
+function parseDbbMinutes(raw) {
+    const m = (raw || "").match(/(\d{1,3})\s*[:.]\s*(\d{2})/);
+    if (m)
+        return Math.round((parseInt(m[1], 10) + parseInt(m[2], 10) / 60) * 10) / 10;
+    const n = parseFloat((raw || "").replace(",", "."));
+    return isNaN(n) ? null : n;
+}
+function parseDbbInt(raw) {
+    const m = (raw || "").match(/-?\d+/);
+    return m ? parseInt(m[0], 10) : null;
+}
+function parseDbbFraction(raw) {
+    const m = (raw || "").match(/(\d+)\s*\/\s*(\d+)/);
+    return m ? { made: parseInt(m[1], 10), att: parseInt(m[2], 10) } : { made: null, att: null };
+}
+function DbbScoresImportModal({ teams, allPlayers, onConfirm, onClose }) {
+    const [stage, setStage] = useState("setup");
+    const [teamId, setTeamId] = useState(teams[0]?.id || "");
+    const [date, setDate] = useState(today());
+    const [gegner, setGegner] = useState("");
+    const [progress, setProgress] = useState({ done: 0, total: 0 });
+    const [parseError, setParseError] = useState("");
+    const [shot1Rows, setShot1Rows] = useState([]);
+    const [rows, setRows] = useState([]);
+    const [matches, setMatches] = useState([]);
+    const teamPlayers = allPlayers.filter((p) => p.teamId === teamId);
+    const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}`;
+    function loadImage(file) {
+        return new Promise((resolve, reject) => {
+            const url = URL.createObjectURL(file);
+            const img = new Image();
+            img.onload = () => resolve(img);
+            img.onerror = () => reject(new Error("Bild konnte nicht geladen werden."));
+            img.src = url;
+        });
+    }
+    async function handleShot1(e) {
+        const file = e.target.files[0];
+        if (!file)
+            return;
+        setParseError("");
+        setStage("processing1");
+        try {
+            const img = await loadImage(file);
+            const { rows: r, error } = await extractDbbScoresScreenshot(img, ["M", "Pkt", "FW", "FW%"], (done, total) => setProgress({ done, total }));
+            if (error) {
+                setParseError(error);
+                setStage("setup");
+                return;
+            }
+            setShot1Rows(r);
+            setStage("upload2");
+        }
+        catch (err) {
+            setParseError("Bilderkennung fehlgeschlagen: " + (err.message || "Unbekannter Fehler"));
+            setStage("setup");
+        }
+    }
+    async function handleShot2(e) {
+        const file = e.target.files[0];
+        if (!file)
+            return;
+        setParseError("");
+        setStage("processing2");
+        try {
+            const img = await loadImage(file);
+            const { rows: r2, error } = await extractDbbScoresScreenshot(img, ["2Pkt", "3Pkt", "PF", "+/-"], (done, total) => setProgress({ done, total }));
+            if (error) {
+                setParseError(error);
+                setStage("upload2");
+                return;
+            }
+            const merged = shot1Rows.map((r1) => {
+                const norm = normalizeName(r1.name);
+                const match = r2.find((x) => normalizeName(x.name) === norm);
+                return { name: r1.name, ...r1.values, ...(match ? match.values : { "2Pkt": "", "3Pkt": "", PF: "", "+/-": "" }) };
+            });
+            setRows(merged);
+            setMatches(merged.map((row) => {
+                const norm = normalizeName(row.name);
+                const hit = teamPlayers.find((p) => normalizeName(p.name) === norm);
+                return hit ? hit.id : "";
+            }));
+            setStage("review");
+        }
+        catch (err) {
+            setParseError("Bilderkennung fehlgeschlagen: " + (err.message || "Unbekannter Fehler"));
+            setStage("upload2");
+        }
+    }
+    function updateCell(i, key, value) {
+        setRows((prev) => prev.map((r, idx) => (idx === i ? { ...r, [key]: value } : r)));
+    }
+    function setMatchAt(i, playerId) {
+        setMatches((m) => m.map((v, idx) => (idx === i ? playerId : v)));
+    }
+    function handleConfirm() {
+        const entries = rows
+            .map((row, i) => {
+                const ft = parseDbbFraction(row.FW);
+                return {
+                    playerId: matches[i],
+                    stats: {
+                        minuten: parseDbbMinutes(row.M),
+                        punkte: parseDbbInt(row.Pkt),
+                        ft_m: ft.made, ft_a: ft.att,
+                        zweiPkt: parseDbbInt(row["2Pkt"]),
+                        dreiPkt: parseDbbInt(row["3Pkt"]),
+                        fouls: parseDbbInt(row.PF),
+                        plusMinus: parseDbbInt(row["+/-"]),
+                    },
+                };
+            })
+            .filter((x) => x.playerId);
+        onConfirm(entries, date, gegner.trim());
+        onClose();
+    }
+    const matchedCount = matches.filter(Boolean).length;
+    if (stage === "setup" || stage === "processing1") {
+        return (React.createElement("div", { className: "space-y-4" },
+            React.createElement("p", { className: "text-xs text-slate-500" }, "Für U12/U14/U16/U18 gibt es keine ausführlichen Statistiken, sondern nur die Werte aus der DBB-Scores-App. Da die App selbst keine Gesamtansicht anbietet, braucht es zwei Screenshots pro Spiel: einmal die Spalten Minuten/Punkte/Feldwürfe/FW%, einmal 2Pkt/3Pkt/Fouls/Plus-Minus."),
+            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
+                React.createElement(Field, { label: "Team" },
+                    React.createElement("select", { className: inputClass, value: teamId, onChange: (e) => setTeamId(e.target.value) },
+                        teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
+                React.createElement(Field, { label: "Datum des Spiels" },
+                    React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) }))),
+            React.createElement(Field, { label: "Gegner (optional)" },
+                React.createElement("input", { className: inputClass, value: gegner, onChange: (e) => setGegner(e.target.value), placeholder: "z. B. TSV Nord" })),
+            parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError),
+            stage === "processing1"
+                ? React.createElement("div", { className: "text-center py-6 text-sm text-slate-500" },
+                    React.createElement(IconLoader, { className: "animate-spin mx-auto mb-2 text-[#C43E0E]", size: 22 }),
+                    progress.total ? `Zeile ${progress.done} von ${progress.total} wird gelesen…` : "Bild wird geladen…")
+                : React.createElement(Field, { label: "Screenshot 1: Minuten / Punkte / Feldwürfe / FW%" },
+                    React.createElement("input", { type: "file", accept: "image/*", onChange: handleShot1, disabled: !teamId || !date, className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }))));
+    }
+    if (stage === "upload2" || stage === "processing2") {
+        return (React.createElement("div", { className: "space-y-4" },
+            React.createElement("p", { className: "text-xs text-slate-500" }, shot1Rows.length, " Spielerzeilen aus Screenshot 1 erkannt. Jetzt den zweiten Screenshot (2Pkt / 3Pkt / Fouls / Plus-Minus, gleiches Spiel) hochladen."),
+            parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError),
+            stage === "processing2"
+                ? React.createElement("div", { className: "text-center py-6 text-sm text-slate-500" },
+                    React.createElement(IconLoader, { className: "animate-spin mx-auto mb-2 text-[#C43E0E]", size: 22 }),
+                    progress.total ? `Zeile ${progress.done} von ${progress.total} wird gelesen…` : "Bild wird geladen…")
+                : React.createElement(Field, { label: "Screenshot 2: 2Pkt / 3Pkt / Fouls / Plus-Minus" },
+                    React.createElement("input", { type: "file", accept: "image/*", onChange: handleShot2, className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }))));
+    }
+    return (React.createElement("div", { className: "space-y-4" },
+        React.createElement("p", { className: "text-xs text-slate-500" }, rows.length, " Spielerzeilen erkannt. Werte vor dem Speichern prüfen (Bilderkennung ist nie 100% fehlerfrei) - Zellen sind direkt bearbeitbar. Punkte fließen in die normale Statistik, Freiwürfe in \"Wurfquoten\"; 2Pkt/3Pkt/Fouls/Plus-Minus werden als neue Felder unter \"DBB Scores\" angelegt."),
+        React.createElement("div", { className: "max-h-[45vh] overflow-auto border border-stone-200 rounded-lg" },
+            React.createElement("table", { className: "w-full text-xs" },
+                React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
+                    React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
+                        ["Spieler", "M", "Pkt", "FW", "2Pkt", "3Pkt", "PF", "+/-", "Zugeordnet"].map((h) => React.createElement("th", { key: h, className: "text-left px-2 py-2 whitespace-nowrap" }, h)))),
+                React.createElement("tbody", null, rows.map((row, i) => (React.createElement("tr", { key: i, className: "border-t border-stone-100" },
+                    React.createElement("td", { className: "px-2 py-1 font-medium text-slate-700 whitespace-nowrap" }, row.name),
+                    ["M", "Pkt", "FW", "2Pkt", "3Pkt", "PF", "+/-"].map((key) => React.createElement("td", { key: key, className: "px-1 py-1" },
+                        React.createElement("input", { className: "w-14 rounded border border-stone-200 px-1 py-0.5 text-xs", value: row[key] ?? "", onChange: (e) => updateCell(i, key, e.target.value) }))),
+                    React.createElement("td", { className: "px-2 py-1" },
+                        React.createElement("select", { className: `rounded border px-1.5 py-1 text-xs ${matches[i] ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`, value: matches[i], onChange: (e) => setMatchAt(i, e.target.value) },
+                            React.createElement("option", { value: "" }, "– Überspringen –"),
+                            teamPlayers.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))))))))),
+        React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { onClick: onClose, className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Abbrechen"),
+            React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
+                matchedCount, " Spieler importieren"))));
 }
 const EVENT_TYPE_STYLES = {
     tt: { label: "Teamtraining (TT)", dot: "bg-teal-500", chip: "bg-teal-50 text-teal-700", border: "border-teal-400" },
@@ -5487,6 +5785,7 @@ function SpielerAkte() {
     const isFullTrainer = isTrainer && !trainerTeamId;
     const teams = meta.teams;
     const visibleTeams = trainerTeamId ? teams.filter((t) => t.id === trainerTeamId) : teams;
+    const dbbEligibleTeams = visibleTeams.filter((t) => DBB_SCORES_ALTERSKLASSEN.includes(t.altersklasse));
     const visiblePlayers = players
         .filter((p) => selectedTeamId === "all" || p.teamId === selectedTeamId)
         .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
@@ -5823,6 +6122,62 @@ function SpielerAkte() {
             persistPlayerFields(playerId, { stats: newStats });
         });
     }
+    function handleImportDbbScores(entries, date, gegner) {
+        const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
+        let normalCat = cats.find((c) => c.id === "normal") || cats[0];
+        let dbbCat = cats.find((c) => c.id === "dbbScores");
+        if (!dbbCat) {
+            dbbCat = { id: "dbbScores", label: "DBB Scores", fields: [] };
+            cats.push(dbbCat);
+        }
+        function findOrCreateField(cat, label, altLabels = []) {
+            const names = [label.toLowerCase(), ...altLabels.map((l) => l.toLowerCase())];
+            for (const c of cats) {
+                const f = c.fields.find((f) => names.includes(f.label.toLowerCase()));
+                if (f)
+                    return f.id;
+            }
+            const newField = { id: uid(), label, kind: "number" };
+            cat.fields = [...cat.fields, newField];
+            return newField.id;
+        }
+        const foulsFieldId = findOrCreateField(normalCat, "Fouls", ["Fouls (PF)"]);
+        const zweiPktFieldId = findOrCreateField(dbbCat, "2-Punkte-Körbe");
+        const dreiPktFieldId = findOrCreateField(dbbCat, "3-Punkte-Körbe");
+        const plusMinusFieldId = findOrCreateField(dbbCat, "Plus/Minus");
+        persistMeta({ statCategories: cats });
+        entries.forEach(({ playerId, stats: row }) => {
+            const fieldValues = {};
+            if (row.minuten !== null)
+                fieldValues.minuten = row.minuten;
+            if (row.punkte !== null)
+                fieldValues.punkte = row.punkte;
+            if (row.ft_m !== null)
+                fieldValues.ft_m = row.ft_m;
+            if (row.ft_a !== null)
+                fieldValues.ft_a = row.ft_a;
+            if (row.fouls !== null)
+                fieldValues[foulsFieldId] = row.fouls;
+            if (row.zweiPkt !== null)
+                fieldValues[zweiPktFieldId] = row.zweiPkt;
+            if (row.dreiPkt !== null)
+                fieldValues[dreiPktFieldId] = row.dreiPkt;
+            if (row.plusMinus !== null)
+                fieldValues[plusMinusFieldId] = row.plusMinus;
+            const player = players.find((p) => p.id === playerId);
+            if (!player)
+                return;
+            const newStats = [...(player.stats || [])];
+            const existingIdx = newStats.findIndex((s) => s.date === date);
+            if (existingIdx !== -1) {
+                newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
+            }
+            else {
+                newStats.push({ id: uid(), date, gegner: gegner || "", minuten: row.minuten ?? 0, ...fieldValues });
+            }
+            persistPlayerFields(playerId, { stats: newStats });
+        });
+    }
     function handleImportAdvancedStats(entries, date, gegner) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
         let advancedCat = cats.find((c) => c.id === "advanced");
@@ -5980,6 +6335,7 @@ function SpielerAkte() {
                         { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => setModal("importBoxscore") },
                         { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
                         { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
+                        ...(dbbEligibleTeams.length > 0 ? [{ label: "DBB Scores importieren", icon: IconUpload, onClick: () => setModal("importDbbScores") }] : []),
                     ] })),
                 React.createElement(HeaderMenu, { label: "Verwalten", icon: IconSettings, isOpen: openHeaderMenu === "settings", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "settings" ? null : "settings"), onClose: () => setOpenHeaderMenu(null), items: isFullTrainer
                         ? [
@@ -6509,7 +6865,9 @@ function SpielerAkte() {
         modal === "importAdvanced" && (React.createElement(Modal, { title: "Advanced Stats importieren", onClose: () => setModal(null), wide: true },
             React.createElement(AdvancedStatsImportModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
         modal === "advancedRechnerLive" && (React.createElement(Modal, { title: "Advanced-Rechner verbinden", onClose: () => setModal(null), wide: true },
-            React.createElement(AdvancedRechnerLiveModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) })))));
+            React.createElement(AdvancedRechnerLiveModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
+        modal === "importDbbScores" && (React.createElement(Modal, { title: "DBB Scores importieren", onClose: () => setModal(null), wide: true },
+            React.createElement(DbbScoresImportModal, { teams: dbbEligibleTeams, allPlayers: players, onConfirm: handleImportDbbScores, onClose: () => setModal(null) })))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(SpielerAkte, null));
 </script>
