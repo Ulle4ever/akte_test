@@ -6241,9 +6241,14 @@ function SpielerAkte() {
     // Scores tatsaechlich liefert - alle anderen (Rebounds, Assists, Hustle-
     // Stats, Advanced usw.) sind fuer diese Altersklassen nicht relevant.
     const ABGESPECKT_STAT_LABELS = ["punkte", "freiwürfe", "fouls", "fouls (pf)", "2-punkte-körbe", "3-punkte-körbe", "plus/minus"];
+    // Umgekehrt: JBBL/NBBL (volle Version) fuehren eigene, ausfuehrlichere
+    // Wurfstatistiken (fg/tp als Treffer/Versuche) - die reinen DBB-Scores-
+    // Trefferzahlen 2-/3-Punkte-Koerbe sind dort redundant und sollen nicht
+    // erscheinen, auch wenn sie club-weit als Statistik-Kategorie existieren.
+    const FULL_HIDDEN_STAT_LABELS = ["2-punkte-körbe", "3-punkte-körbe"];
     const displayStatCategories = isAbgespeckteAkte
         ? statCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => ABGESPECKT_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0)
-        : statCategories;
+        : statCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => !FULL_HIDDEN_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0);
     function addStatCategory(label) {
         persistMeta({ statCategories: [...statCategories, { id: uid(), label, fields: [] }] });
     }
