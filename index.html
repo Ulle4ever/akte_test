@@ -359,6 +359,7 @@ const IconUpload = (p) => React.createElement(Icon, { ...p },
     React.createElement("polyline", { points: "17 8 12 3 7 8" }),
     React.createElement("line", { x1: "12", y1: "3", x2: "12", y2: "15" }));
 const POSITIONS = ["Point Guard", "Shooting Guard", "Small Forward", "Power Forward", "Center"];
+const POSITION_ABBR = { "Point Guard": "PG", "Shooting Guard": "SG", "Small Forward": "SF", "Power Forward": "PF", "Center": "C" };
 const STATUS_OPTIONS = [
     { value: "aktiv", label: "Aktiv" },
     { value: "verletzt", label: "Verletzt" },
@@ -1756,13 +1757,16 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [status, setStatus] = useState(initial?.status || "aktiv");
     const [handedness, setHandedness] = useState(initial?.handedness || "");
     const [previousClub, setPreviousClub] = useState(initial?.previousClub || "");
+    const [nationality, setNationality] = useState(initial?.nationality || "");
     const [height, setHeight] = useState(initial?.height ?? "");
     const [weight, setWeight] = useState(initial?.weight ?? "");
     const [school, setSchool] = useState(initial?.school || "");
     const [city, setCity] = useState(initial?.city || "");
     const [district, setDistrict] = useState(initial?.district || "");
+    const [photoFile, setPhotoFile] = useState(null);
+    const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const [error, setError] = useState("");
-    function handleSubmit(e) {
+    async function handleSubmit(e) {
         e.preventDefault();
         if (!name.trim()) {
             setError("Bitte einen Namen eingeben.");
@@ -1771,6 +1775,20 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
         if (!teamId) {
             setError("Bitte ein Team auswählen.");
             return;
+        }
+        let photoUrl = initial?.photoUrl || "";
+        if (photoFile) {
+            setUploadingPhoto(true);
+            try {
+                const result = await uploadToCloudinary(photoFile);
+                photoUrl = result.url;
+            }
+            catch (err) {
+                setUploadingPhoto(false);
+                setError("Foto-Upload fehlgeschlagen. Bitte nochmal versuchen (oder ohne neues Foto speichern).");
+                return;
+            }
+            setUploadingPhoto(false);
         }
         onSubmit({
             name: name.trim(),
@@ -1781,11 +1799,13 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             status,
             handedness,
             previousClub: previousClub.trim(),
+            nationality: nationality.trim(),
             height: height === "" ? "" : Number(height),
             weight: weight === "" ? "" : Number(weight),
             school: school.trim(),
             city: city.trim(),
             district: district.trim(),
+            photoUrl,
         });
         onClose();
     }
@@ -1796,6 +1816,10 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             React.createElement("select", { className: inputClass, value: teamId, onChange: (e) => setTeamId(e.target.value) },
                 teams.length === 0 && React.createElement("option", { value: "" }, "Kein Team vorhanden"),
                 teams.map((t) => (React.createElement("option", { key: t.id, value: t.id }, t.name))))),
+        React.createElement(Field, { label: "Portraitfoto (optional)" },
+            React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => setPhotoFile(e.target.files[0] || null), className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }),
+            initial?.photoUrl && !photoFile && React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Aktuell ist schon ein Foto hinterlegt - neue Datei wählen, um es zu ersetzen."),
+            photoFile && React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Ausgewählt: ", photoFile.name)),
         React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: "Position" },
                 React.createElement("select", { className: inputClass, value: position, onChange: (e) => setPosition(e.target.value) }, POSITIONS.map((p) => React.createElement("option", { key: p, value: p }, p)))),
@@ -1815,6 +1839,8 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
                     React.createElement("option", { value: "beidhaendig" }, "Beidhändig"))),
             React.createElement(Field, { label: "Letzter Verein" },
                 React.createElement("input", { className: inputClass, value: previousClub, onChange: (e) => setPreviousClub(e.target.value), placeholder: "z. B. TSV Nord" }))),
+        React.createElement(Field, { label: "Nationalität (optional)" },
+            React.createElement("input", { className: inputClass, value: nationality, onChange: (e) => setNationality(e.target.value), placeholder: "z. B. DE oder DE/NG" })),
         React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: "Größe (cm)" },
                 React.createElement("input", { type: "number", className: inputClass, value: height, onChange: (e) => setHeight(e.target.value), min: "0", max: "260", placeholder: "z. B. 188" })),
@@ -1828,7 +1854,7 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             React.createElement(Field, { label: "Stadtteil" },
                 React.createElement("input", { className: inputClass, value: district, onChange: (e) => setDistrict(e.target.value), placeholder: "z. B. Ehrenfeld" }))),
         error && React.createElement("p", { className: "text-xs text-red-600" }, error),
-        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Änderungen speichern" : "Spieler anlegen")));
+        React.createElement("button", { type: "submit", disabled: uploadingPhoto, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 disabled:opacity-60 transition" }, uploadingPhoto ? "Foto wird hochgeladen…" : initial ? "Änderungen speichern" : "Spieler anlegen")));
 }
 /* Formular, das der Spieler/die Eltern selbst ausfüllen - bewusst ohne
    Team/Position/Rückennummer/Status (die bleiben Trainer-Sache). Wird sowohl
@@ -6497,42 +6523,51 @@ function SpielerAkte() {
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
-                selectedPlayer && (React.createElement("div", { className: "rsk-fade-in min-w-0" },
-                    React.createElement("div", { className: `${cardClass} p-6 relative overflow-hidden` },
-                        React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#C43E0E] via-slate-800 to-[#C43E0E]" }),
-                        React.createElement("div", { className: "flex items-start justify-between flex-wrap gap-4" },
-                            React.createElement("div", { className: "flex items-center gap-4" },
-                                React.createElement("div", { className: "w-16 h-16 rounded-2xl bg-gradient-to-br from-[#C43E0E] to-[#A8350C] text-white flex items-center justify-center text-2xl font-black shrink-0 shadow-[0_4px_14px_rgba(196,62,14,0.28)]" }, selectedPlayer.number !== "" && selectedPlayer.number !== undefined ? selectedPlayer.number : (splitName(selectedPlayer.name).last || "?").charAt(0)),
+                                selectedPlayer && (React.createElement("div", { className: "rsk-fade-in min-w-0" },
+                    React.createElement("div", { className: "rounded-2xl overflow-hidden relative bg-gradient-to-br from-slate-900 to-slate-800" },
+                        React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-[#C43E0E] z-10" }),
+                        React.createElement("div", { className: "pointer-events-none select-none absolute inset-0 overflow-hidden", "aria-hidden": "true" },
+                            [0.18, 0.62].map((topFrac, i) => React.createElement("div", { key: i, className: "absolute left-0 right-0 whitespace-nowrap text-[15vw] sm:text-[90px] font-black uppercase italic tracking-tight", style: { top: `${topFrac * 100}%`, color: "transparent", WebkitTextStroke: "1px rgba(255,255,255,0.06)" } }, Array(4).fill((selectedTeam?.name || "BB PLAYER FILE") + "  ").join(" ")))),
+                        React.createElement("div", { className: "relative z-[1] p-5 sm:p-7 flex gap-5 sm:gap-7 flex-wrap sm:flex-nowrap" },
+                            React.createElement("div", { className: "relative shrink-0" },
+                                selectedPlayer.photoUrl
+                                    ? React.createElement("img", { src: selectedPlayer.photoUrl, alt: selectedPlayer.name, className: "w-28 h-36 sm:w-36 sm:h-44 rounded-xl object-cover shadow-[0_8px_24px_rgba(0,0,0,0.35)]" })
+                                    : React.createElement("div", { className: "w-28 h-36 sm:w-36 sm:h-44 rounded-xl bg-gradient-to-br from-[#C43E0E] to-[#A8350C] text-white flex items-center justify-center text-4xl font-black shadow-[0_8px_24px_rgba(0,0,0,0.35)]" }, (splitName(selectedPlayer.name).last || "?").charAt(0)),
+                                React.createElement("div", { className: "absolute -bottom-2 left-2 flex gap-1" },
+                                    selectedPlayer.number !== "" && selectedPlayer.number !== undefined && React.createElement("span", { className: "min-w-[28px] text-center bg-white text-slate-900 text-sm font-black rounded-lg px-1.5 py-1 shadow" }, selectedPlayer.number),
+                                    selectedPlayer.position && React.createElement("span", { className: "bg-[#C43E0E] text-white text-sm font-black rounded-lg px-1.5 py-1 shadow" }, POSITION_ABBR[selectedPlayer.position] || selectedPlayer.position))),
+                            React.createElement("div", { className: "min-w-0 flex-1 flex flex-col justify-between gap-4 pt-1" },
                                 React.createElement("div", null,
-                                    !isTrainer && selectedPlayer.id === account.playerId && (React.createElement("p", { className: "text-sm font-medium text-[#C43E0E] mb-0.5" }, playerGreeting, ", ", splitName(selectedPlayer.name).first || selectedPlayer.name)),
-                                    React.createElement("div", { className: "flex items-baseline gap-1.5 flex-wrap" },
-                                        splitName(selectedPlayer.name).first && (React.createElement("span", { className: "text-3xl font-normal text-slate-400" }, splitName(selectedPlayer.name).first)),
-                                        React.createElement("span", { className: "text-3xl font-bold text-slate-900" }, splitName(selectedPlayer.name).last)),
-                                    React.createElement("div", { className: "flex items-center gap-2 mt-1 flex-wrap" },
-                                        React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide" }, [selectedPlayer.position, selectedTeam?.name].filter(Boolean).join(" · ") || "Kein Team"),
-                                        STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label))))),
-                            isTrainer && (React.createElement("div", { className: "flex gap-2" },
-                                React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Bearbeiten" },
+                                    !isTrainer && selectedPlayer.id === account.playerId && (React.createElement("p", { className: "text-sm font-medium text-[#FF6A2B] mb-1" }, playerGreeting, ", ", splitName(selectedPlayer.name).first || selectedPlayer.name)),
+                                    React.createElement("h2", { className: "font-display italic font-black uppercase text-2xl sm:text-4xl leading-[0.95] text-white break-words" }, selectedPlayer.name),
+                                    React.createElement("div", { className: "flex items-center gap-2 mt-2 flex-wrap" },
+                                        React.createElement("p", { className: "text-sm text-white/60" }, selectedTeam?.name || "Kein Team"),
+                                        STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label)))),
+                                (() => {
+                                    const bioItems = [
+                                        { label: "Geburtsdatum", value: selectedPlayer.birthdate ? fmtDate(selectedPlayer.birthdate) : "" },
+                                        { label: "Nationalität", value: selectedPlayer.nationality || "" },
+                                        { label: "Größe", value: selectedPlayer.height ? `${selectedPlayer.height} cm` : "" },
+                                        { label: "Position", value: selectedPlayer.position || "" },
+                                        { label: "Gewicht", value: selectedPlayer.weight ? `${selectedPlayer.weight} kg` : "" },
+                                        { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
+                                        { label: "Letzter Verein", value: selectedPlayer.previousClub || "", wide: true },
+                                    ].filter((b) => b.value);
+                                    if (bioItems.length === 0)
+                                        return null;
+                                    return React.createElement("div", { className: "grid grid-cols-2 gap-x-6 border-t border-white/10 pt-3" }, bioItems.map((b) => React.createElement("div", { key: b.label, className: `py-1.5 border-b border-white/10 ${b.wide ? "col-span-2" : ""}` },
+                                        React.createElement("p", { className: "text-[10px] text-white/40 uppercase tracking-wide" }, b.label),
+                                        React.createElement("p", { className: "text-sm font-semibold text-white" }, b.value))));
+                                })())),
+                        React.createElement("div", { className: "absolute top-4 right-4 z-[2] flex gap-2" },
+                            isTrainer && (React.createElement(React.Fragment, null,
+                                React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg bg-black/20 hover:bg-black/35 text-white/80", "aria-label": "Bearbeiten" },
                                     React.createElement(IconEdit, { size: 16 })),
-                                React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg hover:bg-red-50 text-red-400", "aria-label": "L\u00F6schen" },
+                                React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg bg-black/20 hover:bg-red-500/40 text-white/80", "aria-label": "Löschen" },
                                     React.createElement(IconTrash, { size: 16 })))),
-                            !isTrainer && selectedPlayer.id === account.playerId && (React.createElement("button", { onClick: () => setModal("selfProfile"), className: "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full border border-stone-200 text-slate-600 hover:bg-stone-50 transition shrink-0" },
+                            !isTrainer && selectedPlayer.id === account.playerId && (React.createElement("button", { onClick: () => setModal("selfProfile"), className: "flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full bg-black/20 hover:bg-black/35 text-white/80 transition shrink-0" },
                                 React.createElement(IconEdit, { size: 13 }),
-                                " Meine Daten bearbeiten"))),
-                        (() => {
-                            const bioItems = [
-                                { label: "Geburtsdatum", value: selectedPlayer.birthdate ? fmtDate(selectedPlayer.birthdate) : "" },
-                                { label: "Größe", value: selectedPlayer.height ? `${selectedPlayer.height} cm` : "" },
-                                { label: "Gewicht", value: selectedPlayer.weight ? `${selectedPlayer.weight} kg` : "" },
-                                { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
-                                { label: "Letzter Verein", value: selectedPlayer.previousClub || "" },
-                            ].filter((b) => b.value);
-                            if (bioItems.length === 0)
-                                return null;
-                            return React.createElement("div", { className: "flex flex-wrap gap-x-8 gap-y-3 mt-5 pt-4 border-t border-stone-100" }, bioItems.map((b) => React.createElement("div", { key: b.label },
-                                React.createElement("p", { className: "text-[11px] text-slate-400 uppercase tracking-wide mb-0.5" }, b.label),
-                                React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, b.value))));
-                        })(),
+                                " Meine Daten bearbeiten")))),
                         (() => {
                             const todayEvents = getPlayerVisibleEvents(calendarEvents, selectedPlayer).filter((e) => e.date === isoDate(new Date()));
                             if (todayEvents.length === 0)
@@ -6546,7 +6581,7 @@ function SpielerAkte() {
                                     e.location && React.createElement("span", { className: "text-xs text-slate-400" },
                                         "\u00B7 ",
                                         e.location))))));
-                        })()),
+                        })(),
                     confirmDeletePlayer && (React.createElement("div", { className: "mt-3 bg-red-50 border border-red-200 rounded-lg p-4 flex items-center justify-between flex-wrap gap-3" },
                         React.createElement("p", { className: "text-sm text-red-700" }, "Spieler wirklich l\u00F6schen? Alle Statistiken, Tests, Videos und Notizen werden mitgel\u00F6scht."),
                         React.createElement("div", { className: "flex gap-2" },
@@ -6572,7 +6607,7 @@ function SpielerAkte() {
                                     React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Anwesenheit")))),
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Auf einen Blick"),
-                                React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3 mt-1.5" }, (isAbgespeckteAkte ? [
+                                React.createElement("div", { className: "grid grid-cols-3 gap-3 mt-1.5" }, (isAbgespeckteAkte ? [
                                     { label: "Minuten", id: "minuten", color: "from-slate-700 to-slate-900", num: "text-slate-800" },
                                     { label: "Punkte", id: "punkte", color: "from-[#C43E0E] to-[#8A2C0A]", num: "text-[#C43E0E]", isField: true },
                                     { label: "FW%", id: "__ft_pct", color: "from-[#FF6A2B] to-[#C43E0E]", num: "text-[#C43E0E]" },
@@ -6582,7 +6617,8 @@ function SpielerAkte() {
                                     { label: "Punkte", id: "punkte", color: "from-[#C43E0E] to-[#8A2C0A]", num: "text-[#C43E0E]", isField: true },
                                     { label: "Rebounds", id: "rebounds", color: "from-[#FF6A2B] to-[#C43E0E]", num: "text-[#C43E0E]", isField: true },
                                     { label: "Assists", id: "assists", color: "from-slate-700 to-[#8A2C0A]", num: "text-slate-800", isField: true },
-                                    { label: "Turnover", id: "turnovers", color: "from-slate-600 to-slate-900", num: "text-slate-800", isField: true },
+                                    { label: "Blocks", id: "blocks", color: "from-slate-600 to-slate-900", num: "text-slate-800", isField: true },
+                                    { label: "Steals", id: "steals", color: "from-slate-600 to-slate-900", num: "text-slate-800", isField: true },
                                     { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]), color: "from-slate-900 to-[#FF6A2B]", num: "text-slate-800", isField: true },
                                 ]).filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 text-center relative overflow-hidden" },
                                     React.createElement("span", { className: `absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${x.color}` }),
