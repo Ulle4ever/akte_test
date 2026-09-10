@@ -4380,10 +4380,10 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
     const hour = new Date().getHours();
     const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Willkommen zurück" : "Guten Abend";
     const kpiTiles = [
-        { label: "Teams", value: teams.length, icon: IconUsers, grad: "from-slate-700 to-slate-900" },
+        { label: "Teams", value: teams.length, icon: IconUsers, grad: "from-slate-900 to-[#8A2C0A]" },
         { label: "Spieler gesamt", value: players.length, icon: IconUsers, grad: "from-slate-700 to-slate-900" },
         { label: "Verletzt / Reha", value: outPlayers.length, icon: IconAlert, grad: outPlayers.length > 0 ? "from-amber-500 to-amber-700" : "from-emerald-500 to-emerald-700" },
-        { label: "Monitoring-Check-ins", value: `${checkedInWellness.length}/${players.length}`, icon: IconHeart, grad: "from-[#C43E0E] to-[#A8350C]" },
+        { label: "Monitoring-Check-ins", value: `${checkedInWellness.length}/${players.length}`, icon: IconHeart, grad: "from-[#FF6A2B] to-[#C43E0E]" },
     ].map((k) => React.createElement("div", { key: k.label, className: "bg-white border border-stone-100 rounded-2xl p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]" },
         React.createElement("span", { className: `w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br ${k.grad} text-white flex items-center justify-center shrink-0` },
             React.createElement(k.icon, { size: 16 })),
@@ -5459,6 +5459,8 @@ function SpielerAkte() {
             React.createElement(IconLoader, { className: "animate-spin text-[#C43E0E]", size: 22 })));
     }
     const isTrainer = account.role === "trainer";
+    const greetingHour = new Date().getHours();
+    const playerGreeting = greetingHour < 11 ? "Guten Morgen" : greetingHour < 18 ? "Willkommen zurück" : "Guten Abend";
     // Team-beschraenkter Trainer-Zugang: account.teamId gesetzt -> sieht/verwaltet
     // nur sein eigenes Team (players/calendarEvents/etc. sind bereits beim Laden
     // entsprechend eingeschraenkt, hier nur fuer UI-Sichtbarkeit von Verwaltung/
@@ -6079,11 +6081,11 @@ function SpielerAkte() {
                         React.createElement(SectionLabel, null, "Verwaltung"),
                         React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, "Teams, Zugänge und die Vorlagen für Statistiken, Tests und Development-Pläne verwalten.")),
                     React.createElement("div", { className: "grid grid-cols-2 lg:grid-cols-3 gap-4" }, [
-                        { key: "team", label: "Neues Team anlegen", desc: "Team für die Spieler-Zuordnung anlegen.", icon: IconUsers, grad: "from-slate-700 to-slate-900", onClick: () => setModal("team") },
+                        { key: "team", label: "Neues Team anlegen", desc: "Team für die Spieler-Zuordnung anlegen.", icon: IconUsers, grad: "from-slate-900 to-[#8A2C0A]", onClick: () => setModal("team") },
                         { key: "accounts", label: "Zugänge verwalten", desc: "Trainer- und Spieler-Zugänge anlegen oder entfernen.", icon: IconLock, grad: "from-[#C43E0E] to-[#8A2C0A]", onClick: () => setModal("accounts") },
                         { key: "statFields", label: "Statistik-Kategorien", desc: "Felder für Spielstatistiken bearbeiten.", icon: IconSettings, grad: "from-slate-700 to-slate-900", onClick: () => setModal("statFields") },
-                        { key: "testTypes", label: "Test-Arten", desc: "Auswahlliste für Athletik-Tests pflegen.", icon: IconClipboard, grad: "from-slate-700 to-slate-900", onClick: () => setModal("testTypes") },
-                        { key: "devPlanTemplates", label: "Development-Plan-Fragen", desc: "Fragebögen für Spieler/Trainer-Bogen anpassen.", icon: IconClipboard, grad: "from-slate-700 to-slate-900", onClick: () => setModal("devPlanTemplates") },
+                        { key: "testTypes", label: "Test-Arten", desc: "Auswahlliste für Athletik-Tests pflegen.", icon: IconClipboard, grad: "from-[#FF6A2B] to-[#C43E0E]", onClick: () => setModal("testTypes") },
+                        { key: "devPlanTemplates", label: "Development-Plan-Fragen", desc: "Fragebögen für Spieler/Trainer-Bogen anpassen.", icon: IconClipboard, grad: "from-slate-900 to-[#A8350C]", onClick: () => setModal("devPlanTemplates") },
                     ].map((x) => React.createElement("button", { key: x.key, onClick: x.onClick, className: `${cardClass} p-5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all` },
                         React.createElement("span", { className: `w-10 h-10 rounded-xl bg-gradient-to-br ${x.grad} text-white flex items-center justify-center mb-3` },
                             React.createElement(x.icon, { size: 17 })),
@@ -6101,6 +6103,7 @@ function SpielerAkte() {
                             React.createElement("div", { className: "flex items-center gap-4" },
                                 React.createElement("div", { className: "w-16 h-16 rounded-2xl bg-gradient-to-br from-[#C43E0E] to-[#A8350C] text-white flex items-center justify-center text-2xl font-black shrink-0 shadow-[0_4px_14px_rgba(196,62,14,0.28)]" }, selectedPlayer.number !== "" && selectedPlayer.number !== undefined ? selectedPlayer.number : (splitName(selectedPlayer.name).last || "?").charAt(0)),
                                 React.createElement("div", null,
+                                    !isTrainer && selectedPlayer.id === account.playerId && (React.createElement("p", { className: "text-sm font-medium text-[#C43E0E] mb-0.5" }, playerGreeting, ", ", splitName(selectedPlayer.name).first || selectedPlayer.name)),
                                     React.createElement("div", { className: "flex items-baseline gap-1.5 flex-wrap" },
                                         splitName(selectedPlayer.name).first && (React.createElement("span", { className: "text-3xl font-normal text-slate-400" }, splitName(selectedPlayer.name).first)),
                                         React.createElement("span", { className: "text-3xl font-bold text-slate-900" }, splitName(selectedPlayer.name).last)),
@@ -6169,14 +6172,14 @@ function SpielerAkte() {
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Auf einen Blick"),
                                 React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3 mt-1.5" }, [
-                                    { label: "Punkte", id: "punkte", hero: true },
-                                    { label: "Rebounds", id: "rebounds", hero: false },
-                                    { label: "Assists", id: "assists", hero: false },
-                                    { label: "Turnover", id: "turnovers", hero: false },
-                                    { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]), hero: false },
+                                    { label: "Punkte", id: "punkte", color: "from-[#C43E0E] to-[#8A2C0A]", num: "text-[#C43E0E]" },
+                                    { label: "Rebounds", id: "rebounds", color: "from-[#FF6A2B] to-[#C43E0E]", num: "text-[#C43E0E]" },
+                                    { label: "Assists", id: "assists", color: "from-slate-700 to-[#8A2C0A]", num: "text-slate-800" },
+                                    { label: "Turnover", id: "turnovers", color: "from-slate-600 to-slate-900", num: "text-slate-800" },
+                                    { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]), color: "from-slate-900 to-[#FF6A2B]", num: "text-slate-800" },
                                 ].filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 text-center relative overflow-hidden" },
-                                    React.createElement("span", { className: `absolute top-0 left-0 right-0 h-1 ${x.hero ? "bg-[#C43E0E]" : "bg-slate-200"}` }),
-                                    React.createElement("p", { className: `text-lg font-bold mt-1 ${x.hero ? "text-[#C43E0E]" : "text-slate-700"}` }, avg(x.id)),
+                                    React.createElement("span", { className: `absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${x.color}` }),
+                                    React.createElement("p", { className: `text-lg font-bold mt-1 ${x.num}` }, avg(x.id)),
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Details"),
