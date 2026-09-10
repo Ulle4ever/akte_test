@@ -6552,19 +6552,25 @@ function SpielerAkte() {
                                     React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Anwesenheit")))),
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Auf einen Blick"),
-                                React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3 mt-1.5" }, [
-                                    { label: "Punkte", id: "punkte", color: "from-[#C43E0E] to-[#8A2C0A]", num: "text-[#C43E0E]" },
-                                    { label: "Rebounds", id: "rebounds", color: "from-[#FF6A2B] to-[#C43E0E]", num: "text-[#C43E0E]" },
-                                    { label: "Assists", id: "assists", color: "from-slate-700 to-[#8A2C0A]", num: "text-slate-800" },
-                                    { label: "Turnover", id: "turnovers", color: "from-slate-600 to-slate-900", num: "text-slate-800" },
-                                    { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]), color: "from-slate-900 to-[#FF6A2B]", num: "text-slate-800" },
-                                ].filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 text-center relative overflow-hidden" },
+                                React.createElement("div", { className: "grid grid-cols-3 md:grid-cols-5 gap-3 mt-1.5" }, (isAbgespeckteAkte ? [
+                                    { label: "Minuten", id: "minuten", color: "from-slate-700 to-slate-900", num: "text-slate-800" },
+                                    { label: "Punkte", id: "punkte", color: "from-[#C43E0E] to-[#8A2C0A]", num: "text-[#C43E0E]", isField: true },
+                                    { label: "FW%", id: "__ft_pct", color: "from-[#FF6A2B] to-[#C43E0E]", num: "text-[#C43E0E]" },
+                                    { label: "2Pkt", id: findFieldId(statCategories, ["2-punkte-körbe"]), color: "from-slate-700 to-[#8A2C0A]", num: "text-slate-800", isField: true },
+                                    { label: "3Pkt", id: findFieldId(statCategories, ["3-punkte-körbe"]), color: "from-slate-600 to-slate-900", num: "text-slate-800", isField: true },
+                                ] : [
+                                    { label: "Punkte", id: "punkte", color: "from-[#C43E0E] to-[#8A2C0A]", num: "text-[#C43E0E]", isField: true },
+                                    { label: "Rebounds", id: "rebounds", color: "from-[#FF6A2B] to-[#C43E0E]", num: "text-[#C43E0E]", isField: true },
+                                    { label: "Assists", id: "assists", color: "from-slate-700 to-[#8A2C0A]", num: "text-slate-800", isField: true },
+                                    { label: "Turnover", id: "turnovers", color: "from-slate-600 to-slate-900", num: "text-slate-800", isField: true },
+                                    { label: "Effizienz", id: findFieldId(statCategories, ["effizienz", "eff", "ef"]), color: "from-slate-900 to-[#FF6A2B]", num: "text-slate-800", isField: true },
+                                ]).filter((x) => x.id).map((x) => (React.createElement("div", { key: x.id, className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3 text-center relative overflow-hidden" },
                                     React.createElement("span", { className: `absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${x.color}` }),
-                                    React.createElement("p", { className: `text-lg font-bold mt-1 ${x.num}` }, avg(x.id)),
+                                    React.createElement("p", { className: `text-lg font-bold mt-1 ${x.num}` }, x.id === "__ft_pct" ? totalPct("ft_m", "ft_a") : avg(x.id)),
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
-                            React.createElement("div", null,
+                            !isAbgespeckteAkte && React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Details"),
-                                React.createElement("div", { className: "space-y-2 mt-1.5" }, statCategories.filter((cat) => isTrainer || cat.id !== "advanced").map((cat) => {
+                                React.createElement("div", { className: "space-y-2 mt-1.5" }, statCategories.filter((cat) => (isTrainer || cat.id !== "advanced") && cat.id !== "dbbScores").map((cat) => {
                                     if (cat.fields.length === 0)
                                         return null;
                                     const isOpen = expandedCats.has(cat.id);
