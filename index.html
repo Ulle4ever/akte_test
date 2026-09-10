@@ -5805,6 +5805,9 @@ function SpielerAkte() {
                     React.createElement(PlayerSelfProfileForm, { initial: selectedPlayer, mandatory: true, onSubmit: (changes) => persistPlayerFields(selectedPlayer.id, changes) })))));
     }
     const selectedTeam = selectedPlayer ? teams.find((t) => t.id === selectedPlayer.teamId) : null;
+    // Abgespeckte Akte fuer U12-U18: kein eigenstaendiges Athletik-Testing,
+    // deshalb Reiter ausblenden (Statistik-Ansicht folgt hier noch separat).
+    const isAbgespeckteAkte = selectedTeam && DBB_SCORES_ALTERSKLASSEN.includes(selectedTeam.altersklasse);
     const breadcrumbItems = [];
     if (isTrainer) {
         breadcrumbItems.push({ label: "Dashboard", onClick: goHome });
@@ -6529,7 +6532,7 @@ function SpielerAkte() {
                         React.createElement("div", { className: "flex gap-2" },
                             React.createElement("button", { onClick: () => setConfirmDeletePlayer(false), className: "px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-slate-600 hover:bg-stone-50" }, "Abbrechen"),
                             React.createElement("button", { onClick: handleDeletePlayer, className: "px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700" }, "Endg\u00FCltig l\u00F6schen")))),
-                    React.createElement("div", { className: "flex gap-5 border-b border-stone-200 mt-6 overflow-x-auto" }, TABS.filter((t) => isTrainer || PLAYER_ROLE_TABS.includes(t.key)).map((t) => {
+                    React.createElement("div", { className: "flex gap-5 border-b border-stone-200 mt-6 overflow-x-auto" }, TABS.filter((t) => (isTrainer || PLAYER_ROLE_TABS.includes(t.key)) && !(isAbgespeckteAkte && t.key === "test")).map((t) => {
                         const Icon = t.icon;
                         const active = activeTab === t.key;
                         return (React.createElement("button", { key: t.key, onClick: () => setActiveTab(t.key), className: `flex items-center gap-1.5 pb-2.5 px-0.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors shrink-0 ${active ? "border-[#C43E0E] text-slate-900" : "border-transparent text-slate-400 hover:text-slate-600"}` },
@@ -6573,8 +6576,8 @@ function SpielerAkte() {
                                             React.createElement("p", { className: "text-lg font-bold text-slate-700" }, f.kind === "shooting" ? totalPct(`${f.id}_m`, `${f.id}_a`) : avg(f.id)),
                                             React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5 truncate", title: f.label }, f.kind === "shooting" ? f.label : `Ø ${f.label}`))))))));
                                 }))),
-                            React.createElement("div", { className: "grid md:grid-cols-2 gap-4" },
-                                React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
+                            React.createElement("div", { className: isAbgespeckteAkte ? "grid grid-cols-1 gap-4" : "grid md:grid-cols-2 gap-4" },
+                                !isAbgespeckteAkte && React.createElement("div", { className: "bg-white rounded-2xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-4" },
                                     React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2" }, "Letzter Athletik-Test"),
                                     playerTests[0] ? (React.createElement("p", { className: "text-sm text-slate-700" },
                                         playerTests[0].testType,
