@@ -6,7 +6,7 @@
 //
 // Zusaetzlich: Empfang von Push-Benachrichtigungen (Firebase Cloud Messaging)
 // im Hintergrund, wenn die App gerade nicht offen ist.
-const CACHE_NAME = "spieler-akte-shell-v2";
+const CACHE_NAME = "spieler-akte-shell-v3";
 const CORE_ASSETS = ["./", "./index.html", "./manifest.json", "./icon-192.png", "./icon-512.png"];
 
 importScripts("https://www.gstatic.com/firebasejs/10.13.0/firebase-app-compat.js");
@@ -62,8 +62,12 @@ self.addEventListener("fetch", (event) => {
   if (req.method !== "GET" || new URL(req.url).origin !== self.location.origin) {
     return; // Firebase/Cloudinary/CDN-Anfragen unangetastet lassen
   }
+  // "no-store" erzwingt einen echten Netzwerk-Request statt einer (evtl.
+  // veralteten) Antwort aus dem normalen HTTP-Cache des Browsers - sonst
+  // liefert Firebase Hosting nach einem Deploy teils noch die alte Version
+  // aus, obwohl dieser Service Worker eigentlich "network-first" arbeitet.
   event.respondWith(
-    fetch(req)
+    fetch(req, { cache: "no-store" })
       .then((res) => {
         const copy = res.clone();
         caches.open(CACHE_NAME).then((cache) => cache.put(req, copy));
