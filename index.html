@@ -4657,6 +4657,7 @@ const ATTENDANCE_WARN_THRESHOLD = 80;
 const ATTENDANCE_MIN_MARKED = 3; // erst ab so vielen markierten Einheiten ueberhaupt eine Quote bilden
 function TrainerDashboard({ events, teams, players, wellnessData, eventAttendance, devPlanWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
     const [showEventForm, setShowEventForm] = useState(false);
+    const [attentionExpanded, setAttentionExpanded] = useState(false);
     const [editingEvent, setEditingEvent] = useState(null);
     const days = [];
     const d0 = new Date();
@@ -4791,10 +4792,12 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
         React.createElement("span", { className: "text-sm font-semibold text-amber-800 flex-1" }, scheduleConflicts.length, " Terminüberschneidung", scheduleConflicts.length > 1 ? "en" : "", " gefunden"),
         React.createElement("span", { className: "text-xs font-medium text-amber-700 shrink-0" }, "In „Alle Einheiten“ ansehen →"));
     const attentionCard = React.createElement("div", { className: `${cardClass} p-5` },
-        React.createElement("div", { className: "flex items-center justify-between" },
-            React.createElement(SectionLabel, null, "Braucht Aufmerksamkeit"),
-            attentionRows.length > 0 && React.createElement("span", { className: "text-xs font-bold px-2 py-0.5 rounded-full bg-red-50 text-[#C43E0E]" }, attentionRows.length)),
-        React.createElement("div", { className: "mt-3 space-y-1.5" },
+        React.createElement("button", { type: "button", onClick: () => setAttentionExpanded((v) => !v), className: "w-full flex items-center justify-between" },
+            React.createElement("div", { className: "flex items-center gap-2" },
+                React.createElement(SectionLabel, null, "Braucht Aufmerksamkeit"),
+                attentionRows.length > 0 && React.createElement("span", { className: "text-xs font-bold px-2 py-0.5 rounded-full bg-red-50 text-[#C43E0E]" }, attentionRows.length)),
+            React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform ${attentionExpanded ? "rotate-180" : ""}` })),
+        attentionExpanded && React.createElement("div", { className: "mt-3 space-y-1.5" },
             conflictBanner,
             attentionRows.length === 0 && !conflictBanner
                 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Alles im grünen Bereich - keine Auffälligkeiten.")
@@ -6245,7 +6248,7 @@ function SpielerAkte() {
     // Wurfstatistiken (fg/tp als Treffer/Versuche) - die reinen DBB-Scores-
     // Trefferzahlen 2-/3-Punkte-Koerbe sind dort redundant und sollen nicht
     // erscheinen, auch wenn sie club-weit als Statistik-Kategorie existieren.
-    const FULL_HIDDEN_STAT_LABELS = ["2-punkte-körbe", "3-punkte-körbe"];
+    const FULL_HIDDEN_STAT_LABELS = ["2-punkte-körbe", "3-punkte-körbe", "fouls", "fouls (pf)", "plus/minus"];
     const displayStatCategories = isAbgespeckteAkte
         ? statCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => ABGESPECKT_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0)
         : statCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => !FULL_HIDDEN_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0);
