@@ -5140,7 +5140,7 @@ function RequestFeedbackToTrainerForm({ pastEvents, onSubmit, onClose }) {
             React.createElement("textarea", { className: inputClass, rows: 2, value: customQuestion, onChange: (e) => setCustomQuestion(e.target.value), placeholder: "z. B. Wie war mein Verhalten in der Crunchtime?" })),
         React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center px-4 py-2.5" }, "Anfordern"));
 }
-function AnswerTrainerToPlayerForm({ item, onSubmit }) {
+function AnswerTrainerToPlayerForm({ item, questions, onSubmit }) {
     const [selfRating, setSelfRating] = useState(5);
     const [energyRating, setEnergyRating] = useState(5);
     const [message, setMessage] = useState("");
@@ -5150,15 +5150,15 @@ function AnswerTrainerToPlayerForm({ item, onSubmit }) {
     }
     return React.createElement("form", { onSubmit: submit, className: `${cardClass} p-4 space-y-3 border border-[#C43E0E]/20` },
         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, `Feedback zu ${item.eventLabel || "eurem Training"}`),
-        React.createElement(RatingScaleInput, { label: FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.selfRatingLabel, value: selfRating, onChange: setSelfRating }),
-        React.createElement(RatingScaleInput, { label: FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.energyRatingLabel, value: energyRating, onChange: setEnergyRating }),
+        React.createElement(RatingScaleInput, { label: questions.selfRatingLabel, value: selfRating, onChange: setSelfRating }),
+        React.createElement(RatingScaleInput, { label: questions.energyRatingLabel, value: energyRating, onChange: setEnergyRating }),
         React.createElement("div", null,
-            React.createElement("label", { className: labelClass }, FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.messageLabel),
+            React.createElement("label", { className: labelClass }, questions.messageLabel),
             React.createElement("textarea", { className: inputClass, rows: 2, value: message, onChange: (e) => setMessage(e.target.value) })),
         React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center px-4 py-2.5" }, "Absenden"));
 }
-function AnswerPlayerToTrainerForm({ item, onSubmit }) {
-    const [ratings, setRatings] = useState(Object.fromEntries(FEEDBACK_CATEGORIES.map((c) => [c.id, 5])));
+function AnswerPlayerToTrainerForm({ item, categories, onSubmit }) {
+    const [ratings, setRatings] = useState(Object.fromEntries(categories.map((c) => [c.id, 5])));
     const [comment, setComment] = useState("");
     const [customAnswer, setCustomAnswer] = useState("");
     function submit(e) {
@@ -5167,7 +5167,7 @@ function AnswerPlayerToTrainerForm({ item, onSubmit }) {
     }
     return React.createElement("form", { onSubmit: submit, className: `${cardClass} p-4 space-y-3 border border-[#C43E0E]/20` },
         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, `Feedback-Anfrage zu ${item.eventLabel || "einem Training"}`),
-        FEEDBACK_CATEGORIES.map((c) => React.createElement(RatingScaleInput, { key: c.id, label: c.label, value: ratings[c.id], onChange: (n) => setRatings((r) => ({ ...r, [c.id]: n })) })),
+        categories.map((c) => React.createElement(RatingScaleInput, { key: c.id, label: c.label, value: ratings[c.id] ?? 5, onChange: (n) => setRatings((r) => ({ ...r, [c.id]: n })) })),
         item.customQuestion && React.createElement("div", null,
             React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1" }, "Frage vom Spieler"),
             React.createElement("p", { className: "text-sm text-slate-700 italic mb-2" }, item.customQuestion),
@@ -5184,7 +5184,7 @@ function FeedbackWaitingRow({ item }) {
         React.createElement("span", { className: "text-sm text-slate-600 flex-1 truncate" }, item.eventLabel || "Feedback-Anfrage"),
         React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, waitingLabel));
 }
-function FeedbackHistoryCard({ item, isTrainer, onDelete }) {
+function FeedbackHistoryCard({ item, questions, categories, isTrainer, onDelete }) {
     const isToPlayer = item.direction === "trainerToPlayer";
     return React.createElement("div", { className: `${cardClass} p-3.5` },
         React.createElement("div", { className: "flex items-center justify-between gap-2 mb-2" },
@@ -5194,15 +5194,15 @@ function FeedbackHistoryCard({ item, isTrainer, onDelete }) {
                 isTrainer && onDelete && React.createElement("button", { type: "button", onClick: () => onDelete(item.id, item.direction), className: "text-slate-300 hover:text-red-500", "aria-label": "Löschen" }, React.createElement(IconTrash, { size: 13 })))),
         isToPlayer
             ? React.createElement("div", { className: "space-y-1.5" },
-                React.createElement("p", { className: "text-xs text-slate-500" }, `${FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.selfRatingLabel} ${item.answer?.selfRating ?? "–"}/10`),
-                React.createElement("p", { className: "text-xs text-slate-500" }, `${FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.energyRatingLabel} ${item.answer?.energyRating ?? "–"}/10`),
+                React.createElement("p", { className: "text-xs text-slate-500" }, `${questions.selfRatingLabel} ${item.answer?.selfRating ?? "–"}/10`),
+                React.createElement("p", { className: "text-xs text-slate-500" }, `${questions.energyRatingLabel} ${item.answer?.energyRating ?? "–"}/10`),
                 item.answer?.messageToCoach && React.createElement("p", { className: "text-sm text-slate-700 italic mt-1" }, `„${item.answer.messageToCoach}“`))
             : React.createElement("div", { className: "space-y-1.5" },
-                React.createElement("div", { className: "flex flex-wrap gap-x-4 gap-y-1" }, FEEDBACK_CATEGORIES.map((c) => React.createElement("span", { key: c.id, className: "text-xs text-slate-500" }, `${c.label}: ${item.answer?.ratings?.[c.id] ?? "–"}/10`))),
+                React.createElement("div", { className: "flex flex-wrap gap-x-4 gap-y-1" }, categories.filter((c) => item.answer?.ratings?.[c.id] !== undefined).map((c) => React.createElement("span", { key: c.id, className: "text-xs text-slate-500" }, `${c.label}: ${item.answer.ratings[c.id]}/10`))),
                 item.customQuestion && React.createElement("p", { className: "text-xs text-slate-500 italic mt-1" }, `Frage: ${item.customQuestion}${item.answer?.customAnswer ? " → " + item.answer.customAnswer : ""}`),
                 item.answer?.comment && React.createElement("p", { className: "text-sm text-slate-700 italic mt-1" }, `„${item.answer.comment}“`)));
 }
-function FeedbackPanel({ isTrainer, isOwnAccount, items, loading, onOpenRequest, onAnswerToPlayer, onAnswerToTrainer, onDelete }) {
+function FeedbackPanel({ isTrainer, isOwnAccount, items, loading, questions, categories, onOpenRequest, onAnswerToPlayer, onAnswerToTrainer, onDelete }) {
     const needsMyAnswer = items.filter((it) => it.status === "pending" && ((isOwnAccount && it.direction === "trainerToPlayer") || (isTrainer && it.direction === "playerToTrainer")));
     const waitingOnOther = items.filter((it) => it.status === "pending" && !needsMyAnswer.includes(it));
     const answered = items.filter((it) => it.status === "answered");
@@ -5214,15 +5214,46 @@ function FeedbackPanel({ isTrainer, isOwnAccount, items, loading, onOpenRequest,
         needsMyAnswer.length > 0 && React.createElement("div", { className: "space-y-3" },
             React.createElement(SectionLabel, null, "Wartet auf deine Antwort"),
             needsMyAnswer.map((it) => it.direction === "trainerToPlayer"
-                ? React.createElement(AnswerTrainerToPlayerForm, { key: it.id, item: it, onSubmit: onAnswerToPlayer })
-                : React.createElement(AnswerPlayerToTrainerForm, { key: it.id, item: it, onSubmit: onAnswerToTrainer }))),
+                ? React.createElement(AnswerTrainerToPlayerForm, { key: it.id, item: it, questions: questions, onSubmit: onAnswerToPlayer })
+                : React.createElement(AnswerPlayerToTrainerForm, { key: it.id, item: it, categories: categories, onSubmit: onAnswerToTrainer }))),
         waitingOnOther.length > 0 && React.createElement("div", { className: "space-y-2" },
             React.createElement(SectionLabel, null, "Offen"),
             waitingOnOther.map((it) => React.createElement(FeedbackWaitingRow, { key: it.id, item: it }))),
         React.createElement("div", { className: "space-y-2" },
             answered.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
             !loading && needsMyAnswer.length === 0 && waitingOnOther.length === 0 && answered.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch kein Feedback vorhanden."),
-            answered.map((it) => React.createElement(FeedbackHistoryCard, { key: it.id, item: it, isTrainer: isTrainer, onDelete: isTrainer ? onDelete : null }))));
+            answered.map((it) => React.createElement(FeedbackHistoryCard, { key: it.id, item: it, questions: questions, categories: categories, isTrainer: isTrainer, onDelete: isTrainer ? onDelete : null }))));
+}
+function FeedbackTemplatesEditor({ questions, categories, onSaveQuestions, onAddCategory, onRenameCategory, onDeleteCategory, onMoveCategory, onClose }) {
+    const [selfRatingLabel, setSelfRatingLabel] = useState(questions.selfRatingLabel);
+    const [energyRatingLabel, setEnergyRatingLabel] = useState(questions.energyRatingLabel);
+    const [messageLabel, setMessageLabel] = useState(questions.messageLabel);
+    const [saved, setSaved] = useState(false);
+    function saveQuestions(e) {
+        e.preventDefault();
+        onSaveQuestions({
+            selfRatingLabel: selfRatingLabel.trim() || questions.selfRatingLabel,
+            energyRatingLabel: energyRatingLabel.trim() || questions.energyRatingLabel,
+            messageLabel: messageLabel.trim() || questions.messageLabel,
+        });
+        setSaved(true);
+        setTimeout(() => setSaved(false), 2000);
+    }
+    return React.createElement("div", { className: "space-y-6" },
+        React.createElement("form", { onSubmit: saveQuestions, className: "space-y-3" },
+            React.createElement(SectionLabel, null, "Trainer → Spieler: Fragen zur Selbsteinschätzung"),
+            React.createElement(Field, { label: "Frage 1 (Bewertung 1-10)" },
+                React.createElement("input", { className: inputClass, value: selfRatingLabel, onChange: (e) => setSelfRatingLabel(e.target.value) })),
+            React.createElement(Field, { label: "Frage 2 (Bewertung 1-10)" },
+                React.createElement("input", { className: inputClass, value: energyRatingLabel, onChange: (e) => setEnergyRatingLabel(e.target.value) })),
+            React.createElement(Field, { label: "Frage 3 (Freitext, optional für den Spieler)" },
+                React.createElement("input", { className: inputClass, value: messageLabel, onChange: (e) => setMessageLabel(e.target.value) })),
+            React.createElement("button", { type: "submit", className: btnPrimaryClass + " px-4 py-2 text-sm" }, saved ? "Gespeichert ✓" : "Fragen speichern")),
+        React.createElement("div", { className: "border-t border-stone-200 pt-4" },
+            React.createElement(SectionLabel, null, "Spieler → Trainer: Bewertungs-Kategorien (je 1-10)"),
+            React.createElement("div", { className: "mt-2" },
+                React.createElement(SimpleListManager, { items: categories, onAdd: onAddCategory, onRename: onRenameCategory, onDelete: onDeleteCategory, onMove: onMoveCategory, addPlaceholder: "z. B. Kommunikation" }))),
+        React.createElement("button", { onClick: onClose, className: btnSecondaryClass + " w-full py-2.5" }, "Fertig"));
 }
 function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
@@ -5289,15 +5320,14 @@ const TABS = [
     { key: "feedback", label: "Feedback", icon: IconMessage },
 ];
 const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "noten", "video", "notiz", "entwicklung", "feedback"];
-// Feedback-Loop: fest vorgegebene Fragen/Kategorien fuers Erste (v1, testweise -
-// falls sich das Feature bewaehrt, kann das spaeter wie Statistik-Kategorien/
-// Test-Arten ueber eine eigene Verwaltung anpassbar gemacht werden).
-const FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS = {
+// Feedback-Loop: Fragen/Kategorien, falls in club/meta noch nichts Eigenes
+// hinterlegt ist (ueber Verwaltung -> Feedback-Fragen anpassbar).
+const DEFAULT_FEEDBACK_QUESTIONS = {
     selfRatingLabel: "Wie zufrieden warst du mit deiner eigenen Leistung heute?",
     energyRatingLabel: "Wie war deine körperliche Verfassung/Energie?",
     messageLabel: "Möchtest du dem Trainer etwas mitteilen? (optional)",
 };
-const FEEDBACK_CATEGORIES = [
+const DEFAULT_FEEDBACK_CATEGORIES = [
     { id: "einsatz", label: "Einsatz/Einstellung" },
     { id: "technik", label: "Technische Ausführung" },
     { id: "spielverstaendnis", label: "Spielverständnis/Taktik" },
@@ -5453,7 +5483,7 @@ function SpielerAkte() {
         async function loadData() {
             try {
                 const metaSnap = await db.collection("club").doc("meta").get();
-                const metaDefaults = { teams: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES };
+                const metaDefaults = { teams: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES, feedbackQuestions: DEFAULT_FEEDBACK_QUESTIONS, feedbackCategories: DEFAULT_FEEDBACK_CATEGORIES };
                 if (!cancelled)
                     setMeta(metaSnap.exists ? { ...metaDefaults, ...metaSnap.data() } : metaDefaults);
                 let loadedPlayerTeamId = null;
@@ -6648,6 +6678,29 @@ function SpielerAkte() {
         [types[i], types[j]] = [types[j], types[i]];
         persistMeta({ testTypes: types });
     }
+    const feedbackQuestions = meta.feedbackQuestions || DEFAULT_FEEDBACK_QUESTIONS;
+    const feedbackCategories = meta.feedbackCategories || DEFAULT_FEEDBACK_CATEGORIES;
+    function saveFeedbackQuestions(questions) {
+        persistMeta({ feedbackQuestions: questions });
+    }
+    function addFeedbackCategory(label) {
+        persistMeta({ feedbackCategories: [...feedbackCategories, { id: uid(), label }] });
+    }
+    function renameFeedbackCategory(id, label) {
+        persistMeta({ feedbackCategories: feedbackCategories.map((c) => (c.id === id ? { ...c, label } : c)) });
+    }
+    function deleteFeedbackCategory(id) {
+        persistMeta({ feedbackCategories: feedbackCategories.filter((c) => c.id !== id) });
+    }
+    function moveFeedbackCategory(id, dir) {
+        const cats = [...feedbackCategories];
+        const i = cats.findIndex((c) => c.id === id);
+        const j = i + dir;
+        if (i < 0 || j < 0 || j >= cats.length)
+            return;
+        [cats[i], cats[j]] = [cats[j], cats[i]];
+        persistMeta({ feedbackCategories: cats });
+    }
     return (React.createElement("div", { className: "min-h-[100dvh] flex flex-col" },
         React.createElement("img", { src: LOGO_FULL_DATA_URI, alt: "", "aria-hidden": "true", className: "fixed -right-16 bottom-0 w-[560px] h-[560px] object-contain opacity-[0.1] pointer-events-none select-none -z-10" }),
         React.createElement("header", { className: "bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white px-4 sm:px-6 py-3 sm:py-3.5 pt-safe flex items-center justify-between flex-wrap gap-3 sticky top-0 z-10 border-b border-white/10 relative" },
@@ -6689,6 +6742,7 @@ function SpielerAkte() {
                             { label: "Statistik-Kategorien", icon: IconSettings, onClick: () => setModal("statFields") },
                             { label: "Test-Arten", icon: IconClipboard, onClick: () => setModal("testTypes") },
                             { label: "Development-Plan-Fragen", icon: IconClipboard, onClick: () => setModal("devPlanTemplates") },
+                            { label: "Feedback-Fragen", icon: IconMessage, onClick: () => setModal("feedbackTemplates") },
                             { label: "Zugänge verwalten", icon: IconLock, onClick: () => setModal("accounts") },
                             { label: "Abmelden", icon: IconExternal, onClick: handleLogout },
                         ]
@@ -6811,6 +6865,7 @@ function SpielerAkte() {
                         { key: "statFields", label: "Statistik-Kategorien", desc: "Felder für Spielstatistiken bearbeiten.", icon: IconSettings, grad: "from-slate-700 to-slate-900", onClick: () => setModal("statFields") },
                         { key: "testTypes", label: "Test-Arten", desc: "Auswahlliste für Athletik-Tests pflegen.", icon: IconClipboard, grad: "from-[#FF6A2B] to-[#C43E0E]", onClick: () => setModal("testTypes") },
                         { key: "devPlanTemplates", label: "Development-Plan-Fragen", desc: "Fragebögen für Spieler/Trainer-Bogen anpassen.", icon: IconClipboard, grad: "from-slate-900 to-[#A8350C]", onClick: () => setModal("devPlanTemplates") },
+                        { key: "feedbackTemplates", label: "Feedback-Fragen", desc: "Fragen und Bewertungs-Kategorien für den Feedback-Loop anpassen.", icon: IconMessage, grad: "from-[#C43E0E] to-slate-900", onClick: () => setModal("feedbackTemplates") },
                     ].map((x) => React.createElement("button", { key: x.key, onClick: x.onClick, className: `${cardClass} p-5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all` },
                         React.createElement("span", { className: `w-10 h-10 rounded-xl bg-gradient-to-br ${x.grad} text-white flex items-center justify-center mb-3` },
                             React.createElement(x.icon, { size: 17 })),
@@ -7112,7 +7167,7 @@ function SpielerAkte() {
                                 " ",
                                 n.attachmentName || "Anhang öffnen"))))))))),
         activeTab === "entwicklung" && (React.createElement(DevelopmentPlanPanel, { player: selectedPlayer, isTrainer: isTrainer, cycles: devPlanCycles, templates: devPlanTemplates, onCreateCycle: createDevPlanCycle, onSavePlayer: saveDevPlanPlayer, onReleasePlayer: releaseDevPlanPlayer, onSaveTrainer: saveDevPlanTrainer, onReleaseTrainer: releaseDevPlanTrainer, onSaveCombined: saveDevPlanCombined, onDeleteCycle: deleteDevPlanCycle })),
-        activeTab === "feedback" && (React.createElement(FeedbackPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, items: feedbackItems, loading: feedbackLoading, onOpenRequest: () => setModal(isTrainer ? "requestFeedbackToPlayer" : "requestFeedbackToTrainer"), onAnswerToPlayer: answerFeedbackToPlayer, onAnswerToTrainer: answerFeedbackToTrainer, onDelete: deleteFeedbackItem })),
+        activeTab === "feedback" && (React.createElement(FeedbackPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, items: feedbackItems, loading: feedbackLoading, questions: feedbackQuestions, categories: feedbackCategories, onOpenRequest: () => setModal(isTrainer ? "requestFeedbackToPlayer" : "requestFeedbackToTrainer"), onAnswerToPlayer: answerFeedbackToPlayer, onAnswerToTrainer: answerFeedbackToTrainer, onDelete: deleteFeedbackItem })),
         activeTab === "steckbrief" && selectedPlayer && isTrainer && (() => {
             const manualRatings = { wurf: 5, verteidigung: 5, athletik: 5, spielintelligenz: 5, teamplay: 5, ...(selectedPlayer.radarRatings || {}) };
             function setRadarValue(skillId, val) {
@@ -7219,6 +7274,8 @@ function SpielerAkte() {
             React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, teams: teams, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onDelete: deleteAccount, onClose: () => setModal(null) }))),
         modal === "devPlanTemplates" && (React.createElement(Modal, { title: "Development-Plan-Fragen verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(DevPlanTemplateEditor, { templates: devPlanTemplates, onSave: saveDevPlanTemplates, onClose: () => setModal(null) }))),
+        modal === "feedbackTemplates" && (React.createElement(Modal, { title: "Feedback-Fragen verwalten", onClose: () => setModal(null), wide: true },
+            React.createElement(FeedbackTemplatesEditor, { questions: feedbackQuestions, categories: feedbackCategories, onSaveQuestions: saveFeedbackQuestions, onAddCategory: addFeedbackCategory, onRenameCategory: renameFeedbackCategory, onDeleteCategory: deleteFeedbackCategory, onMoveCategory: moveFeedbackCategory, onClose: () => setModal(null) }))),
         modal === "requestFeedbackToPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Feedback anfordern", onClose: () => setModal(null) },
             React.createElement(RequestFeedbackToPlayerForm, { player: selectedPlayer, team: selectedTeam, teamPlayers: players.filter((p) => p.teamId === selectedPlayer.teamId), pastEvents: recentPastEventsForPlayer(calendarEvents, selectedPlayer), onSubmit: requestFeedbackToPlayer, onClose: () => setModal(null) }))),
         modal === "requestFeedbackToTrainer" && selectedPlayer && (React.createElement(Modal, { title: "Feedback anfordern", onClose: () => setModal(null) },
