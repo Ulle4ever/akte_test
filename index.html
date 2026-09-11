@@ -6561,6 +6561,8 @@ function SpielerAkte() {
                                         { label: "Größe", value: selectedPlayer.height ? `${selectedPlayer.height} cm` : "" },
                                         { label: "Position", value: selectedPlayer.position || "" },
                                         { label: "Gewicht", value: selectedPlayer.weight ? `${selectedPlayer.weight} kg` : "" },
+                                        { label: "Spiele erfasst", value: String(playerStats.length) },
+                                        { label: "Anwesenheit", value: playerLiveAttendanceQuote === null ? "" : `${playerLiveAttendanceQuote}%` },
                                         { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
                                         { label: "Letzter Verein", value: selectedPlayer.previousClub || "", wide: true },
                                     ].filter((b) => b.value);
