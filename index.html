@@ -6590,7 +6590,7 @@ function SpielerAkte() {
                                     const bioItems = [
                                         { label: "Geburtsdatum", value: selectedPlayer.birthdate ? fmtDate(selectedPlayer.birthdate) : "" },
                                         { label: "Alter", value: age !== null ? `${age} Jahre` : "" },
-                                        { label: "Nationalität", value: selectedPlayer.nationality || "" },
+                                        { label: "Letzter Verein", value: selectedPlayer.previousClub || "" },
                                         { label: "Größe", value: selectedPlayer.height ? `${selectedPlayer.height} cm` : "" },
                                         { label: "Position", value: selectedPlayer.position || "" },
                                         { label: "Gewicht", value: selectedPlayer.weight ? `${selectedPlayer.weight} kg` : "" },
@@ -6598,7 +6598,6 @@ function SpielerAkte() {
                                         { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
                                         { label: "Spiele erfasst", value: String(playerStats.length) },
                                         { label: "Nächster Termin", value: nextEvent ? `${new Date(nextEvent.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" })}${nextEvent.time ? ", " + nextEvent.time : ""}` : "", forceCol2: true },
-                                        { label: "Letzter Verein", value: selectedPlayer.previousClub || "", wide: true },
                                     ].filter((b) => b.value);
                                     if (bioItems.length === 0)
                                         return null;
@@ -6634,15 +6633,6 @@ function SpielerAkte() {
                     })),
                     React.createElement("div", { className: "mt-5 min-w-0" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
-                            React.createElement("div", { className: "flex flex-wrap gap-4" },
-                                React.createElement("div", { className: `${cardClass} p-4 text-center w-full md:w-48 hover:shadow-md transition-shadow relative overflow-hidden` },
-                                    React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#C43E0E] to-[#A8350C]" }),
-                                    React.createElement("p", { className: "text-2xl font-black text-[#C43E0E] mt-1" }, playerStats.length),
-                                    React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Spiele erfasst")),
-                                isTrainer && playerLiveAttendanceRows.length > 0 && (React.createElement("div", { className: `${cardClass} p-4 text-center w-full md:w-48 hover:shadow-md transition-shadow relative overflow-hidden` },
-                                    React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-gradient-to-r from-[#C43E0E] to-[#8A2C0A]" }),
-                                    React.createElement("p", { className: "text-2xl font-black text-[#C43E0E] mt-1" }, playerLiveAttendanceQuote === null ? "–" : `${playerLiveAttendanceQuote}%`),
-                                    React.createElement("p", { className: "text-xs text-slate-500 uppercase tracking-wide mt-1" }, "Anwesenheit")))),
                             React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Auf einen Blick"),
                                 React.createElement("div", { className: "grid grid-cols-3 gap-3 mt-1.5" }, (isAbgespeckteAkte ? [
