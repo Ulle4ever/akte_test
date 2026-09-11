@@ -112,6 +112,18 @@ exports.onCalendarEventCreated = onDocumentCreated("calendarEvents/{eventId}", a
     await sendToPlayerIds(playerIds, "Neuer Termin", body, { type: "calendarEvent", eventId: event.params.eventId });
 });
 
+// Trainer fordert Feedback zu einem Training/Spiel an -> der betroffene Spieler
+// bekommt eine Push-Benachrichtigung (umgekehrte Richtung - Spieler fordert
+// Feedback beim Trainer an - loest bewusst KEINE Push aus, der Trainer sieht das
+// nur als Hinweis im eigenen Dashboard, siehe README/Absprache).
+exports.onFeedbackToPlayerCreated = onDocumentCreated("feedbackTrainerToPlayer/{requestId}", async (event) => {
+    const data = event.data?.data();
+    if (!data || !data.playerId)
+        return;
+    const eventLabel = data.eventLabel || "eurem letzten Training";
+    await sendToPlayerIds([data.playerId], "Feedback angefragt", `Dein Trainer möchte dein Feedback zu ${eventLabel}.`, { type: "feedbackTrainerToPlayer", requestId: event.params.requestId });
+});
+
 exports.dailyMonitoringReminder = onSchedule({ schedule: "0 18 * * *", timeZone: "Europe/Berlin" }, async () => {
     const allPlayers = await loadAllPlayers();
     const weekKey = isoWeekKey(todayIso());

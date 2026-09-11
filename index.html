@@ -320,6 +320,8 @@ const IconVideo = (p) => React.createElement(Icon, { ...p },
 const IconNote = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M5 4h11l4 4v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V5a1 1 0 0 1 1-1Z" }),
     React.createElement("path", { d: "M16 4v4h4" }));
+const IconMessage = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z" }));
 const IconExternal = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M14 4h6v6" }),
     React.createElement("path", { d: "M20 4 10 14" }),
@@ -3541,6 +3543,21 @@ function getPlayerVisibleEvents(events, player) {
         return (matchesTeam && !isExcluded) || matchesInvite;
     });
 }
+// Fuer den Feedback-Loop: die letzten (bereits stattgefundenen) Trainings/Spiele
+// eines Spielers zur Auswahl - neueste zuerst, auf eine ueberschaubare Anzahl
+// begrenzt.
+function recentPastEventsForPlayer(events, player, limit = 15) {
+    const todayKey = today();
+    return getPlayerVisibleEvents(events, player)
+        .filter((e) => e.date && e.date <= todayKey)
+        .sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || "")))
+        .slice(0, limit);
+}
+function feedbackEventLabel(event) {
+    if (!event)
+        return "";
+    return `"${event.title}" am ${fmtDate(event.date)}`;
+}
 function getPlayerVisibleTeamNotes(teamNotes, player) {
     if (!player)
         return [];
@@ -4708,7 +4725,7 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
 }
 const ATTENDANCE_WARN_THRESHOLD = 80;
 const ATTENDANCE_MIN_MARKED = 3; // erst ab so vielen markierten Einheiten ueberhaupt eine Quote bilden
-function TrainerDashboard({ events, teams, players, wellnessData, eventAttendance, devPlanWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
+function TrainerDashboard({ events, teams, players, wellnessData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
     const [showEventForm, setShowEventForm] = useState(false);
     const [attentionExpanded, setAttentionExpanded] = useState(false);
     const [editingEvent, setEditingEvent] = useState(null);
@@ -4827,13 +4844,17 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
     const devPlanWaitingRows = (devPlanWaiting || [])
         .map((w) => ({ waiting: w, player: players.find((p) => p.id === w.playerId) }))
         .filter((x) => x.player);
-    const ICON_BY_KIND = { injury: IconAlert, wellness: IconHeart, profile: IconEdit, attendance: IconActivity, devplan: IconClipboard };
+    const feedbackWaitingRows = (feedbackWaiting || [])
+        .map((w) => ({ waiting: w, player: players.find((p) => p.id === w.playerId) }))
+        .filter((x) => x.player);
+    const ICON_BY_KIND = { injury: IconAlert, wellness: IconHeart, profile: IconEdit, attendance: IconActivity, devplan: IconClipboard, feedback: IconMessage };
     const attentionRows = [
         ...outPlayers.map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury", label: STATUS_OPTIONS.find((s) => s.value === p.status)?.label || "Verletzt/Reha" })),
         ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", label: wellnessFlagReason(entry) })),
         ...incompleteProfilePlayers.map((p) => ({ id: "profile-" + p.id, player: p, kind: "profile", label: "Profil unvollständig" })),
         ...lowAttendancePlayers.map(({ player, quote }) => ({ id: "attendance-" + player.id, player, kind: "attendance", label: `${quote}% Anwesenheit` })),
         ...devPlanWaitingRows.map(({ player, waiting }) => ({ id: "devplan-" + waiting.id, player, kind: "devplan", label: "Wartet auf deine Freigabe" })),
+        ...feedbackWaitingRows.map(({ player, waiting }) => ({ id: "feedback-" + waiting.id, player, kind: "feedback", label: "Feedback angefragt" })),
     ].map((item) => React.createElement("button", { key: item.id, onClick: () => onSelectPlayer(item.player.id), className: "w-full flex items-center gap-2.5 bg-red-50 hover:bg-red-100 border-l-2 border-[#C43E0E] rounded-xl px-3 py-2 text-left transition" },
         React.createElement(ICON_BY_KIND[item.kind] || IconAlert, { size: 14, className: "text-[#C43E0E] shrink-0" }),
         React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.player.name),
@@ -5068,6 +5089,138 @@ function GradesPanel({ isTrainer, isOwnAccount, subjects, onSave, onToggleFlag, 
             isTrainer && React.createElement("input", { className: "w-full text-xs bg-white border border-stone-200 rounded-lg px-2 py-1 placeholder:text-slate-400", defaultValue: s.trainerComment || "", onBlur: (e) => { if (e.target.value.trim() !== (s.trainerComment || ""))
                     onSetComment(s.id, e.target.value.trim()); }, placeholder: "Kommentar für den Spieler (z. B. Nachhilfe empfehlen) – sichtbar für den Spieler, nur du kannst ihn schreiben" }))))));
 }
+function RatingScaleInput({ label, value, onChange }) {
+    return React.createElement("div", { className: "space-y-1" },
+        React.createElement("div", { className: "flex items-center justify-between" },
+            React.createElement("p", { className: "text-sm font-medium text-slate-700" }, label),
+            React.createElement("span", { className: "text-sm font-bold text-[#C43E0E] tabular-nums" }, value, "/10")),
+        React.createElement("input", { type: "range", min: 1, max: 10, step: 1, value: value, onChange: (e) => onChange(Number(e.target.value)), className: "w-full accent-[#C43E0E]" }));
+}
+function RequestFeedbackToPlayerForm({ player, team, teamPlayers, pastEvents, onSubmit, onClose }) {
+    const [scope, setScope] = useState("player");
+    const [eventId, setEventId] = useState(pastEvents[0]?.id || "");
+    function submit(e) {
+        e.preventDefault();
+        const chosenEvent = pastEvents.find((ev) => ev.id === eventId);
+        const eventLabel = chosenEvent ? feedbackEventLabel(chosenEvent) : "eurem letzten Training";
+        const targetIds = scope === "team" ? teamPlayers.map((p) => p.id) : [player.id];
+        onSubmit(targetIds, eventId || null, eventLabel);
+        onClose();
+    }
+    return React.createElement("form", { onSubmit: submit, className: "space-y-4" },
+        React.createElement(Field, { label: "An wen?" },
+            React.createElement("div", { className: "flex gap-2" },
+                React.createElement("button", { type: "button", onClick: () => setScope("player"), className: `flex-1 rounded-lg py-2 text-sm font-semibold border transition ${scope === "player" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-stone-300"}` }, `Nur ${player.name}`),
+                React.createElement("button", { type: "button", onClick: () => setScope("team"), className: `flex-1 rounded-lg py-2 text-sm font-semibold border transition ${scope === "team" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-600 border-stone-300"}` }, `Ganzes Team${team ? " (" + team.name + ")" : ""}`))),
+        React.createElement(Field, { label: "Welches Training/Spiel?" },
+            pastEvents.length > 0
+                ? React.createElement("select", { className: inputClass, value: eventId, onChange: (e) => setEventId(e.target.value) }, pastEvents.map((e) => React.createElement("option", { key: e.id, value: e.id }, `${fmtDate(e.date)} – ${e.title}`)))
+                : React.createElement("p", { className: "text-sm text-slate-400" }, "Keine vergangenen Termine gefunden.")),
+        React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center px-4 py-2.5" }, "Anfordern"));
+}
+function RequestFeedbackToTrainerForm({ pastEvents, onSubmit, onClose }) {
+    const [eventId, setEventId] = useState(pastEvents[0]?.id || "");
+    const [customQuestion, setCustomQuestion] = useState("");
+    function submit(e) {
+        e.preventDefault();
+        const chosenEvent = pastEvents.find((ev) => ev.id === eventId);
+        const eventLabel = chosenEvent ? feedbackEventLabel(chosenEvent) : "eurem letzten Training";
+        onSubmit(eventId || null, eventLabel, customQuestion.trim());
+        onClose();
+    }
+    return React.createElement("form", { onSubmit: submit, className: "space-y-4" },
+        React.createElement(Field, { label: "Welches Training/Spiel?" },
+            pastEvents.length > 0
+                ? React.createElement("select", { className: inputClass, value: eventId, onChange: (e) => setEventId(e.target.value) }, pastEvents.map((e) => React.createElement("option", { key: e.id, value: e.id }, `${fmtDate(e.date)} – ${e.title}`)))
+                : React.createElement("p", { className: "text-sm text-slate-400" }, "Keine vergangenen Termine gefunden.")),
+        React.createElement(Field, { label: "Eigene Frage an den Trainer (optional)" },
+            React.createElement("textarea", { className: inputClass, rows: 2, value: customQuestion, onChange: (e) => setCustomQuestion(e.target.value), placeholder: "z. B. Wie war mein Verhalten in der Crunchtime?" })),
+        React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center px-4 py-2.5" }, "Anfordern"));
+}
+function AnswerTrainerToPlayerForm({ item, onSubmit }) {
+    const [selfRating, setSelfRating] = useState(5);
+    const [energyRating, setEnergyRating] = useState(5);
+    const [message, setMessage] = useState("");
+    function submit(e) {
+        e.preventDefault();
+        onSubmit(item.id, { selfRating, energyRating, messageToCoach: message.trim(), answeredAt: today() });
+    }
+    return React.createElement("form", { onSubmit: submit, className: `${cardClass} p-4 space-y-3 border border-[#C43E0E]/20` },
+        React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, `Feedback zu ${item.eventLabel || "eurem Training"}`),
+        React.createElement(RatingScaleInput, { label: FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.selfRatingLabel, value: selfRating, onChange: setSelfRating }),
+        React.createElement(RatingScaleInput, { label: FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.energyRatingLabel, value: energyRating, onChange: setEnergyRating }),
+        React.createElement("div", null,
+            React.createElement("label", { className: labelClass }, FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.messageLabel),
+            React.createElement("textarea", { className: inputClass, rows: 2, value: message, onChange: (e) => setMessage(e.target.value) })),
+        React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center px-4 py-2.5" }, "Absenden"));
+}
+function AnswerPlayerToTrainerForm({ item, onSubmit }) {
+    const [ratings, setRatings] = useState(Object.fromEntries(FEEDBACK_CATEGORIES.map((c) => [c.id, 5])));
+    const [comment, setComment] = useState("");
+    const [customAnswer, setCustomAnswer] = useState("");
+    function submit(e) {
+        e.preventDefault();
+        onSubmit(item.id, { ratings, comment: comment.trim(), customAnswer: customAnswer.trim(), answeredAt: today() });
+    }
+    return React.createElement("form", { onSubmit: submit, className: `${cardClass} p-4 space-y-3 border border-[#C43E0E]/20` },
+        React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, `Feedback-Anfrage zu ${item.eventLabel || "einem Training"}`),
+        FEEDBACK_CATEGORIES.map((c) => React.createElement(RatingScaleInput, { key: c.id, label: c.label, value: ratings[c.id], onChange: (n) => setRatings((r) => ({ ...r, [c.id]: n })) })),
+        item.customQuestion && React.createElement("div", null,
+            React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1" }, "Frage vom Spieler"),
+            React.createElement("p", { className: "text-sm text-slate-700 italic mb-2" }, item.customQuestion),
+            React.createElement("textarea", { className: inputClass, rows: 2, value: customAnswer, onChange: (e) => setCustomAnswer(e.target.value), placeholder: "Deine Antwort darauf" })),
+        React.createElement("div", null,
+            React.createElement("label", { className: labelClass }, "Kommentar (optional)"),
+            React.createElement("textarea", { className: inputClass, rows: 2, value: comment, onChange: (e) => setComment(e.target.value) })),
+        React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center px-4 py-2.5" }, "Absenden"));
+}
+function FeedbackWaitingRow({ item }) {
+    const waitingLabel = item.direction === "trainerToPlayer" ? "Wartet auf Antwort vom Spieler" : "Wartet auf Antwort vom Trainer";
+    return React.createElement("div", { className: "flex items-center gap-2.5 bg-stone-50 border border-stone-200 rounded-xl px-3 py-2.5" },
+        React.createElement(IconMessage, { size: 14, className: "text-slate-400 shrink-0" }),
+        React.createElement("span", { className: "text-sm text-slate-600 flex-1 truncate" }, item.eventLabel || "Feedback-Anfrage"),
+        React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, waitingLabel));
+}
+function FeedbackHistoryCard({ item, isTrainer, onDelete }) {
+    const isToPlayer = item.direction === "trainerToPlayer";
+    return React.createElement("div", { className: `${cardClass} p-3.5` },
+        React.createElement("div", { className: "flex items-center justify-between gap-2 mb-2" },
+            React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, item.eventLabel || (isToPlayer ? "Feedback vom Trainer angefragt" : "Feedback vom Spieler angefragt")),
+            React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
+                React.createElement("span", { className: "text-[10px] font-bold uppercase tracking-wide text-slate-400" }, isToPlayer ? "Selbsteinschätzung" : "Trainer-Bewertung"),
+                isTrainer && onDelete && React.createElement("button", { type: "button", onClick: () => onDelete(item.id, item.direction), className: "text-slate-300 hover:text-red-500", "aria-label": "Löschen" }, React.createElement(IconTrash, { size: 13 })))),
+        isToPlayer
+            ? React.createElement("div", { className: "space-y-1.5" },
+                React.createElement("p", { className: "text-xs text-slate-500" }, `${FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.selfRatingLabel} ${item.answer?.selfRating ?? "–"}/10`),
+                React.createElement("p", { className: "text-xs text-slate-500" }, `${FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS.energyRatingLabel} ${item.answer?.energyRating ?? "–"}/10`),
+                item.answer?.messageToCoach && React.createElement("p", { className: "text-sm text-slate-700 italic mt-1" }, `„${item.answer.messageToCoach}“`))
+            : React.createElement("div", { className: "space-y-1.5" },
+                React.createElement("div", { className: "flex flex-wrap gap-x-4 gap-y-1" }, FEEDBACK_CATEGORIES.map((c) => React.createElement("span", { key: c.id, className: "text-xs text-slate-500" }, `${c.label}: ${item.answer?.ratings?.[c.id] ?? "–"}/10`))),
+                item.customQuestion && React.createElement("p", { className: "text-xs text-slate-500 italic mt-1" }, `Frage: ${item.customQuestion}${item.answer?.customAnswer ? " → " + item.answer.customAnswer : ""}`),
+                item.answer?.comment && React.createElement("p", { className: "text-sm text-slate-700 italic mt-1" }, `„${item.answer.comment}“`)));
+}
+function FeedbackPanel({ isTrainer, isOwnAccount, items, loading, onOpenRequest, onAnswerToPlayer, onAnswerToTrainer, onDelete }) {
+    const needsMyAnswer = items.filter((it) => it.status === "pending" && ((isOwnAccount && it.direction === "trainerToPlayer") || (isTrainer && it.direction === "playerToTrainer")));
+    const waitingOnOther = items.filter((it) => it.status === "pending" && !needsMyAnswer.includes(it));
+    const answered = items.filter((it) => it.status === "answered");
+    return React.createElement("div", { className: "space-y-5" },
+        (isTrainer || isOwnAccount) && React.createElement("button", { type: "button", onClick: onOpenRequest, className: btnPrimaryClass + " px-4 py-2.5" },
+            React.createElement(IconMessage, { size: 15 }),
+            isTrainer ? "Feedback anfordern" : "Feedback zu Training/Spiel anfordern"),
+        loading && React.createElement("p", { className: "text-sm text-slate-400" }, "Lädt…"),
+        needsMyAnswer.length > 0 && React.createElement("div", { className: "space-y-3" },
+            React.createElement(SectionLabel, null, "Wartet auf deine Antwort"),
+            needsMyAnswer.map((it) => it.direction === "trainerToPlayer"
+                ? React.createElement(AnswerTrainerToPlayerForm, { key: it.id, item: it, onSubmit: onAnswerToPlayer })
+                : React.createElement(AnswerPlayerToTrainerForm, { key: it.id, item: it, onSubmit: onAnswerToTrainer }))),
+        waitingOnOther.length > 0 && React.createElement("div", { className: "space-y-2" },
+            React.createElement(SectionLabel, null, "Offen"),
+            waitingOnOther.map((it) => React.createElement(FeedbackWaitingRow, { key: it.id, item: it }))),
+        React.createElement("div", { className: "space-y-2" },
+            answered.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
+            !loading && needsMyAnswer.length === 0 && waitingOnOther.length === 0 && answered.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch kein Feedback vorhanden."),
+            answered.map((it) => React.createElement(FeedbackHistoryCard, { key: it.id, item: it, isTrainer: isTrainer, onDelete: isTrainer ? onDelete : null }))));
+}
 function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
     const normalFields = normalCat ? normalCat.fields.filter((f) => f.kind !== "shooting") : [];
@@ -5130,8 +5283,23 @@ const TABS = [
     { key: "video", label: "Videos", icon: IconVideo },
     { key: "notiz", label: "Notizen", icon: IconNote },
     { key: "entwicklung", label: "Development Plan", icon: IconClipboard },
+    { key: "feedback", label: "Feedback", icon: IconMessage },
 ];
-const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "noten", "video", "notiz", "entwicklung"];
+const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "noten", "video", "notiz", "entwicklung", "feedback"];
+// Feedback-Loop: fest vorgegebene Fragen/Kategorien fuers Erste (v1, testweise -
+// falls sich das Feature bewaehrt, kann das spaeter wie Statistik-Kategorien/
+// Test-Arten ueber eine eigene Verwaltung anpassbar gemacht werden).
+const FEEDBACK_TRAINER_TO_PLAYER_QUESTIONS = {
+    selfRatingLabel: "Wie zufrieden warst du mit deiner eigenen Leistung heute?",
+    energyRatingLabel: "Wie war deine körperliche Verfassung/Energie?",
+    messageLabel: "Möchtest du dem Trainer etwas mitteilen? (optional)",
+};
+const FEEDBACK_CATEGORIES = [
+    { id: "einsatz", label: "Einsatz/Einstellung" },
+    { id: "technik", label: "Technische Ausführung" },
+    { id: "spielverstaendnis", label: "Spielverständnis/Taktik" },
+    { id: "athletik", label: "Athletik/Fitness" },
+];
 function SpielerAkte() {
     const [loading, setLoading] = useState(true);
     const [saveError, setSaveError] = useState(false);
@@ -5188,6 +5356,7 @@ function SpielerAkte() {
     const [gradesData, setGradesData] = useState({}); // { [playerId]: { subjects: [] } }, Trainer: alle, Spieler: nur eigene
     const [calendarEvents, setCalendarEvents] = useState([]);
     const [devPlanWaiting, setDevPlanWaiting] = useState([]); // Zyklen, die der Spieler freigegeben hat, der Trainer aber noch nicht (fuer Dashboard-Hinweis)
+    const [feedbackWaiting, setFeedbackWaiting] = useState([]); // Offene Spieler->Trainer-Feedback-Anfragen (fuer Dashboard-Hinweis, keine Push)
     const [eventAttendance, setEventAttendance] = useState({}); // { [eventId]: { [playerId]: "present"|"absent" } } - direkt in "Alle Einheiten" markiert
     const [teamNotes, setTeamNotes] = useState([]);
     const [loginEmail, setLoginEmail] = useState("");
@@ -5331,19 +5500,19 @@ function SpielerAkte() {
                     const tnSnap = await teamNotesQuery.get();
                     if (!cancelled)
                         setTeamNotes(tnSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+                    async function fetchByPlayerIdChunks(collName) {
+                        if (!scopeTeamId)
+                            return (await db.collection(collName).get()).docs;
+                        const playerIds = loadedPlayers.map((p) => p.id);
+                        if (playerIds.length === 0)
+                            return [];
+                        const idChunks = [];
+                        for (let i = 0; i < playerIds.length; i += 30)
+                            idChunks.push(playerIds.slice(i, i + 30));
+                        const results = await Promise.all(idChunks.map((chunk) => db.collection(collName).where("playerId", "in", chunk).get()));
+                        return results.flatMap((snap) => snap.docs);
+                    }
                     try {
-                        async function fetchByPlayerIdChunks(collName) {
-                            if (!scopeTeamId)
-                                return (await db.collection(collName).get()).docs;
-                            const playerIds = loadedPlayers.map((p) => p.id);
-                            if (playerIds.length === 0)
-                                return [];
-                            const idChunks = [];
-                            for (let i = 0; i < playerIds.length; i += 30)
-                                idChunks.push(playerIds.slice(i, i + 30));
-                            const results = await Promise.all(idChunks.map((chunk) => db.collection(collName).where("playerId", "in", chunk).get()));
-                            return results.flatMap((snap) => snap.docs);
-                        }
                         const [devPlayerDocs, devTrainerDocs] = await Promise.all([
                             fetchByPlayerIdChunks("devPlanPlayer"),
                             fetchByPlayerIdChunks("devPlanTrainer"),
@@ -5358,6 +5527,18 @@ function SpielerAkte() {
                     catch (e) {
                         if (!cancelled)
                             setDevPlanWaiting([]);
+                    }
+                    try {
+                        const fbDocs = await fetchByPlayerIdChunks("feedbackPlayerToTrainer");
+                        const fbWaiting = fbDocs
+                            .filter((d) => d.data().status === "pending")
+                            .map((d) => ({ id: d.id, playerId: d.data().playerId, eventLabel: d.data().eventLabel }));
+                        if (!cancelled)
+                            setFeedbackWaiting(fbWaiting);
+                    }
+                    catch (e) {
+                        if (!cancelled)
+                            setFeedbackWaiting([]);
                     }
                     try {
                         if (scopeTeamId) {
@@ -5789,6 +5970,83 @@ function SpielerAkte() {
     const devPlanTemplates = meta?.devPlanTemplates || DEFAULT_DEVPLAN_TEMPLATES;
     function saveDevPlanTemplates(templates) {
         persistMeta({ devPlanTemplates: templates });
+    }
+    // Feedback-Loop: Verlauf (beide Richtungen) wird - wie beim Development Plan -
+    // erst geladen, wenn der Feedback-Tab eines Spielers tatsaechlich geoeffnet
+    // wird (nicht fuer alle Spieler auf Vorrat).
+    const [feedbackItems, setFeedbackItems] = useState([]);
+    const [feedbackLoading, setFeedbackLoading] = useState(false);
+    useEffect(() => {
+        const activePlayer = players.find((p) => p.id === selectedPlayerId) || null;
+        if (activeTab !== "feedback" || !activePlayer) return;
+        let cancelled = false;
+        async function loadFeedback() {
+            setFeedbackLoading(true);
+            try {
+                const [toPlayerSnap, toTrainerSnap] = await Promise.all([
+                    db.collection("feedbackTrainerToPlayer").where("playerId", "==", activePlayer.id).get(),
+                    db.collection("feedbackPlayerToTrainer").where("playerId", "==", activePlayer.id).get(),
+                ]);
+                const items = [
+                    ...toPlayerSnap.docs.map((d) => ({ id: d.id, direction: "trainerToPlayer", ...d.data() })),
+                    ...toTrainerSnap.docs.map((d) => ({ id: d.id, direction: "playerToTrainer", ...d.data() })),
+                ].sort((a, b) => (b.createdAt || "").localeCompare(a.createdAt || ""));
+                if (!cancelled) setFeedbackItems(items);
+            } catch (e) {
+                console.error("feedback load error", e);
+            } finally {
+                if (!cancelled) setFeedbackLoading(false);
+            }
+        }
+        loadFeedback();
+        return () => { cancelled = true; };
+    }, [activeTab, selectedPlayerId, players]);
+    async function requestFeedbackToPlayer(playerIds, eventId, eventLabel) {
+        const refs = await Promise.all(playerIds.map((pid) => {
+            const player = players.find((p) => p.id === pid);
+            return db.collection("feedbackTrainerToPlayer").add({
+                playerId: pid,
+                teamId: player?.teamId || null,
+                eventId: eventId || null,
+                eventLabel,
+                createdBy: firebaseUser?.uid || null,
+                createdAt: today(),
+                status: "pending",
+                answer: null,
+            });
+        }));
+        if (selectedPlayerId && playerIds.includes(selectedPlayerId)) {
+            const ref = refs[playerIds.indexOf(selectedPlayerId)];
+            setFeedbackItems((prev) => [{ id: ref.id, direction: "trainerToPlayer", playerId: selectedPlayerId, eventId, eventLabel, createdAt: today(), status: "pending", answer: null }, ...prev]);
+        }
+    }
+    async function requestFeedbackToTrainer(eventId, eventLabel, customQuestion) {
+        const ref = await db.collection("feedbackPlayerToTrainer").add({
+            playerId: selectedPlayer.id,
+            teamId: selectedPlayer.teamId || null,
+            eventId: eventId || null,
+            eventLabel,
+            customQuestion: customQuestion || "",
+            createdAt: today(),
+            status: "pending",
+            answer: null,
+        });
+        setFeedbackItems((prev) => [{ id: ref.id, direction: "playerToTrainer", playerId: selectedPlayer.id, eventId, eventLabel, customQuestion: customQuestion || "", createdAt: today(), status: "pending", answer: null }, ...prev]);
+    }
+    async function answerFeedbackToPlayer(id, answer) {
+        await db.collection("feedbackTrainerToPlayer").doc(id).set({ status: "answered", answer }, { merge: true });
+        setFeedbackItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: "answered", answer } : it)));
+    }
+    async function answerFeedbackToTrainer(id, answer) {
+        await db.collection("feedbackPlayerToTrainer").doc(id).set({ status: "answered", answer }, { merge: true });
+        setFeedbackItems((prev) => prev.map((it) => (it.id === id ? { ...it, status: "answered", answer } : it)));
+        setFeedbackWaiting((prev) => prev.filter((w) => w.id !== id));
+    }
+    async function deleteFeedbackItem(id, direction) {
+        const coll = direction === "trainerToPlayer" ? "feedbackTrainerToPlayer" : "feedbackPlayerToTrainer";
+        await db.collection(coll).doc(id).delete();
+        setFeedbackItems((prev) => prev.filter((it) => it.id !== id));
+        setFeedbackWaiting((prev) => prev.filter((w) => w.id !== id));
     }
 
     if (firebaseUser === undefined || (firebaseUser && loading)) {
@@ -6545,7 +6803,7 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
@@ -6841,6 +7099,7 @@ function SpielerAkte() {
                                 " ",
                                 n.attachmentName || "Anhang öffnen"))))))))),
         activeTab === "entwicklung" && (React.createElement(DevelopmentPlanPanel, { player: selectedPlayer, isTrainer: isTrainer, cycles: devPlanCycles, templates: devPlanTemplates, onCreateCycle: createDevPlanCycle, onSavePlayer: saveDevPlanPlayer, onReleasePlayer: releaseDevPlanPlayer, onSaveTrainer: saveDevPlanTrainer, onReleaseTrainer: releaseDevPlanTrainer, onSaveCombined: saveDevPlanCombined, onDeleteCycle: deleteDevPlanCycle })),
+        activeTab === "feedback" && (React.createElement(FeedbackPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, items: feedbackItems, loading: feedbackLoading, onOpenRequest: () => setModal(isTrainer ? "requestFeedbackToPlayer" : "requestFeedbackToTrainer"), onAnswerToPlayer: answerFeedbackToPlayer, onAnswerToTrainer: answerFeedbackToTrainer, onDelete: deleteFeedbackItem })),
         activeTab === "steckbrief" && selectedPlayer && isTrainer && (() => {
             const manualRatings = { wurf: 5, verteidigung: 5, athletik: 5, spielintelligenz: 5, teamplay: 5, ...(selectedPlayer.radarRatings || {}) };
             function setRadarValue(skillId, val) {
@@ -6947,6 +7206,10 @@ function SpielerAkte() {
             React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, teams: teams, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onDelete: deleteAccount, onClose: () => setModal(null) }))),
         modal === "devPlanTemplates" && (React.createElement(Modal, { title: "Development-Plan-Fragen verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(DevPlanTemplateEditor, { templates: devPlanTemplates, onSave: saveDevPlanTemplates, onClose: () => setModal(null) }))),
+        modal === "requestFeedbackToPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Feedback anfordern", onClose: () => setModal(null) },
+            React.createElement(RequestFeedbackToPlayerForm, { player: selectedPlayer, team: selectedTeam, teamPlayers: players.filter((p) => p.teamId === selectedPlayer.teamId), pastEvents: recentPastEventsForPlayer(calendarEvents, selectedPlayer), onSubmit: requestFeedbackToPlayer, onClose: () => setModal(null) }))),
+        modal === "requestFeedbackToTrainer" && selectedPlayer && (React.createElement(Modal, { title: "Feedback anfordern", onClose: () => setModal(null) },
+            React.createElement(RequestFeedbackToTrainerForm, { pastEvents: recentPastEventsForPlayer(calendarEvents, selectedPlayer), onSubmit: requestFeedbackToTrainer, onClose: () => setModal(null) }))),
         modal === "teamNoteDashboard" && (React.createElement(Modal, { title: "Notiz/Datei f\u00FCr Spieler", onClose: () => setModal(null), wide: true },
             React.createElement(TeamNoteForm, { teams: teams, players: players, defaultTeamId: selectedPlayer?.teamId, onSubmit: addTeamNote, onClose: () => setModal(null) }))),
         modal === "importAttendance" && (React.createElement(Modal, { title: "Anwesenheit aus CSV importieren", onClose: () => setModal(null), wide: true },

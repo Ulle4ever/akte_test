@@ -183,5 +183,28 @@ service cloud.firestore {
       allow create: if playerBelongsToTrainerTeam(request.resource.data.playerId);
       allow update, delete: if playerBelongsToTrainerTeam(resource.data.playerId);
     }
+
+    // Feedback-Loop (Training/Spiel):
+    // - feedbackTrainerToPlayer: Trainer fordert bei einem Spieler Feedback zu einem
+    //   Termin an (Selbsteinschaetzung + Nachricht an Coach). Trainer legt an, der
+    //   Spieler darf ausschliesslich sein eigenes "answer"/"status" nachtragen.
+    // - feedbackPlayerToTrainer: Spieler fordert Feedback vom Trainer zu einem
+    //   Termin an (mit optionaler eigener Frage). Der Spieler legt an, nur der
+    //   Trainer darf "answer"/"status" eintragen.
+    match /feedbackTrainerToPlayer/{id} {
+      allow read: if playerBelongsToTrainerTeam(resource.data.playerId) || myPlayerId() == resource.data.playerId;
+      allow create: if playerBelongsToTrainerTeam(request.resource.data.playerId);
+      allow update: if playerBelongsToTrainerTeam(resource.data.playerId)
+        || (myPlayerId() == resource.data.playerId
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'answer']));
+      allow delete: if playerBelongsToTrainerTeam(resource.data.playerId);
+    }
+    match /feedbackPlayerToTrainer/{id} {
+      allow read: if playerBelongsToTrainerTeam(resource.data.playerId) || myPlayerId() == resource.data.playerId;
+      allow create: if myPlayerId() == request.resource.data.playerId;
+      allow update: if playerBelongsToTrainerTeam(resource.data.playerId)
+        && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['status', 'answer']);
+      allow delete: if playerBelongsToTrainerTeam(resource.data.playerId);
+    }
   }
 }
