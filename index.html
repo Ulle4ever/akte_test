@@ -6597,12 +6597,12 @@ function SpielerAkte() {
                                         { label: "Anwesenheit", value: playerLiveAttendanceQuote === null ? "" : `${playerLiveAttendanceQuote}%` },
                                         { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
                                         { label: "Spiele erfasst", value: String(playerStats.length) },
-                                        { label: "Nächster Termin", value: nextEvent ? `${new Date(nextEvent.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" })}${nextEvent.time ? ", " + nextEvent.time : ""}` : "" },
+                                        { label: "Nächster Termin", value: nextEvent ? `${new Date(nextEvent.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" })}${nextEvent.time ? ", " + nextEvent.time : ""}` : "", forceCol2: true },
                                         { label: "Letzter Verein", value: selectedPlayer.previousClub || "", wide: true },
                                     ].filter((b) => b.value);
                                     if (bioItems.length === 0)
                                         return null;
-                                    return React.createElement("div", { className: "grid grid-cols-2 gap-x-6 border-t border-white/10 pt-3" }, bioItems.map((b) => React.createElement("div", { key: b.label, className: `py-1.5 border-b border-white/10 ${b.wide ? "col-span-2" : ""}` },
+                                    return React.createElement("div", { className: "grid grid-cols-2 gap-x-6 border-t border-white/10 pt-3" }, bioItems.map((b) => React.createElement("div", { key: b.label, className: `py-1.5 border-b border-white/10 ${b.wide ? "col-span-2" : b.forceCol2 ? "col-start-2" : ""}` },
                                         React.createElement("p", { className: "text-[10px] text-white/40 uppercase tracking-wide" }, b.label),
                                         React.createElement("p", { className: "text-sm font-semibold text-white" }, b.value))));
                                 })()))),
