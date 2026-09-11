@@ -103,6 +103,7 @@
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-firestore-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-messaging-compat.js"></script>
 <script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-app-check-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.13.0/firebase-functions-compat.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
 </head>
@@ -150,6 +151,8 @@ if (APPCHECK_SITE_KEY) {
 }
 const db = firebase.firestore();
 const auth = firebase.auth();
+// Region muss zur Region der Cloud Functions passen (siehe functions/index.js).
+const functionsInstance = firebase.app().functions("europe-west1");
 // Messaging ist nicht in jedem Browser/Kontext verfuegbar (z.B. Safari < 16.4,
 // oder wenn die Seite nicht ueber https/localhost laeuft) - darum defensiv.
 let messaging = null;
@@ -5802,6 +5805,16 @@ function SpielerAkte() {
         setAccounts((prev) => [...prev, { uid: newUid, ...accountDoc }]);
     }
     async function deleteAccount(uid) {
+        // Erst das eigentliche Login-Konto bei Firebase Auth entfernen (geht vom
+        // Client aus nur ueber eine Cloud Function mit Admin-Rechten), danach den
+        // Datenbank-Eintrag - sonst bliebe der Code weiterhin gueltig zum Anmelden,
+        // landet dann aber ohne Zugangsdaten in der App ("kein Zugang hinterlegt").
+        try {
+            await functionsInstance.httpsCallable("deleteAccountAuth")({ uid });
+        }
+        catch (e) {
+            console.error("Login-Konto konnte nicht mitgeloescht werden", e);
+        }
         await db.collection("accounts").doc(uid).delete();
         setAccounts((prev) => prev.filter((a) => a.uid !== uid));
     }

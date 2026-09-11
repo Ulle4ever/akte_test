@@ -12,9 +12,11 @@
    ============================================================ */
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
+const { onCall, HttpsError } = require("firebase-functions/v2/https");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
+const { getAuth } = require("firebase-admin/auth");
 
 initializeApp();
 const db = getFirestore();
@@ -122,6 +124,34 @@ exports.onFeedbackToPlayerCreated = onDocumentCreated("feedbackTrainerToPlayer/{
         return;
     const eventLabel = data.eventLabel || "eurem letzten Training";
     await sendToPlayerIds([data.playerId], "Feedback angefragt", `Dein Trainer möchte dein Feedback zu ${eventLabel}.`, { type: "feedbackTrainerToPlayer", requestId: event.params.requestId });
+});
+
+// "Zugang entfernen" in der App loescht bisher nur den Firestore-Eintrag - das
+// eigentliche Login-Konto bei Firebase Auth kann ein Client aus Sicherheitsgruenden
+// nicht selbst fuer einen ANDEREN Nutzer loeschen, das geht nur mit Admin-Rechten
+// hier in der Cloud Function. Ohne das bleibt ein entfernter Code weiterhin
+// gueltig zum Anmelden, landet dann aber ohne Zugangsdaten in der App.
+exports.deleteAccountAuth = onCall({ region: "europe-west1" }, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Bitte eingeloggt sein.");
+    const callerSnap = await db.collection("accounts").doc(request.auth.uid).get();
+    const caller = callerSnap.exists ? callerSnap.data() : null;
+    const isFullTrainer = caller && caller.role === "trainer" && !caller.teamId;
+    if (!isFullTrainer)
+        throw new HttpsError("permission-denied", "Nur Vollzugriff-Trainer duerfen Zugaenge entfernen.");
+    const uid = request.data?.uid;
+    if (!uid || typeof uid !== "string")
+        throw new HttpsError("invalid-argument", "uid fehlt.");
+    try {
+        await getAuth().deleteUser(uid);
+    }
+    catch (e) {
+        // Login-Konto existiert schon nicht mehr (z.B. vorher schon entfernt) -
+        // dann ist das Ziel (kein gueltiges Login mehr) bereits erreicht.
+        if (e.code !== "auth/user-not-found")
+            throw e;
+    }
+    return { ok: true };
 });
 
 exports.dailyMonitoringReminder = onSchedule({ schedule: "0 18 * * *", timeZone: "Europe/Berlin" }, async () => {
