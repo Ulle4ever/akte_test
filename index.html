@@ -6528,7 +6528,7 @@ function SpielerAkte() {
                         React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-[#C43E0E] z-10" }),
                         React.createElement("div", { className: "pointer-events-none select-none absolute inset-0 overflow-hidden", "aria-hidden": "true" },
                             [0.18, 0.62].map((topFrac, i) => React.createElement("div", { key: i, className: "absolute left-0 right-0 whitespace-nowrap text-[15vw] sm:text-[90px] font-black uppercase italic tracking-tight", style: { top: `${topFrac * 100}%`, color: "transparent", WebkitTextStroke: "1px rgba(255,255,255,0.06)" } }, Array(4).fill((selectedTeam?.name || "BB PLAYER FILE") + "  ").join(" ")))),
-                        React.createElement("div", { className: "relative z-[1] p-5 sm:p-7 flex items-start gap-5 sm:gap-7 flex-wrap sm:flex-nowrap" },
+                        React.createElement("div", { className: "relative z-[1] p-5 sm:p-7 flex gap-5 sm:gap-7 flex-wrap sm:flex-nowrap" },
                             React.createElement("div", { className: "relative shrink-0" },
                                 selectedPlayer.photoUrl
                                     ? React.createElement("img", { src: selectedPlayer.photoUrl, alt: selectedPlayer.name, className: "w-20 h-24 sm:w-24 sm:h-28 rounded-xl object-cover shadow-[0_8px_24px_rgba(0,0,0,0.35)]" })
