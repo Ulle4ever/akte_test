@@ -4728,6 +4728,18 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
 }
 const ATTENDANCE_WARN_THRESHOLD = 80;
 const ATTENDANCE_MIN_MARKED = 3; // erst ab so vielen markierten Einheiten ueberhaupt eine Quote bilden
+// Farbcodierung "Braucht Aufmerksamkeit": jede Art bekommt ihre eigene Farbe,
+// damit man Zeilen (aufgeklappt) und Anzahl-Badges (eingeklappt) auf einen
+// Blick unterscheiden kann.
+const ATTENTION_KIND_STYLE = {
+    injury: { icon: IconAlert, row: "bg-rose-50 hover:bg-rose-100 border-rose-500", text: "text-rose-700", badge: "bg-rose-500 text-white" },
+    profile: { icon: IconEdit, row: "bg-red-50 hover:bg-red-100 border-red-500", text: "text-red-700", badge: "bg-red-500 text-white" },
+    feedback: { icon: IconMessage, row: "bg-yellow-50 hover:bg-yellow-100 border-yellow-500", text: "text-yellow-800", badge: "bg-yellow-400 text-slate-900" },
+    wellness: { icon: IconHeart, row: "bg-purple-50 hover:bg-purple-100 border-purple-500", text: "text-purple-700", badge: "bg-purple-500 text-white" },
+    attendance: { icon: IconActivity, row: "bg-orange-50 hover:bg-orange-100 border-orange-500", text: "text-orange-700", badge: "bg-orange-500 text-white" },
+    devplan: { icon: IconClipboard, row: "bg-blue-50 hover:bg-blue-100 border-blue-500", text: "text-blue-700", badge: "bg-blue-500 text-white" },
+};
+const ATTENTION_KIND_ORDER = ["injury", "profile", "feedback", "wellness", "attendance", "devplan"];
 function TrainerDashboard({ events, teams, players, wellnessData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
     const [showEventForm, setShowEventForm] = useState(false);
     const [attentionExpanded, setAttentionExpanded] = useState(false);
@@ -4850,19 +4862,29 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
     const feedbackWaitingRows = (feedbackWaiting || [])
         .map((w) => ({ waiting: w, player: players.find((p) => p.id === w.playerId) }))
         .filter((x) => x.player);
-    const ICON_BY_KIND = { injury: IconAlert, wellness: IconHeart, profile: IconEdit, attendance: IconActivity, devplan: IconClipboard, feedback: IconMessage };
-    const attentionRows = [
+    const attentionItems = [
         ...outPlayers.map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury", label: STATUS_OPTIONS.find((s) => s.value === p.status)?.label || "Verletzt/Reha" })),
         ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", label: wellnessFlagReason(entry) })),
         ...incompleteProfilePlayers.map((p) => ({ id: "profile-" + p.id, player: p, kind: "profile", label: "Profil unvollständig" })),
         ...lowAttendancePlayers.map(({ player, quote }) => ({ id: "attendance-" + player.id, player, kind: "attendance", label: `${quote}% Anwesenheit` })),
         ...devPlanWaitingRows.map(({ player, waiting }) => ({ id: "devplan-" + waiting.id, player, kind: "devplan", label: "Wartet auf deine Freigabe" })),
         ...feedbackWaitingRows.map(({ player, waiting }) => ({ id: "feedback-" + waiting.id, player, kind: "feedback", label: "Feedback angefragt" })),
-    ].map((item) => React.createElement("button", { key: item.id, onClick: () => onSelectPlayer(item.player.id), className: "w-full flex items-center gap-2.5 bg-red-50 hover:bg-red-100 border-l-2 border-[#C43E0E] rounded-xl px-3 py-2 text-left transition" },
-        React.createElement(ICON_BY_KIND[item.kind] || IconAlert, { size: 14, className: "text-[#C43E0E] shrink-0" }),
-        React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.player.name),
-        React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(item.player.teamId)),
-        React.createElement("span", { className: "text-xs text-[#C43E0E] font-medium shrink-0 max-w-[40%] truncate" }, item.label)));
+    ];
+    const attentionRows = attentionItems.map((item) => {
+        const style = ATTENTION_KIND_STYLE[item.kind] || ATTENTION_KIND_STYLE.injury;
+        return React.createElement("button", { key: item.id, onClick: () => onSelectPlayer(item.player.id), className: `w-full flex items-center gap-2.5 ${style.row} border-l-2 rounded-xl px-3 py-2 text-left transition` },
+            React.createElement(style.icon, { size: 14, className: `${style.text} shrink-0` }),
+            React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.player.name),
+            React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(item.player.teamId)),
+            React.createElement("span", { className: `text-xs font-medium shrink-0 max-w-[40%] truncate ${style.text}` }, item.label));
+    });
+    const attentionCountsByKind = attentionItems.reduce((acc, item) => { acc[item.kind] = (acc[item.kind] || 0) + 1; return acc; }, {});
+    const attentionBadges = ATTENTION_KIND_ORDER.filter((k) => attentionCountsByKind[k] > 0).map((k) => {
+        const style = ATTENTION_KIND_STYLE[k];
+        return React.createElement("span", { key: k, className: `inline-flex items-center gap-1 text-[11px] font-bold pl-1 pr-1.5 py-0.5 rounded-full ${style.badge}` },
+            React.createElement(style.icon, { size: 10 }),
+            attentionCountsByKind[k]);
+    });
     const scheduleConflicts = groupConflictsByEventPair(findScheduleConflicts(events, players, CONFLICT_MIN_OVERLAP_MINUTES));
     const conflictBanner = scheduleConflicts.length > 0 && React.createElement("button", { onClick: onGoToAllUnits, className: "w-full flex items-center gap-2.5 bg-amber-50 hover:bg-amber-100 border-l-2 border-amber-500 rounded-xl px-3 py-2.5 text-left transition" },
         React.createElement(IconAlert, { size: 14, className: "text-amber-600 shrink-0" }),
@@ -4870,10 +4892,10 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
         React.createElement("span", { className: "text-xs font-medium text-amber-700 shrink-0" }, "In „Alle Einheiten“ ansehen →"));
     const attentionCard = React.createElement("div", { className: `${cardClass} p-5` },
         React.createElement("button", { type: "button", onClick: () => setAttentionExpanded((v) => !v), className: "w-full flex items-center justify-between" },
-            React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
                 React.createElement(SectionLabel, null, "Braucht Aufmerksamkeit"),
-                attentionRows.length > 0 && React.createElement("span", { className: "text-xs font-bold px-2 py-0.5 rounded-full bg-red-50 text-[#C43E0E]" }, attentionRows.length)),
-            React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform ${attentionExpanded ? "rotate-180" : ""}` })),
+                attentionBadges),
+            React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform shrink-0 ${attentionExpanded ? "rotate-180" : ""}` })),
         attentionExpanded && React.createElement("div", { className: "mt-3 space-y-1.5" },
             conflictBanner,
             attentionRows.length === 0 && !conflictBanner
@@ -5123,12 +5145,21 @@ function RequestFeedbackToPlayerForm({ player, team, teamPlayers, pastEvents, on
 }
 function RequestFeedbackToTrainerForm({ pastEvents, onSubmit, onClose }) {
     const [eventId, setEventId] = useState(pastEvents[0]?.id || "");
-    const [customQuestion, setCustomQuestion] = useState("");
+    const [customQuestions, setCustomQuestions] = useState([""]);
+    function updateQuestion(i, value) {
+        setCustomQuestions((prev) => prev.map((q, idx) => (idx === i ? value : q)));
+    }
+    function addQuestion() {
+        setCustomQuestions((prev) => [...prev, ""]);
+    }
+    function removeQuestion(i) {
+        setCustomQuestions((prev) => prev.filter((_, idx) => idx !== i));
+    }
     function submit(e) {
         e.preventDefault();
         const chosenEvent = pastEvents.find((ev) => ev.id === eventId);
         const eventLabel = chosenEvent ? feedbackEventLabel(chosenEvent) : "eurem letzten Training";
-        onSubmit(eventId || null, eventLabel, customQuestion.trim());
+        onSubmit(eventId || null, eventLabel, customQuestions.map((q) => q.trim()).filter(Boolean));
         onClose();
     }
     return React.createElement("form", { onSubmit: submit, className: "space-y-4" },
@@ -5136,8 +5167,12 @@ function RequestFeedbackToTrainerForm({ pastEvents, onSubmit, onClose }) {
             pastEvents.length > 0
                 ? React.createElement("select", { className: inputClass, value: eventId, onChange: (e) => setEventId(e.target.value) }, pastEvents.map((e) => React.createElement("option", { key: e.id, value: e.id }, `${fmtDate(e.date)} – ${e.title}`)))
                 : React.createElement("p", { className: "text-sm text-slate-400" }, "Keine vergangenen Termine gefunden.")),
-        React.createElement(Field, { label: "Eigene Frage an den Trainer (optional)" },
-            React.createElement("textarea", { className: inputClass, rows: 2, value: customQuestion, onChange: (e) => setCustomQuestion(e.target.value), placeholder: "z. B. Wie war mein Verhalten in der Crunchtime?" })),
+        React.createElement(Field, { label: "Eigene Fragen an den Trainer (optional)" },
+            React.createElement("div", { className: "space-y-2" },
+                customQuestions.map((q, i) => React.createElement("div", { key: i, className: "flex gap-2" },
+                    React.createElement("input", { className: inputClass, value: q, onChange: (e) => updateQuestion(i, e.target.value), placeholder: "z. B. Wie war mein Verhalten in der Crunchtime?" }),
+                    customQuestions.length > 1 && React.createElement("button", { type: "button", onClick: () => removeQuestion(i), className: "shrink-0 text-slate-400 hover:text-red-500 px-1", "aria-label": "Frage entfernen" }, React.createElement(IconX, { size: 16 })))),
+                React.createElement("button", { type: "button", onClick: addQuestion, className: "text-sm font-semibold text-[#C43E0E] hover:text-[#8A2C0A]" }, "+ Weitere Frage"))),
         React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center px-4 py-2.5" }, "Anfordern"));
 }
 function AnswerTrainerToPlayerForm({ item, questions, onSubmit }) {
@@ -5158,20 +5193,22 @@ function AnswerTrainerToPlayerForm({ item, questions, onSubmit }) {
         React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center px-4 py-2.5" }, "Absenden"));
 }
 function AnswerPlayerToTrainerForm({ item, categories, onSubmit }) {
+    const questionsList = item.customQuestions || (item.customQuestion ? [item.customQuestion] : []);
     const [ratings, setRatings] = useState(Object.fromEntries(categories.map((c) => [c.id, 5])));
     const [comment, setComment] = useState("");
-    const [customAnswer, setCustomAnswer] = useState("");
+    const [customAnswers, setCustomAnswers] = useState(questionsList.map(() => ""));
     function submit(e) {
         e.preventDefault();
-        onSubmit(item.id, { ratings, comment: comment.trim(), customAnswer: customAnswer.trim(), answeredAt: today() });
+        onSubmit(item.id, { ratings, comment: comment.trim(), customAnswers: customAnswers.map((a) => a.trim()), answeredAt: today() });
     }
     return React.createElement("form", { onSubmit: submit, className: `${cardClass} p-4 space-y-3 border border-[#C43E0E]/20` },
         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, `Feedback-Anfrage zu ${item.eventLabel || "einem Training"}`),
         categories.map((c) => React.createElement(RatingScaleInput, { key: c.id, label: c.label, value: ratings[c.id] ?? 5, onChange: (n) => setRatings((r) => ({ ...r, [c.id]: n })) })),
-        item.customQuestion && React.createElement("div", null,
-            React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide mb-1" }, "Frage vom Spieler"),
-            React.createElement("p", { className: "text-sm text-slate-700 italic mb-2" }, item.customQuestion),
-            React.createElement("textarea", { className: inputClass, rows: 2, value: customAnswer, onChange: (e) => setCustomAnswer(e.target.value), placeholder: "Deine Antwort darauf" })),
+        questionsList.length > 0 && React.createElement("div", { className: "space-y-3" },
+            React.createElement("p", { className: "text-xs font-semibold text-slate-500 uppercase tracking-wide" }, questionsList.length > 1 ? "Fragen vom Spieler" : "Frage vom Spieler"),
+            questionsList.map((q, i) => React.createElement("div", { key: i },
+                React.createElement("p", { className: "text-sm text-slate-700 italic mb-1" }, q),
+                React.createElement("textarea", { className: inputClass, rows: 2, value: customAnswers[i] || "", onChange: (e) => setCustomAnswers((prev) => prev.map((a, idx) => (idx === i ? e.target.value : a))), placeholder: "Deine Antwort darauf" })))),
         React.createElement("div", null,
             React.createElement("label", { className: labelClass }, "Kommentar (optional)"),
             React.createElement("textarea", { className: inputClass, rows: 2, value: comment, onChange: (e) => setComment(e.target.value) })),
@@ -5199,7 +5236,10 @@ function FeedbackHistoryCard({ item, questions, categories, isTrainer, onDelete 
                 item.answer?.messageToCoach && React.createElement("p", { className: "text-sm text-slate-700 italic mt-1" }, `„${item.answer.messageToCoach}“`))
             : React.createElement("div", { className: "space-y-1.5" },
                 React.createElement("div", { className: "flex flex-wrap gap-x-4 gap-y-1" }, categories.filter((c) => item.answer?.ratings?.[c.id] !== undefined).map((c) => React.createElement("span", { key: c.id, className: "text-xs text-slate-500" }, `${c.label}: ${item.answer.ratings[c.id]}/10`))),
-                item.customQuestion && React.createElement("p", { className: "text-xs text-slate-500 italic mt-1" }, `Frage: ${item.customQuestion}${item.answer?.customAnswer ? " → " + item.answer.customAnswer : ""}`),
+                (item.customQuestions || (item.customQuestion ? [item.customQuestion] : [])).map((q, i) => {
+                    const answers = item.answer?.customAnswers || (item.answer?.customAnswer ? [item.answer.customAnswer] : []);
+                    return React.createElement("p", { key: i, className: "text-xs text-slate-500 italic mt-1" }, `Frage: ${q}${answers[i] ? " → " + answers[i] : ""}`);
+                }),
                 item.answer?.comment && React.createElement("p", { className: "text-sm text-slate-700 italic mt-1" }, `„${item.answer.comment}“`)));
 }
 function FeedbackPanel({ isTrainer, isOwnAccount, items, loading, questions, categories, onOpenRequest, onAnswerToPlayer, onAnswerToTrainer, onDelete }) {
@@ -6063,18 +6103,19 @@ function SpielerAkte() {
             setFeedbackItems((prev) => [{ id: ref.id, direction: "trainerToPlayer", playerId: selectedPlayerId, eventId, eventLabel, createdAt: today(), status: "pending", answer: null }, ...prev]);
         }
     }
-    async function requestFeedbackToTrainer(eventId, eventLabel, customQuestion) {
+    async function requestFeedbackToTrainer(eventId, eventLabel, customQuestions) {
+        const questions = customQuestions || [];
         const ref = await db.collection("feedbackPlayerToTrainer").add({
             playerId: selectedPlayer.id,
             teamId: selectedPlayer.teamId || null,
             eventId: eventId || null,
             eventLabel,
-            customQuestion: customQuestion || "",
+            customQuestions: questions,
             createdAt: today(),
             status: "pending",
             answer: null,
         });
-        setFeedbackItems((prev) => [{ id: ref.id, direction: "playerToTrainer", playerId: selectedPlayer.id, eventId, eventLabel, customQuestion: customQuestion || "", createdAt: today(), status: "pending", answer: null }, ...prev]);
+        setFeedbackItems((prev) => [{ id: ref.id, direction: "playerToTrainer", playerId: selectedPlayer.id, eventId, eventLabel, customQuestions: questions, createdAt: today(), status: "pending", answer: null }, ...prev]);
     }
     async function answerFeedbackToPlayer(id, answer) {
         await db.collection("feedbackTrainerToPlayer").doc(id).set({ status: "answered", answer }, { merge: true });
