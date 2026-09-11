@@ -568,6 +568,19 @@ const fmtDate = (d) => {
         return d;
     return dt.toLocaleDateString("de-DE", { day: "2-digit", month: "2-digit", year: "numeric" });
 };
+const calcAge = (birthdate) => {
+    if (!birthdate)
+        return null;
+    const bd = new Date(birthdate);
+    if (isNaN(bd))
+        return null;
+    const today = new Date();
+    let age = today.getFullYear() - bd.getFullYear();
+    const beforeBirthdayThisYear = today.getMonth() < bd.getMonth() || (today.getMonth() === bd.getMonth() && today.getDate() < bd.getDate());
+    if (beforeBirthdayThisYear)
+        age--;
+    return age;
+};
 const pct = (made, att) => (att ? Math.round((Number(made) / Number(att)) * 1000) / 10 : null);
 const splitName = (fullName) => {
     const parts = (fullName || "").trim().split(/\s+/);
@@ -6570,8 +6583,13 @@ function SpielerAkte() {
                                             React.createElement(IconEdit, { size: 13 }),
                                             React.createElement("span", { className: "hidden sm:inline" }, "Meine Daten bearbeiten"))))),
                                 (() => {
+                                    const age = calcAge(selectedPlayer.birthdate);
+                                    const nextEvent = getPlayerVisibleEvents(calendarEvents, selectedPlayer)
+                                        .filter((e) => e.date >= isoDate(new Date()))
+                                        .sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")))[0];
                                     const bioItems = [
                                         { label: "Geburtsdatum", value: selectedPlayer.birthdate ? fmtDate(selectedPlayer.birthdate) : "" },
+                                        { label: "Alter", value: age !== null ? `${age} Jahre` : "" },
                                         { label: "Nationalität", value: selectedPlayer.nationality || "" },
                                         { label: "Größe", value: selectedPlayer.height ? `${selectedPlayer.height} cm` : "" },
                                         { label: "Position", value: selectedPlayer.position || "" },
@@ -6579,6 +6597,7 @@ function SpielerAkte() {
                                         { label: "Anwesenheit", value: playerLiveAttendanceQuote === null ? "" : `${playerLiveAttendanceQuote}%` },
                                         { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
                                         { label: "Spiele erfasst", value: String(playerStats.length) },
+                                        { label: "Nächster Termin", value: nextEvent ? `${new Date(nextEvent.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" })}${nextEvent.time ? ", " + nextEvent.time : ""}` : "" },
                                         { label: "Letzter Verein", value: selectedPlayer.previousClub || "", wide: true },
                                     ].filter((b) => b.value);
                                     if (bioItems.length === 0)
