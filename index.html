@@ -5992,9 +5992,17 @@ function SpielerAkte() {
         async function loadDevPlans() {
             setDevPlanLoading(true);
             try {
+                // Fuer den Spieler-Zugang selbst darf devPlanTrainer laut Firestore-Regeln
+                // nur mit released == true GELESEN werden (Trainer-Notizen sind bis zur
+                // Freigabe privat) - die Abfrage muss das Filterkriterium deshalb exakt so
+                // stellen, sonst lehnt Firestore die ganze Liste mit permission-denied ab,
+                // auch wenn einzelne Dokumente eigentlich schon freigegeben waeren.
+                const trainerQuery = isTrainer
+                    ? db.collection("devPlanTrainer").where("playerId", "==", activePlayer.id)
+                    : db.collection("devPlanTrainer").where("playerId", "==", activePlayer.id).where("released", "==", true);
                 const [pSnap, tSnap, cSnap] = await Promise.all([
                     db.collection("devPlanPlayer").where("playerId", "==", activePlayer.id).get(),
-                    db.collection("devPlanTrainer").where("playerId", "==", activePlayer.id).get(),
+                    trainerQuery.get(),
                     db.collection("devPlanCombined").where("playerId", "==", activePlayer.id).get(),
                 ]);
                 const byId = {};
