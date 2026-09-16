@@ -559,7 +559,6 @@ function formatWeekRange(monday) {
     return `${fmt(monday)} – ${fmt(sunday)}${sunday.getFullYear()}`;
 }
 const WELLNESS_SCALE_FIELDS = [
-    { id: "sleep", label: "Schlafqualität", lowLabel: "Sehr schlecht", highLabel: "Ausgezeichnet" },
     { id: "soreness", label: "Muskelkater / Erschöpfung", lowLabel: "Stark erschöpft", highLabel: "Frisch & erholt" },
     { id: "energy", label: "Energie / Stimmung", lowLabel: "Sehr niedrig", highLabel: "Top drauf" },
     { id: "stress", label: "Stress (Schule/Alltag)", lowLabel: "Sehr entspannt", highLabel: "Sehr gestresst" },
@@ -5102,6 +5101,31 @@ function RadarEditor({ values, onChange, modes, onModeChange, autoValues }) {
 }
 const WELLNESS_SCALE_COLORS = { 1: "bg-red-500", 2: "bg-orange-500", 3: "bg-amber-400", 4: "bg-lime-500", 5: "bg-emerald-500" };
 const TEAM_COLORS = ["from-[#C43E0E] to-[#8A2C0A]", "from-teal-600 to-teal-900", "from-emerald-500 to-emerald-800", "from-violet-500 to-violet-800", "from-amber-500 to-amber-800", "from-slate-600 to-slate-900"];
+// Monitoring-Verlauf (Trainingsbelastung + Wellness-Check-in): nach Kalenderwoche
+// gruppiert und einzeln ein-/ausklappbar, damit die Seite bei wachsender
+// Historie uebersichtlich bleibt - nur die juengste Woche startet aufgeklappt.
+function weekGroupsForEntries(entries) {
+    const map = new Map();
+    entries.forEach((e) => {
+        const key = isoWeekKey(e.date);
+        if (!map.has(key))
+            map.set(key, []);
+        map.get(key).push(e);
+    });
+    return Array.from(map.entries())
+        .map(([weekKey, items]) => ({ weekKey, entries: sortByDateDesc(items), monday: startOfWeekMonday(new Date(items[0].date + "T00:00:00")) }))
+        .sort((a, b) => b.weekKey.localeCompare(a.weekKey));
+}
+function WeekAccordionSection({ weekKey, monday, defaultOpen, summary, children }) {
+    const [open, setOpen] = useState(defaultOpen);
+    return React.createElement("div", { className: `${cardClass} overflow-hidden` },
+        React.createElement("button", { type: "button", onClick: () => setOpen((v) => !v), className: "w-full flex items-center justify-between px-4 py-3" },
+            React.createElement("div", { className: "flex items-center gap-2.5" },
+                React.createElement("span", { className: "text-sm font-semibold text-slate-800" }, formatWeekRange(monday)),
+                summary),
+            React.createElement(IconArrowDown, { size: 14, className: `text-slate-400 transition-transform shrink-0 ${open ? "rotate-180" : ""}` })),
+        open && React.createElement("div", { className: "px-4 pb-4 pt-1 border-t border-stone-100 space-y-2" }, children));
+}
 // Trainingsbelastung (sRPE): RPE 1-10 nach Borg CR-10, ein Eintrag pro
 // bereits stattgefundenem Kalender-Termin (Typ/Datum kommen vom Termin selbst -
 // der Spieler traegt nur noch Anstrengung und ggf. eine abweichende Dauer ein).
@@ -5151,7 +5175,7 @@ function TrainingLoadPanel({ isTrainer, isOwnAccount, events, entries, onAddEntr
         .filter((e) => e.date && e.date <= todayKey && !loggedEventIds.has(e.id))
         .sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || "")))
         .slice(0, 10);
-    const history = sortByDateDesc(entries);
+    const weekGroups = weekGroupsForEntries(entries);
     const acwr = computeAcwr(entries, todayKey);
     const zone = acwrZone(acwr);
     let form = null;
@@ -5173,10 +5197,15 @@ function TrainingLoadPanel({ isTrainer, isOwnAccount, events, entries, onAddEntr
             React.createElement("span", { className: `text-xs font-semibold rounded-full px-2.5 py-1 ${zone.cls}` }, zone.label)),
         form,
         React.createElement("div", null,
-            history.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
-            React.createElement("div", { className: "space-y-2 mt-2" }, history.length === 0
+            weekGroups.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
+            React.createElement("div", { className: "space-y-2 mt-2" }, weekGroups.length === 0
                 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Belastungsdaten vorhanden.")
-                : history.map((e) => React.createElement(TrainingLoadEntryCard, { key: e.id, entry: e, canDelete: isTrainer, onDelete: () => onDeleteEntry(e.id) })))));
+                : weekGroups.map((g, i) => {
+                    const weekLoad = g.entries.reduce((sum, e) => sum + sessionLoad(e), 0);
+                    const summary = React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, `${g.entries.length} · ${weekLoad} AU`);
+                    return React.createElement(WeekAccordionSection, { key: g.weekKey, weekKey: g.weekKey, monday: g.monday, defaultOpen: i === 0, summary },
+                        g.entries.map((e) => React.createElement(TrainingLoadEntryCard, { key: e.id, entry: e, canDelete: isTrainer, onDelete: () => onDeleteEntry(e.id) })));
+                }))));
 }
 function WellnessScaleInput({ field, value, onChange }) {
     const buttons = [1, 2, 3, 4, 5].map((n) => React.createElement("button", { key: n, type: "button", onClick: () => onChange(n), className: `flex-1 h-9 rounded-lg text-sm font-bold transition ${value === n ? WELLNESS_SCALE_COLORS[n] + " text-white shadow-sm scale-105" : "bg-stone-100 text-slate-400 hover:bg-stone-200"}` }, n));
@@ -5196,20 +5225,20 @@ function WellnessEntryCard({ entry, onDelete, canDelete }) {
             React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, fmtDate(entry.date)),
             canDelete && React.createElement("button", { onClick: () => onDelete(entry.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag löschen" },
                 React.createElement(IconTrash, { size: 13 }))),
-        React.createElement("div", { className: "grid grid-cols-4 gap-1" }, pills),
+        React.createElement("div", { className: "grid grid-cols-3 gap-1" }, pills),
         entry.pain && React.createElement("p", { className: "mt-2.5 text-sm text-[#C43E0E] bg-red-50 rounded-lg px-2.5 py-1.5" }, "⚠ ", entry.pain),
         entry.comment && React.createElement("p", { className: "mt-2 text-sm text-slate-600" }, entry.comment));
 }
 function WellnessPanel({ isTrainer, isOwnAccount, entries, onAddEntry, onDeleteEntry }) {
     const hasCheckedInToday = entries.some((e) => e.date === today());
-    const [values, setValues] = useState({ sleep: 3, soreness: 3, energy: 3, stress: 3, pain: "", comment: "" });
+    const [values, setValues] = useState({ soreness: 3, energy: 3, stress: 3, pain: "", comment: "" });
     function submit(e) {
         e.preventDefault();
-        onAddEntry({ sleep: values.sleep, soreness: values.soreness, energy: values.energy, stress: values.stress, pain: values.pain.trim(), comment: values.comment.trim() });
-        setValues({ sleep: 3, soreness: 3, energy: 3, stress: 3, pain: "", comment: "" });
+        onAddEntry({ soreness: values.soreness, energy: values.energy, stress: values.stress, pain: values.pain.trim(), comment: values.comment.trim() });
+        setValues({ soreness: 3, energy: 3, stress: 3, pain: "", comment: "" });
     }
     const scaleInputs = WELLNESS_SCALE_FIELDS.map((f) => React.createElement(WellnessScaleInput, { key: f.id, field: f, value: values[f.id], onChange: (n) => setValues((v) => ({ ...v, [f.id]: n })) }));
-    const entryCards = entries.map((e) => React.createElement(WellnessEntryCard, { key: e.id, entry: e, canDelete: isTrainer, onDelete: () => onDeleteEntry(e.id) }));
+    const weekGroups = weekGroupsForEntries(entries);
     let form = null;
     if (!isTrainer && isOwnAccount) {
         form = hasCheckedInToday
@@ -5227,13 +5256,17 @@ function WellnessPanel({ isTrainer, isOwnAccount, entries, onAddEntry, onDeleteE
                     React.createElement("textarea", { className: inputClass, rows: 2, value: values.comment, onChange: (e) => setValues((v) => ({ ...v, comment: e.target.value })) })),
                 React.createElement("button", { type: "submit", className: btnPrimaryClass + " w-full justify-center" }, "Check-in abschicken"));
     }
-    const historyBody = entries.length === 0
+    const historyBody = weekGroups.length === 0
         ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Monitoring-Check-ins vorhanden.")
-        : entryCards;
+        : weekGroups.map((g, i) => {
+            const summary = React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, `${g.entries.length} Check-in${g.entries.length > 1 ? "s" : ""}`);
+            return React.createElement(WeekAccordionSection, { key: g.weekKey, weekKey: g.weekKey, monday: g.monday, defaultOpen: i === 0, summary },
+                g.entries.map((e) => React.createElement(WellnessEntryCard, { key: e.id, entry: e, canDelete: isTrainer, onDelete: () => onDeleteEntry(e.id) })));
+        });
     return React.createElement("div", { className: "space-y-4" },
         form,
         React.createElement("div", null,
-            entries.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
+            weekGroups.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
             React.createElement("div", { className: "space-y-2 mt-2" }, historyBody)));
 }
 function GradeChips({ grades, onRemove }) {
