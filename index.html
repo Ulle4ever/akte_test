@@ -3546,6 +3546,66 @@ function getPlayerVisibleEvents(events, player) {
         return (matchesTeam && !isExcluded) || matchesInvite;
     });
 }
+// Trainingsbelastung (sRPE-Methode): Dauer eines Termins in Minuten, falls
+// Start-/Endzeit gepflegt sind - sonst null (Aufrufer faellt dann auf den
+// Typ-Standardwert zurueck).
+function eventDurationMinutes(event) {
+    if (!event.time || !event.endTime)
+        return null;
+    const [h1, m1] = event.time.split(":").map(Number);
+    const [h2, m2] = event.endTime.split(":").map(Number);
+    if ([h1, m1, h2, m2].some((n) => isNaN(n)))
+        return null;
+    const mins = (h2 * 60 + m2) - (h1 * 60 + m1);
+    return mins > 0 ? mins : null;
+}
+function sessionLoad(entry) {
+    return Math.round((Number(entry.rpe) || 0) * (Number(entry.durationMin) || 0));
+}
+function dailyLoadMap(entries) {
+    const map = {};
+    (entries || []).forEach((e) => { map[e.date] = (map[e.date] || 0) + sessionLoad(e); });
+    return map;
+}
+// Durchschnitt ueber die letzten "days" Kalendertage bis einschliesslich
+// referenceDateIso - Tage ohne Eintrag zaehlen bewusst als 0 (wie im Vorbild-
+// Sheet: ein vergessenes Log sieht dadurch wie Unterbelastung aus, das ist
+// gewollt, siehe Sheet-Legende).
+function avgLoadOverDays(dailyMap, referenceDateIso, days) {
+    const end = new Date(referenceDateIso + "T00:00:00");
+    let sum = 0;
+    for (let i = 0; i < days; i++) {
+        const d = new Date(end);
+        d.setDate(end.getDate() - i);
+        sum += dailyMap[isoDate(d)] || 0;
+    }
+    return sum / days;
+}
+function computeAcwr(entries, referenceDateIso) {
+    if (!entries || entries.length === 0)
+        return null;
+    const firstDate = entries.reduce((min, e) => (e.date < min ? e.date : min), entries[0].date);
+    const daysSinceFirst = Math.round((new Date(referenceDateIso) - new Date(firstDate)) / 86400000) + 1;
+    if (daysSinceFirst < ACWR_MIN_HISTORY_DAYS)
+        return null;
+    const dailyMap = dailyLoadMap(entries);
+    const chronic = avgLoadOverDays(dailyMap, referenceDateIso, 28);
+    if (!chronic)
+        return null;
+    const acute = avgLoadOverDays(dailyMap, referenceDateIso, 7);
+    return Math.round((acute / chronic) * 100) / 100;
+}
+function acwrZone(acwr) {
+    if (acwr === null || acwr === undefined)
+        return { label: "Keine Daten", cls: "bg-stone-100 text-slate-400" };
+    if (acwr < ACWR_LOW)
+        return { label: "Unterbelastung", cls: "bg-sky-50 text-sky-700" };
+    if (acwr <= ACWR_HIGH)
+        return { label: "Normal", cls: "bg-emerald-50 text-emerald-700" };
+    if (acwr < ACWR_ALARM)
+        return { label: "Erhöht", cls: "bg-amber-50 text-amber-700" };
+    return { label: "Alarm", cls: "bg-red-50 text-red-600" };
+}
 // Fuer den Feedback-Loop: die letzten (bereits stattgefundenen) Trainings/Spiele
 // eines Spielers zur Auswahl - neueste zuerst, auf eine ueberschaubare Anzahl
 // begrenzt.
@@ -4728,6 +4788,20 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
 }
 const ATTENDANCE_WARN_THRESHOLD = 75;
 const ATTENDANCE_MIN_MARKED = 3; // erst ab so vielen markierten Einheiten ueberhaupt eine Quote bilden
+// Trainingsbelastung (sRPE-Methode, ACWR = Ø Load 7 Tage / Ø Load 28 Tage):
+// Standardwerte wie in der Athletik-Trainer-Vorlage (Google Sheet).
+const ACWR_LOW = 0.8; // darunter: Unterbelastung
+const ACWR_HIGH = 1.3; // oberes Ende des Zielkorridors
+const ACWR_ALARM = 1.5; // darueber: deutliche Belastungsspitze
+const ACWR_MIN_HISTORY_DAYS = 21; // vorher zu wenig Historie fuer eine aussagekraeftige ACWR
+const TRAINING_LOAD_TYPE_DEFAULTS = {
+    tt: { duration: 90, fixed: false },
+    it: { duration: 60, fixed: false },
+    at: { duration: 60, fixed: false },
+    spiel: { duration: 120, fixed: true },
+    training: { duration: 90, fixed: false },
+    individuell: { duration: 60, fixed: false },
+};
 // Farbcodierung "Braucht Aufmerksamkeit": jede Art bekommt ihre eigene Farbe,
 // damit man Zeilen (aufgeklappt) und Anzahl-Badges (eingeklappt) auf einen
 // Blick unterscheiden kann.
@@ -4738,11 +4812,13 @@ const ATTENTION_KIND_STYLE = {
     wellness: { icon: IconHeart, row: "bg-purple-50 hover:bg-purple-100 border-purple-500", text: "text-purple-700", badge: "bg-purple-500 text-white" },
     attendance: { icon: IconActivity, row: "bg-teal-50 hover:bg-teal-100 border-teal-500", text: "text-teal-700", badge: "bg-teal-500 text-white" },
     devplan: { icon: IconClipboard, row: "bg-blue-50 hover:bg-blue-100 border-blue-500", text: "text-blue-700", badge: "bg-blue-500 text-white" },
+    load: { icon: IconTrendUp, row: "bg-fuchsia-50 hover:bg-fuchsia-100 border-fuchsia-500", text: "text-fuchsia-700", badge: "bg-fuchsia-500 text-white" },
 };
-const ATTENTION_KIND_ORDER = ["injury", "profile", "feedback", "wellness", "attendance", "devplan"];
-function TrainerDashboard({ events, teams, players, wellnessData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
+const ATTENTION_KIND_ORDER = ["injury", "profile", "feedback", "wellness", "attendance", "devplan", "load"];
+function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
     const [showEventForm, setShowEventForm] = useState(false);
     const [attentionExpanded, setAttentionExpanded] = useState(false);
+    const [loadExpanded, setLoadExpanded] = useState(false);
     const [editingEvent, setEditingEvent] = useState(null);
     const days = [];
     const d0 = new Date();
@@ -4770,6 +4846,20 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
             reasons.push("Stress hoch");
         return reasons.join(" · ") || "Auffällig";
     }
+    // Trainingsbelastung (sRPE/ACWR) je Spieler fuer "heute" - Grundlage fuer
+    // die Team-heute-Karte und den Belastungsalarm unter "Braucht Aufmerksamkeit".
+    const todayKeyLoad = today();
+    const trainingLoadRows = players.map((p) => {
+        const entries = trainingLoadData[p.id]?.entries || [];
+        const todaysEntries = entries.filter((e) => e.date === todayKeyLoad);
+        const loadToday = todaysEntries.reduce((sum, e) => sum + sessionLoad(e), 0);
+        const load7 = Math.round(avgLoadOverDays(dailyLoadMap(entries), todayKeyLoad, 7));
+        const acwr = computeAcwr(entries, todayKeyLoad);
+        const zone = acwrZone(acwr);
+        const lastEntry = sortByDateDesc(entries)[0] || null;
+        return { player: p, todaysEntries, loadToday, load7, acwr, zone, lastEntry };
+    });
+    const loadAlarmRows = trainingLoadRows.filter((r) => r.zone.label === "Alarm");
     function openNewEvent() {
         setEditingEvent(null);
         setShowEventForm(true);
@@ -4785,6 +4875,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
         { label: "Spieler gesamt", value: players.length, icon: IconUsers, grad: "from-slate-700 to-slate-900" },
         { label: "Verletzt / Reha", value: outPlayers.length, icon: IconAlert, grad: outPlayers.length > 0 ? "from-amber-500 to-amber-700" : "from-emerald-500 to-emerald-700" },
         { label: "Monitoring-Check-ins", value: `${checkedInWellness.length}/${players.length}`, icon: IconHeart, grad: "from-[#FF6A2B] to-[#C43E0E]" },
+        { label: "Belastungsalarm", value: loadAlarmRows.length, icon: IconTrendUp, grad: loadAlarmRows.length > 0 ? "from-fuchsia-500 to-fuchsia-700" : "from-emerald-500 to-emerald-700" },
     ].map((k) => React.createElement("div", { key: k.label, className: "bg-white border border-stone-100 rounded-2xl p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]" },
         React.createElement("span", { className: `w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br ${k.grad} text-white flex items-center justify-center shrink-0` },
             React.createElement(k.icon, { size: 16 })),
@@ -4869,6 +4960,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
         ...lowAttendancePlayers.map(({ player, quote }) => ({ id: "attendance-" + player.id, player, kind: "attendance", label: `${quote}% Anwesenheit` })),
         ...devPlanWaitingRows.map(({ player, waiting }) => ({ id: "devplan-" + waiting.id, player, kind: "devplan", label: "Wartet auf deine Freigabe" })),
         ...feedbackWaitingRows.map(({ player, waiting }) => ({ id: "feedback-" + waiting.id, player, kind: "feedback", label: "Feedback angefragt" })),
+        ...loadAlarmRows.map(({ player, acwr }) => ({ id: "load-" + player.id, player, kind: "load", label: `ACWR ${acwr} - Belastungsspitze` })),
     ];
     const attentionRows = attentionItems.map((item) => {
         const style = ATTENTION_KIND_STYLE[item.kind] || ATTENTION_KIND_STYLE.injury;
@@ -4901,6 +4993,40 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
             attentionRows.length === 0 && !conflictBanner
                 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Alles im grünen Bereich - keine Auffälligkeiten.")
                 : attentionRows));
+    // "Team heute": Trainingsbelastung (sRPE/ACWR) je Spieler, analog zur
+    // Team-Uebersicht der Athletik-Trainer-Vorlage - Alarm-/Erhoeht-Zonen zuerst.
+    const loadEntryCount = trainingLoadRows.filter((r) => r.todaysEntries.length > 0).length;
+    const trainingLoadTableRows = [...trainingLoadRows].sort((a, b) => {
+        const rank = (r) => (r.zone.label === "Alarm" ? 0 : r.zone.label === "Erhöht" ? 1 : r.todaysEntries.length === 0 ? 2 : 3);
+        return rank(a) - rank(b) || a.player.name.localeCompare(b.player.name);
+    });
+    const trainingLoadCard = React.createElement("div", { className: `${cardClass} p-5` },
+        React.createElement("button", { type: "button", onClick: () => setLoadExpanded((v) => !v), className: "w-full flex items-center justify-between" },
+            React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+                React.createElement(SectionLabel, null, "Trainingsbelastung heute"),
+                players.length > 0 && React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, `${loadEntryCount}/${players.length} eingetragen`)),
+            React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform shrink-0 ${loadExpanded ? "rotate-180" : ""}` })),
+        loadExpanded && (players.length === 0
+            ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4 mt-3" }, "Noch keine Spieler.")
+            : React.createElement("div", { className: "mt-3 -mx-1 overflow-x-auto" },
+                React.createElement("table", { className: "w-full text-sm" },
+                    React.createElement("thead", null,
+                        React.createElement("tr", { className: "border-b-2 border-[#C43E0E]/20 bg-stone-50/60 text-slate-500 text-xs uppercase tracking-wide" },
+                            React.createElement("th", { className: "text-left px-3 py-2" }, "Spieler"),
+                            React.createElement("th", { className: "text-left px-3 py-2" }, "Team"),
+                            React.createElement("th", { className: "text-center px-3 py-2" }, "Heute"),
+                            React.createElement("th", { className: "text-right px-3 py-2" }, "Load 7T Ø"),
+                            React.createElement("th", { className: "text-right px-3 py-2" }, "ACWR"),
+                            React.createElement("th", { className: "text-left px-3 py-2" }, "Zone"))),
+                    React.createElement("tbody", null, trainingLoadTableRows.map((r) => React.createElement("tr", { key: r.player.id, onClick: () => onSelectPlayer(r.player.id), className: "border-b border-stone-100 last:border-0 odd:bg-stone-50/40 hover:bg-red-50/60 cursor-pointer transition-colors" },
+                        React.createElement("td", { className: "px-3 py-2 font-medium text-slate-800 truncate max-w-[160px]" }, r.player.name),
+                        React.createElement("td", { className: "px-3 py-2 text-slate-400" }, teamName(r.player.teamId)),
+                        React.createElement("td", { className: "px-3 py-2 text-center" }, r.todaysEntries.length > 0
+                            ? React.createElement("span", { className: "text-emerald-600 font-bold" }, "S")
+                            : React.createElement("span", { className: "text-slate-300" }, "–")),
+                        React.createElement("td", { className: "px-3 py-2 text-right tabular-nums" }, r.load7 || "–"),
+                        React.createElement("td", { className: "px-3 py-2 text-right tabular-nums font-semibold" }, r.acwr === null ? "–" : r.acwr),
+                        React.createElement("td", { className: "px-3 py-2" }, React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${r.zone.cls}` }, r.zone.label)))))))));
     return (React.createElement("div", { className: "space-y-6 rsk-fade-in" },
         React.createElement("div", { className: "rounded-3xl bg-gradient-to-br from-white via-stone-50 to-white border border-stone-100 p-6 sm:p-8 relative overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]" },
             React.createElement("div", { className: "pointer-events-none absolute -top-16 -right-16 w-56 h-56 rounded-full bg-[#C43E0E]/10 blur-3xl" }),
@@ -4918,6 +5044,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, eventAttendanc
         showEventForm && (React.createElement(Modal, { title: editingEvent ? "Termin bearbeiten" : "Termin anlegen", onClose: () => setShowEventForm(false), wide: true },
             React.createElement(EventForm, { initialEvent: editingEvent, teams: teams, allPlayers: players, onSubmit: (vals) => { editingEvent ? onEditEvent(editingEvent.id, vals) : onAddEvent(vals); setShowEventForm(false); }, onClose: () => setShowEventForm(false) }))),
         attentionCard,
+        trainingLoadCard,
         React.createElement("div", { className: "grid lg:grid-cols-3 gap-6 items-start" },
             React.createElement("div", { className: "lg:col-span-2" }, terminCard),
             React.createElement("div", { className: "space-y-6" }, teamsCard))));
@@ -4975,6 +5102,82 @@ function RadarEditor({ values, onChange, modes, onModeChange, autoValues }) {
 }
 const WELLNESS_SCALE_COLORS = { 1: "bg-red-500", 2: "bg-orange-500", 3: "bg-amber-400", 4: "bg-lime-500", 5: "bg-emerald-500" };
 const TEAM_COLORS = ["from-[#C43E0E] to-[#8A2C0A]", "from-teal-600 to-teal-900", "from-emerald-500 to-emerald-800", "from-violet-500 to-violet-800", "from-amber-500 to-amber-800", "from-slate-600 to-slate-900"];
+// Trainingsbelastung (sRPE): RPE 1-10 nach Borg CR-10, ein Eintrag pro
+// bereits stattgefundenem Kalender-Termin (Typ/Datum kommen vom Termin selbst -
+// der Spieler traegt nur noch Anstrengung und ggf. eine abweichende Dauer ein).
+function RpeScaleInput({ value, onChange }) {
+    const buttons = Array.from({ length: 10 }, (_, i) => i + 1).map((n) => React.createElement("button", { key: n, type: "button", onClick: () => onChange(n), className: `flex-1 h-9 rounded-lg text-sm font-bold transition ${value === n ? "bg-[#C43E0E] text-white shadow-sm scale-105" : "bg-stone-100 text-slate-400 hover:bg-stone-200"}` }, n));
+    return React.createElement("div", { className: "space-y-1.5" },
+        React.createElement("div", { className: "flex items-center gap-1" }, buttons),
+        React.createElement("div", { className: "flex items-center justify-between text-[11px] text-slate-400" },
+            React.createElement("span", null, "Sehr leicht"),
+            React.createElement("span", null, "Maximal")));
+}
+function TrainingLoadLogForm({ event, onSubmit }) {
+    const typeDefaults = TRAINING_LOAD_TYPE_DEFAULTS[event.type] || { duration: 60, fixed: false };
+    const [duration, setDuration] = useState(typeDefaults.fixed ? typeDefaults.duration : (eventDurationMinutes(event) || typeDefaults.duration));
+    const [rpe, setRpe] = useState(null);
+    function submit(e) {
+        e.preventDefault();
+        if (!rpe)
+            return;
+        onSubmit({ eventId: event.id, date: event.date, type: event.type, durationMin: Number(duration) || 0, rpe });
+    }
+    return React.createElement("form", { onSubmit: submit, className: `${cardClass} p-3.5 space-y-2.5` },
+        React.createElement("div", { className: "flex items-center justify-between gap-2" },
+            React.createElement("div", { className: "min-w-0" },
+                React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, event.title || EVENT_TYPE_STYLES[event.type]?.label),
+                React.createElement("p", { className: "text-xs text-slate-400" }, fmtDate(event.date), " · ", EVENT_TYPE_STYLES[event.type]?.label || event.type)),
+            React.createElement("div", { className: "flex items-center gap-1.5 shrink-0" },
+                React.createElement("input", { type: "number", min: 1, className: inputClass + " w-16 text-center", value: duration, disabled: typeDefaults.fixed, onChange: (e) => setDuration(e.target.value) }),
+                React.createElement("span", { className: "text-xs text-slate-400" }, "Min."))),
+        React.createElement(RpeScaleInput, { value: rpe, onChange: setRpe }),
+        React.createElement("button", { type: "submit", disabled: !rpe, className: btnPrimaryClass + " w-full justify-center text-sm disabled:opacity-40" }, "Eintragen"));
+}
+function TrainingLoadEntryCard({ entry, onDelete, canDelete }) {
+    return React.createElement("div", { className: `${cardClass} p-3.5 flex items-center justify-between gap-3` },
+        React.createElement("div", { className: "min-w-0" },
+            React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, EVENT_TYPE_STYLES[entry.type]?.label || entry.type),
+            React.createElement("p", { className: "text-xs text-slate-400" }, fmtDate(entry.date), " · ", entry.durationMin, " Min. · RPE ", entry.rpe)),
+        React.createElement("div", { className: "flex items-center gap-3 shrink-0" },
+            React.createElement("span", { className: "text-sm font-bold text-slate-900" }, sessionLoad(entry), " AU"),
+            canDelete && React.createElement("button", { onClick: () => onDelete(entry.id), className: "text-slate-300 hover:text-red-500", "aria-label": "Eintrag löschen" },
+                React.createElement(IconTrash, { size: 13 }))));
+}
+function TrainingLoadPanel({ isTrainer, isOwnAccount, events, entries, onAddEntry, onDeleteEntry }) {
+    const todayKey = today();
+    const loggedEventIds = new Set(entries.map((e) => e.eventId).filter(Boolean));
+    const openEvents = events
+        .filter((e) => e.date && e.date <= todayKey && !loggedEventIds.has(e.id))
+        .sort((a, b) => (b.date + (b.time || "")).localeCompare(a.date + (a.time || "")))
+        .slice(0, 10);
+    const history = sortByDateDesc(entries);
+    const acwr = computeAcwr(entries, todayKey);
+    const zone = acwrZone(acwr);
+    let form = null;
+    if (!isTrainer && isOwnAccount) {
+        form = openEvents.length === 0
+            ? React.createElement("div", { className: `${cardClass} p-4 flex items-center gap-2.5 text-emerald-700 bg-emerald-50 border border-emerald-100` },
+                React.createElement(IconCheck, { size: 16 }),
+                React.createElement("span", { className: "text-sm font-medium" }, "Alles eingetragen - keine offenen Einheiten."))
+            : React.createElement("div", { className: "space-y-2.5" },
+                React.createElement(SectionLabel, null, "Belastung eintragen"),
+                openEvents.map((e) => React.createElement(TrainingLoadLogForm, { key: e.id, event: e, onSubmit: onAddEntry })));
+    }
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement(SectionLabel, null, "Trainingsbelastung"),
+        React.createElement("div", { className: "flex items-center gap-3 flex-wrap" },
+            React.createElement("div", { className: `${cardClass} px-4 py-2.5 flex items-center gap-2` },
+                React.createElement("span", { className: "text-xs text-slate-400" }, "ACWR"),
+                React.createElement("span", { className: "text-sm font-black text-slate-900" }, acwr === null ? "–" : acwr)),
+            React.createElement("span", { className: `text-xs font-semibold rounded-full px-2.5 py-1 ${zone.cls}` }, zone.label)),
+        form,
+        React.createElement("div", null,
+            history.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
+            React.createElement("div", { className: "space-y-2 mt-2" }, history.length === 0
+                ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Belastungsdaten vorhanden.")
+                : history.map((e) => React.createElement(TrainingLoadEntryCard, { key: e.id, entry: e, canDelete: isTrainer, onDelete: () => onDeleteEntry(e.id) })))));
+}
 function WellnessScaleInput({ field, value, onChange }) {
     const buttons = [1, 2, 3, 4, 5].map((n) => React.createElement("button", { key: n, type: "button", onClick: () => onChange(n), className: `flex-1 h-9 rounded-lg text-sm font-bold transition ${value === n ? WELLNESS_SCALE_COLORS[n] + " text-white shadow-sm scale-105" : "bg-stone-100 text-slate-400 hover:bg-stone-200"}` }, n));
     return React.createElement("div", { className: "space-y-1.5" },
@@ -5426,6 +5629,7 @@ function SpielerAkte() {
     const [players, setPlayers] = useState([]);
     const [privateData, setPrivateData] = useState({}); // { [playerId]: { notes, tests, attendance } }, nur für Trainer geladen
     const [wellnessData, setWellnessData] = useState({}); // { [playerId]: { entries: [] } }, Trainer: alle, Spieler: nur eigene
+    const [trainingLoadData, setTrainingLoadData] = useState({}); // { [playerId]: { entries: [] } }, sRPE-Trainingsbelastung, Trainer: alle, Spieler: nur eigene
     const [gradesData, setGradesData] = useState({}); // { [playerId]: { subjects: [] } }, Trainer: alle, Spieler: nur eigene
     const [calendarEvents, setCalendarEvents] = useState([]);
     const [devPlanWaiting, setDevPlanWaiting] = useState([]); // Zyklen, die der Spieler freigegeben hat, der Trainer aber noch nicht (fuer Dashboard-Hinweis)
@@ -5478,6 +5682,7 @@ function SpielerAkte() {
                 setPlayers([]);
                 setPrivateData({});
                 setWellnessData({});
+                setTrainingLoadData({});
                 setGradesData({});
                 setLoading(false);
                 return;
@@ -5550,6 +5755,22 @@ function SpielerAkte() {
                     }));
                     if (!cancelled)
                         setWellnessData(Object.fromEntries(wellEntries));
+                    // In try/catch: neue Collection, deren Firestore-Regel der Nutzer erst
+                    // noch manuell in der Console nachtragen muss (siehe firestore.rules) -
+                    // bis dahin soll ein permission-denied hier nicht den kompletten Login
+                    // abbrechen, sondern die Trainingsbelastung einfach leer bleiben.
+                    try {
+                        const loadEntries = await Promise.all(loadedPlayers.map(async (p) => {
+                            const s = await db.collection("playerTrainingLoad").doc(p.id).get();
+                            return [p.id, s.exists ? { entries: s.data().entries || [] } : { entries: [] }];
+                        }));
+                        if (!cancelled)
+                            setTrainingLoadData(Object.fromEntries(loadEntries));
+                    }
+                    catch (e) {
+                        if (!cancelled)
+                            setTrainingLoadData({});
+                    }
                     try {
                         const gradeEntries = await Promise.all(loadedPlayers.map(async (p) => {
                             const s = await db.collection("playerGrades").doc(p.id).get();
@@ -5642,6 +5863,15 @@ function SpielerAkte() {
                     const ownWellSnap = await db.collection("playerWellness").doc(account.playerId).get();
                     if (!cancelled)
                         setWellnessData({ [account.playerId]: { entries: ownWellSnap.exists ? (ownWellSnap.data().entries || []) : [] } });
+                    try {
+                        const ownLoadSnap = await db.collection("playerTrainingLoad").doc(account.playerId).get();
+                        if (!cancelled)
+                            setTrainingLoadData({ [account.playerId]: { entries: ownLoadSnap.exists ? (ownLoadSnap.data().entries || []) : [] } });
+                    }
+                    catch (e) {
+                        if (!cancelled)
+                            setTrainingLoadData({ [account.playerId]: { entries: [] } });
+                    }
                     try {
                         const ownGradeSnap = await db.collection("playerGrades").doc(account.playerId).get();
                         if (!cancelled)
@@ -5799,6 +6029,24 @@ function SpielerAkte() {
     function deleteWellnessEntry(playerId, id) {
         const cur = wellnessData[playerId]?.entries || [];
         persistWellness(playerId, cur.filter((e) => e.id !== id));
+    }
+    async function persistTrainingLoad(playerId, entries) {
+        setTrainingLoadData((prev) => ({ ...prev, [playerId]: { entries } }));
+        try {
+            await db.collection("playerTrainingLoad").doc(playerId).set({ entries }, { merge: true });
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+    }
+    function addTrainingLoadEntry(playerId, entry) {
+        const cur = trainingLoadData[playerId]?.entries || [];
+        persistTrainingLoad(playerId, [...cur, { id: uid(), createdAt: today(), ...entry }]);
+    }
+    function deleteTrainingLoadEntry(playerId, id) {
+        const cur = trainingLoadData[playerId]?.entries || [];
+        persistTrainingLoad(playerId, cur.filter((e) => e.id !== id));
     }
     async function persistGrades(playerId, subjects) {
         setGradesData((prev) => ({ ...prev, [playerId]: { subjects } }));
@@ -6272,6 +6520,8 @@ function SpielerAkte() {
     }, { present: 0, absent: 0, injured: 0 });
     const playerLiveAttendanceQuote = attendanceQuote(playerLiveAttendanceStats.present, playerLiveAttendanceStats.absent);
     const playerWellnessEntries = selectedPlayer ? sortByDateDesc(wellnessData[selectedPlayer.id]?.entries || []) : [];
+    const playerTrainingLoadEntries = selectedPlayer ? (trainingLoadData[selectedPlayer.id]?.entries || []) : [];
+    const playerTrainingLoadEvents = selectedPlayer ? getPlayerVisibleEvents(calendarEvents, selectedPlayer) : [];
     const avg = (key) => (playerStats.length ? fmtNum(playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length, 1) : "–");
     const totalPct = (madeKey, attKey) => {
         const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
@@ -6920,7 +7170,7 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
@@ -7132,7 +7382,12 @@ function SpielerAkte() {
                                     React.createElement("p", { className: "text-2xl font-black text-amber-600" }, playerLiveAttendanceStats.injured),
                                     React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Verletzt"))),
                             React.createElement(PlayerAttendanceTab, { rows: playerLiveAttendanceRows }))),
-                        activeTab === "wellness" && (React.createElement(WellnessPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, entries: playerWellnessEntries, onAddEntry: (entry) => addWellnessEntry(selectedPlayer.id, entry), onDeleteEntry: (id) => deleteWellnessEntry(selectedPlayer.id, id) })),
+                        activeTab === "wellness" && (React.createElement("div", { className: "space-y-8" },
+                            React.createElement(TrainingLoadPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, events: playerTrainingLoadEvents, entries: playerTrainingLoadEntries, onAddEntry: (entry) => addTrainingLoadEntry(selectedPlayer.id, entry), onDeleteEntry: (id) => deleteTrainingLoadEntry(selectedPlayer.id, id) }),
+                            React.createElement("div", { className: "border-t border-stone-200 pt-6" },
+                                React.createElement(SectionLabel, null, "Wellness-Check-in"),
+                                React.createElement("div", { className: "mt-3" },
+                                    React.createElement(WellnessPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, entries: playerWellnessEntries, onAddEntry: (entry) => addWellnessEntry(selectedPlayer.id, entry), onDeleteEntry: (id) => deleteWellnessEntry(selectedPlayer.id, id) }))))),
                         activeTab === "noten" && (React.createElement(GradesPanel, { isTrainer: isTrainer, isOwnAccount: !isTrainer && account.playerId === selectedPlayer.id, subjects: playerGradeSubjects, onSave: (subjects) => saveGradeSubjects(selectedPlayer.id, subjects), onToggleFlag: (id) => toggleGradeFlag(selectedPlayer.id, id), onRenameSubject: (id, name) => renameGradeSubject(selectedPlayer.id, id, name), onSetComment: (id, comment) => setGradeComment(selectedPlayer.id, id, comment) })),
                         activeTab === "video" && (React.createElement("div", null,
                             isTrainer && (React.createElement("div", { className: "flex justify-end mb-3" },

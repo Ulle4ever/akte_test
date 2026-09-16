@@ -104,6 +104,13 @@ service cloud.firestore {
       allow read, write: if playerBelongsToTrainerTeam(playerId) || myPlayerId() == playerId;
     }
 
+    // Trainingsbelastung (sRPE/ACWR): Spieler tragen ihre eigene Belastung pro
+    // Termin selbst ein. Trainer (Vollzugriff oder eigenes Team) sehen und
+    // verwalten die Einträge ihrer Spieler. Gleiches Muster wie playerWellness.
+    match /playerTrainingLoad/{playerId} {
+      allow read, write: if playerBelongsToTrainerTeam(playerId) || myPlayerId() == playerId;
+    }
+
     // Noten-Umfrage: Fächer/Zeugnisnoten/Klausurnoten trägt der Spieler für sich
     // selbst ein. Trainer (Vollzugriff oder eigenes Team) sehen und verwalten alle
     // Einträge ihrer Spieler.
