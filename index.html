@@ -1103,7 +1103,43 @@ function isNearWhite(r, g, b) {
 function colorDistance(c1, c2) {
     return Math.sqrt((c1[0] - c2[0]) ** 2 + (c1[1] - c2[1]) ** 2 + (c1[2] - c2[2]) ** 2);
 }
-function detectColoredBlocks(canvas) {
+// Screenshot-Hintergrund schaetzen statt "weiss" fest anzunehmen - noetig fuer
+// Dark-Mode-Kalender-Apps (dunkler Hintergrund, helle Kaestchen) und farbige
+// Seitenhintergruende (z.B. beige/cremefarbene Themes). Die Randpixel des
+// Bildes sind so gut wie immer echter Seitenhintergrund, nie ein Termin-
+// Kaestchen - die haeufigste Randfarbe ist daher eine robuste Schaetzung.
+function estimateBackgroundColor(canvas) {
+    const width = canvas.width, height = canvas.height;
+    const { data } = canvas.getContext("2d").getImageData(0, 0, width, height);
+    const counts = new Map();
+    // Ueber das GANZE Bild sparsam abtasten statt nur den Bildrand - ein eng
+    // zugeschnittener Screenshot kann eine Rasterlinie oder ein Kaestchen genau
+    // an den Rand legen, was den Rand selbst zur falschen Schaetzung machen
+    // wuerde. Der Hintergrund ist so gut wie immer die haeufigste Farbe im
+    // gesamten Bild, weil Kaestchen/Linien/Text immer nur einen Bruchteil der
+    // Flaeche einnehmen.
+    const stepX = Math.max(1, Math.floor(width / 150));
+    const stepY = Math.max(1, Math.floor(height / 150));
+    for (let y = 0; y < height; y += stepY) {
+        for (let x = 0; x < width; x += stepX) {
+            const p = (y * width + x) * 4;
+            // Auf ein 8er-Raster quantisieren, damit minimale Kompressions-/
+            // Antialiasing-Abweichungen nicht als eigene Farben zaehlen.
+            const key = `${data[p] >> 3},${data[p + 1] >> 3},${data[p + 2] >> 3}`;
+            counts.set(key, (counts.get(key) || 0) + 1);
+        }
+    }
+    let bestKey = "31,31,31", bestCount = -1;
+    counts.forEach((c, k) => { if (c > bestCount) {
+        bestCount = c;
+        bestKey = k;
+    } });
+    return bestKey.split(",").map((v) => Number(v) * 8 + 4);
+}
+function isBackgroundColor(r, g, b, bg) {
+    return colorDistance([r, g, b], bg) < 28;
+}
+function detectColoredBlocks(canvas, bg) {
     const width = canvas.width, height = canvas.height;
     const ctx = canvas.getContext("2d");
     const imageData = ctx.getImageData(0, 0, width, height);
@@ -1112,6 +1148,7 @@ function detectColoredBlocks(canvas) {
     const visited = new Uint8Array(n);
     const stack = new Int32Array(n);
     const blocks = [];
+    const background = bg || estimateBackgroundColor(canvas);
     function pixelAt(idx) {
         const p = idx * 4;
         return [data[p], data[p + 1], data[p + 2]];
@@ -1123,7 +1160,7 @@ function detectColoredBlocks(canvas) {
                 continue;
             visited[idx] = 1;
             const seedColor = pixelAt(idx);
-            if (isNearWhite(seedColor[0], seedColor[1], seedColor[2]))
+            if (isBackgroundColor(seedColor[0], seedColor[1], seedColor[2], background))
                 continue;
             let sp = 0;
             stack[sp++] = idx;
@@ -1158,7 +1195,7 @@ function detectColoredBlocks(canvas) {
                     if (visited[nb])
                         continue;
                     const nColor = pixelAt(nb);
-                    if (isNearWhite(nColor[0], nColor[1], nColor[2])) {
+                    if (isBackgroundColor(nColor[0], nColor[1], nColor[2], background)) {
                         visited[nb] = 1;
                         continue;
                     }
@@ -1170,13 +1207,14 @@ function detectColoredBlocks(canvas) {
             }
             // Schwarzer/grauer Text ausserhalb der farbigen Kaestchen (z.B. ein
             // "OPTIONAL"-Label ueber einem Termin) besteht aus Pixeln, die nicht
-            // "fast weiss" sind - wuerde ohne diese Pruefung faelschlich als
+            // Hintergrundfarbe sind - wuerde ohne diese Pruefung faelschlich als
             // eigener Termin-Block erkannt. Echte Termin-Kaestchen haben eine
-            // klar gesaettigte Farbe (Orange/Lila/Blau usw.), reiner Text ist
-            // dagegen (fast) grau - R/G/B liegen nah beieinander.
+            // klar erkennbare Eigenfarbe (Orange/Lila/Blau usw. - auch pastellig
+            // oder im Dark Mode), reiner Text ist dagegen (fast) grau/neutral -
+            // R/G/B liegen nah beieinander.
             const avgR = rSum / count, avgG = gSum / count, avgB = bSum / count;
             const saturation = Math.max(avgR, avgG, avgB) - Math.min(avgR, avgG, avgB);
-            if (count > 300 && maxX - minX > 20 && maxY - minY > 15 && saturation > 30) {
+            if (count > 300 && maxX - minX > 20 && maxY - minY > 15 && saturation > 18) {
                 blocks.push({ minX, maxX, minY, maxY, count });
             }
         }
@@ -1203,16 +1241,20 @@ function assignColumnsByWidth(blocks, numDays) {
    selbst finden (duenne graue/schwarze Linien, die fast die volle Breite bzw.
    Hoehe durchlaufen) und daraus die Zellgrenzen ableiten - unabhaengig davon,
    ob eine Zelle eingefaerbt ist oder nicht. */
-function isGridLineColor(r, g, b) {
+function isGridLineColor(r, g, b, bg) {
+    // Bei bekanntem Seitenhintergrund reicht "deutlich anders als der Hintergrund" -
+    // das erkennt Linien unabhaengig davon, ob der Hintergrund hell oder dunkel
+    // ist. Die alte Grau/Dunkel-Heuristik unten ging von einem HELLEN Hintergrund
+    // aus (Linie = dunkler/grau) - bei einem dunklen, selbst schon grauen
+    // Hintergrund (z.B. Dark Mode #1e1e1e) haette sie sonst JEDEN Hintergrund-
+    // Pixel faelschlich als Linie gezaehlt, weil "dunkelgrau" eben auch auf den
+    // Hintergrund selbst zutrifft.
+    if (bg)
+        return colorDistance([r, g, b], bg) > 40;
     const maxc = Math.max(r, g, b), minc = Math.min(r, g, b);
     // Grau/schwarz (Linie oder graue Kopfzeilen-Flaeche), aber nicht reines Weiss
     // und nicht zu bunt (das waeren dann eingefaerbte Termin-Zellen, keine Linie).
     const grayish = maxc < 235 && (maxc - minc) < 20;
-    // ODER einfach deutlich dunkler als alles andere im Bild: eine duenne
-    // Rahmenlinie, die ueber eine eingefaerbte Termin-Zelle laeuft, wird beim
-    // Skalieren/Komprimieren des Screenshots oft mit der Fuellfarbe verwischt
-    // und ist dann nicht mehr rein grau - aber immer noch klar dunkler als die
-    // Fuellfarbe selbst (die ist typischerweise hell/mittelhell).
     const luma = 0.299 * r + 0.587 * g + 0.114 * b;
     return grayish || luma < 140;
 }
@@ -1240,10 +1282,11 @@ function extractLinePositions(isLine, length) {
     });
     return merged;
 }
-function detectGridLines(canvas) {
+function detectGridLines(canvas, bg) {
     const width = canvas.width, height = canvas.height;
     const ctx = canvas.getContext("2d");
     const { data } = ctx.getImageData(0, 0, width, height);
+    const background = bg || estimateBackgroundColor(canvas);
     const rowIsLine = new Uint8Array(height);
     const colIsLine = new Uint8Array(width);
     const rowCount = new Int32Array(height);
@@ -1251,7 +1294,7 @@ function detectGridLines(canvas) {
     for (let y = 0; y < height; y++) {
         for (let x = 0; x < width; x++) {
             const p = (y * width + x) * 4;
-            if (isGridLineColor(data[p], data[p + 1], data[p + 2])) {
+            if (isGridLineColor(data[p], data[p + 1], data[p + 2], background)) {
                 rowCount[y]++;
                 colCount[x]++;
             }
@@ -1266,7 +1309,7 @@ function detectGridLines(canvas) {
         colLines: extractLinePositions(colIsLine, width),
     };
 }
-function hasVisibleContent(canvas, block) {
+function hasVisibleContent(canvas, block, bg) {
     const ctx = canvas.getContext("2d");
     // Ein paar Pixel Rand weglassen - direkt an der Zellgrenze faerbt die
     // (leicht verwischte) Rasterlinie sonst auch komplett leere Zellen ein
@@ -1276,19 +1319,21 @@ function hasVisibleContent(canvas, block) {
     if (w <= 0 || h <= 0)
         return false;
     const { data } = ctx.getImageData(block.minX + inset, block.minY + inset, w, h);
-    let dark = 0;
+    const background = bg || estimateBackgroundColor(canvas);
+    let content = 0;
     for (let i = 0; i < data.length; i += 4) {
-        if (!isNearWhite(data[i], data[i + 1], data[i + 2]))
-            dark++;
+        if (!isBackgroundColor(data[i], data[i + 1], data[i + 2], background))
+            content++;
     }
-    return dark / (data.length / 4) > 0.015;
+    return content / (data.length / 4) > 0.015;
 }
 /* Aus den erkannten Rasterlinien die einzelnen Zellen bilden - die erste
    Zeilen-Bande (Kopfzeile mit den Wochentagsnamen) wird uebersprungen, ihre
    Spaltengrenzen aber fuer alle folgenden Zeilen weiterverwendet. Leere
    Zellen (kein Text/Inhalt) werden gleich verworfen, um unnoetiges OCR zu
    vermeiden. */
-function detectGridCells(canvas, rowLines, colLines) {
+function detectGridCells(canvas, rowLines, colLines, bg) {
+    const background = bg || estimateBackgroundColor(canvas);
     const cells = [];
     for (let r = 1; r < rowLines.length - 1; r++) {
         const minY = rowLines[r], maxY = rowLines[r + 1];
@@ -1305,7 +1350,7 @@ function detectGridCells(canvas, rowLines, colLines) {
             // ein stoerendes "l") missversteht.
             const inset = 3;
             const block = { minX: minX + inset, maxX: maxX - inset, minY: minY + inset, maxY: maxY - inset, column: c };
-            if (block.maxX - block.minX > 4 && block.maxY - block.minY > 4 && hasVisibleContent(canvas, block))
+            if (block.maxX - block.minX > 4 && block.maxY - block.minY > 4 && hasVisibleContent(canvas, block, background))
                 cells.push(block);
         }
     }
@@ -1413,6 +1458,18 @@ function guessCategoryFromTitle(title) {
         return "individuell";
     return "tt";
 }
+// 12-Stunden-Format (AM/PM) auf 24h normalisieren, BEVOR die eigentliche
+// Zeilen-Erkennung laeuft - viele (v.a. englischsprachige/US-) Kalender-Apps
+// zeigen Zeiten als "6:00 PM" statt "18:00". Ersetzt jedes Vorkommen einzeln,
+// damit z.B. "10:00 AM - 11:30 AM" beide Seiten trifft.
+function normalizeAmPmTimes(text) {
+    return (text || "").replace(/(\d{1,2})[.:](\d{2})\s*([AaPp])\.?\s*[Mm]\.?/g, (match, hh, mm, ap) => {
+        let h = Number(hh) % 12;
+        if (/p/i.test(ap))
+            h += 12;
+        return `${String(h).padStart(2, "0")}:${mm}`;
+    });
+}
 function parseBlockText(rawText) {
     // Je nach Screenshot-Quelle steht die Uhrzeit mal UEBER dem Titel (Tabellen-
     // Export: "10:00" / "Lift / Individuals"), mal DARUNTER (Google-Calendar-
@@ -1421,7 +1478,7 @@ function parseBlockText(rawText) {
     // lesen, sondern jede Zeile einzeln pruefen: die ERSTE Zeile, die wie eine
     // Uhrzeit aussieht, liefert die Uhrzeit (egal an welcher Position) - alle
     // anderen Zeilen (bzw. der Rest einer gemischten Zeile) ergeben den Titel.
-    const cleaned = (rawText || "").replace(/\r/g, "").trim();
+    const cleaned = normalizeAmPmTimes((rawText || "").replace(/\r/g, "").trim());
     const rangeRe = /(\d{1,2})[.:]?(\d{0,2})\s*(?:bis|-|–|bs)\s*(\d{1,2})[.:](\d{2})/i;
     const soloTimeRe = /^(\d{1,2})[.:](\d{2})$/;
     const leadingTimeRe = /^(\d{1,2})[.:](\d{2})\s+(.+)$/;
@@ -1485,6 +1542,93 @@ function parseBlockText(rawText) {
     const title = titleParts.join(" ").replace(/\s+/g, " ").trim() || "Termin";
     return { title, startTime, endTime };
 }
+/* Dritter Erkennungsweg, wenn weder Raster noch farbige Kaestchen gefunden
+   werden: eine reine Text-/Listenansicht (z.B. Listenansicht von Apple-
+   Kalender/Outlook, ein Trainingsplan als Fliesstext, ein abfotografierter
+   Aushang). Dort steht kein Termin in einem abgegrenzten Kaestchen, sondern
+   die Tage stehen als Ueberschrift (Wochentag oder Datum) ueber einer Reihe
+   von Zeilen mit Uhrzeit + Titel. */
+const WEEKDAY_TOKENS = [
+    { re: /\b(mo|montag|mon|monday)\b/i, offset: 0 },
+    { re: /\b(di|dienstag|tue|tues|tuesday)\b/i, offset: 1 },
+    { re: /\b(mi|mittwoch|wed|wednesday)\b/i, offset: 2 },
+    { re: /\b(do|donnerstag|thu|thur|thurs|thursday)\b/i, offset: 3 },
+    { re: /\b(fr|freitag|fri|friday)\b/i, offset: 4 },
+    { re: /\b(sa|samstag|sat|saturday)\b/i, offset: 5 },
+    { re: /\b(so|sonntag|sun|sunday)\b/i, offset: 6 },
+];
+function matchDateHeader(line, mondayDate) {
+    const trimmed = line.trim();
+    // Ein explizites Datum ist eindeutig und hat Vorrang vor einem blossen
+    // Wochentagsnamen (der sich auf die vom Nutzer angegebene Woche bezieht).
+    const dateMatch = trimmed.match(/(\d{1,2})[.\/](\d{1,2})\.?(?:[.\/](\d{2,4}))?/);
+    if (dateMatch) {
+        const day = Number(dateMatch[1]), month = Number(dateMatch[2]);
+        if (day >= 1 && day <= 31 && month >= 1 && month <= 12) {
+            let year = dateMatch[3] ? Number(dateMatch[3]) : mondayDate.getFullYear();
+            if (year < 100)
+                year += 2000;
+            const d = new Date(year, month - 1, day);
+            if (!isNaN(d))
+                return d;
+        }
+    }
+    for (const wd of WEEKDAY_TOKENS) {
+        if (new RegExp("^" + wd.re.source, "i").test(trimmed)) {
+            const d = new Date(mondayDate);
+            d.setDate(mondayDate.getDate() + wd.offset);
+            return d;
+        }
+    }
+    return null;
+}
+// Bei einer echten Kaestchen-/Zellen-OCR steht die Uhrzeit fast immer allein
+// oder am Zeilenanfang (das deckt parseBlockText() ab) - in Fliesstext-Listen
+// steckt sie aber oft mitten im Satz ("Spiel um 20:00 Uhr", "Training ab
+// 18:00"). Dafuer zusaetzlich nach einer Uhrzeit IRGENDWO in der Zeile suchen
+// und sie samt gaengiger Fuellwoerter aus dem Titel herausschneiden.
+function parseFreeTextLine(line) {
+    const primary = parseBlockText(line);
+    if (primary.startTime)
+        return primary;
+    const stripFiller = (s) => s.replace(/\b(um|ab|von|bis|at|uhr|o'?clock)\b/gi, "").replace(/\s+/g, " ").trim() || "Termin";
+    const rangeMatch = line.match(/(\d{1,2})[.:](\d{2})\s*(?:bis|-|–)\s*(\d{1,2})[.:](\d{2})/);
+    if (rangeMatch) {
+        return {
+            title: stripFiller(line.replace(rangeMatch[0], "")),
+            startTime: `${rangeMatch[1].padStart(2, "0")}:${rangeMatch[2]}`,
+            endTime: `${rangeMatch[3].padStart(2, "0")}:${rangeMatch[4]}`,
+        };
+    }
+    const soloMatch = line.match(/(\d{1,2})[.:](\d{2})/);
+    if (soloMatch) {
+        return { title: stripFiller(line.replace(soloMatch[0], "")), startTime: `${soloMatch[1].padStart(2, "0")}:${soloMatch[2]}`, endTime: "" };
+    }
+    return primary;
+}
+function parseFreeTextSchedule(rawText, mondayDate) {
+    const lines = normalizeAmPmTimes((rawText || "").replace(/\r/g, "")).split("\n").map((l) => l.trim()).filter(Boolean);
+    const events = [];
+    let currentDate = null;
+    for (const line of lines) {
+        const headerDate = matchDateHeader(line, mondayDate);
+        if (headerDate) {
+            currentDate = headerDate;
+            continue;
+        }
+        // Zeilen vor der ersten erkannten Datums-/Wochentags-Ueberschrift
+        // ueberspringen (z.B. ein Bildschirmtitel wie "Mein Wochenplan").
+        if (!currentDate)
+            continue;
+        const { title, startTime, endTime } = parseFreeTextLine(line);
+        // Eine Zeile ohne erkennbare Uhrzeit ist meist kein eigener Termin,
+        // sondern z.B. eine umgebrochene Fortsetzung des vorigen Titels.
+        if (!startTime)
+            continue;
+        events.push({ title, date: isoDate(currentDate), time: startTime, endTime });
+    }
+    return events.map((e, i) => ({ id: `txt-${i}`, ...e }));
+}
 async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, onProgress) {
     await loadTesseractScript();
     const canvas = document.createElement("canvas");
@@ -1492,22 +1636,25 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
     canvas.height = imgEl.naturalHeight;
     const ctx = canvas.getContext("2d");
     ctx.drawImage(imgEl, 0, 0);
-    // Zwei grundverschiedene Screenshot-Arten kommen vor: (1) Google-Calendar-
-    // Wochenansicht mit frei schwebenden farbigen Kaestchen auf weissem Grund,
-    // ohne sichtbare Rasterlinien, oder (2) ein Tabellen-Export (Excel/Sheets)
-    // mit Wochentags-Kopfzeile und durchgezogenen Rasterlinien, wo auch nicht
-    // eingefaerbte (weisse) Zellen echte Termine enthalten koennen. Deshalb
-    // zuerst nach einem Raster suchen; nur wenn keins gefunden wird (keine
-    // durchgehenden Linien), auf die reine Farbflaechen-Erkennung zurueckfallen.
-    const { rowLines, colLines } = detectGridLines(canvas);
+    // Drei grundverschiedene Screenshot-Arten kommen vor: (1) Google-Calendar-
+    // Wochenansicht mit frei schwebenden farbigen Kaestchen auf einfarbigem
+    // Grund (hell ODER dunkel - Dark Mode), ohne sichtbare Rasterlinien,
+    // (2) ein Tabellen-Export (Excel/Sheets) mit Wochentags-Kopfzeile und
+    // durchgezogenen Rasterlinien, wo auch nicht eingefaerbte Zellen echte
+    // Termine enthalten koennen, oder (3) eine reine Text-/Listenansicht ganz
+    // ohne Kaestchen/Raster (Listenansicht, Fliesstext-Plan, Aushang-Foto).
+    // Deshalb zuerst nach einem Raster suchen, dann nach Farbkaestchen, und
+    // nur wenn beides nichts findet auf die Fliesstext-Erkennung zurueckfallen.
+    const bg = estimateBackgroundColor(canvas);
+    const { rowLines, colLines } = detectGridLines(canvas, bg);
     const gridColumns = colLines.length - 1;
     const gridRows = rowLines.length - 1;
     let blocks;
     if (gridColumns >= Math.max(2, numDays - 1) && gridColumns <= numDays + 2 && gridRows >= 2) {
-        blocks = detectGridCells(canvas, rowLines, colLines);
+        blocks = detectGridCells(canvas, rowLines, colLines, bg);
     }
     else {
-        const rawBlocks = detectColoredBlocks(canvas);
+        const rawBlocks = detectColoredBlocks(canvas, bg);
         blocks = assignColumnsByWidth(rawBlocks, numDays);
     }
     blocks.sort((a, b) => a.column - b.column || a.minY - b.minY);
@@ -1526,6 +1673,26 @@ async function extractEventsFromCalendarScreenshot(imgEl, mondayDate, numDays, o
             ...(window.Tesseract.PSM ? { tessedit_pageseg_mode: window.Tesseract.PSM.SINGLE_BLOCK } : {}),
             tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyzÄÖÜäöü0123456789:.,-+/ ",
         });
+    }
+    if (blocks.length === 0) {
+        // Weder Raster noch farbige Kaestchen gefunden - letzter Versuch: das
+        // ganze Bild als einen Fliesstext erkennen (volle Seitenerkennung statt
+        // "ein einzelner Textblock") und zeilenweise nach Datum/Wochentag plus
+        // Uhrzeit+Titel durchsuchen.
+        try {
+            if (worker && window.Tesseract.PSM)
+                await worker.setParameters({ tessedit_pageseg_mode: window.Tesseract.PSM.AUTO });
+            if (onProgress)
+                onProgress(0, 1);
+            const fullText = worker ? await worker.recognize(canvas).then((r) => r.data.text) : (await window.Tesseract.recognize(canvas, "deu")).data.text;
+            if (onProgress)
+                onProgress(1, 1);
+            return parseFreeTextSchedule(fullText, mondayDate);
+        }
+        finally {
+            if (worker)
+                await worker.terminate();
+        }
     }
     const rawResults = [];
     try {
@@ -2707,7 +2874,7 @@ function ScreenshotImportModal({ teams, allPlayers, onConfirm, onClose }) {
                 const events = await extractEventsFromCalendarScreenshot(img, effectiveMonday, numDays, (done, total) => setProgress({ done, total }));
                 URL.revokeObjectURL(imgUrl);
                 if (events.length === 0) {
-                    setParseError("Es konnten keine Termin-Kästchen im Bild erkannt werden. Bitte einen anderen Ausschnitt versuchen (Screenshot sollte die farbigen Kästchen deutlich zeigen).");
+                    setParseError("Es konnten keine Termine im Bild erkannt werden - weder Kästchen/Tabellenraster noch eine Textliste mit Datum/Wochentag und Uhrzeit je Zeile. Bitte einen anderen Ausschnitt versuchen (unbeschnitten, gut lesbar) oder die Termine manuell anlegen.");
                     setStage("setup");
                     return;
                 }
@@ -2756,7 +2923,7 @@ function ScreenshotImportModal({ teams, allPlayers, onConfirm, onClose }) {
     const weekOk = weekConfirmed === true || (weekConfirmed === false && customWeek !== "");
     const canUpload = targetChosen && weekOk;
     if (stage === "setup") {
-        const intro = React.createElement("p", { className: "text-xs text-slate-500" }, "Screenshot einer Wochenansicht (z. B. aus Google Calendar) hochladen. Die App erkennt die farbigen Termin-Kästchen automatisch, liest Titel und Uhrzeit aus und zeigt danach alles zur Kontrolle an. Die Erkennung ist nicht perfekt – bitte vor dem Speichern prüfen.");
+        const intro = React.createElement("p", { className: "text-xs text-slate-500" }, "Screenshot einer Wochenansicht hochladen - egal ob farbige Kästchen (z. B. Google Calendar, auch im Dark Mode), eine Tabelle mit Rasterlinien (Excel/Sheets-Export) oder eine reine Textliste (z. B. Listenansicht, Trainingsplan als Fließtext). Die App erkennt Titel und Uhrzeit automatisch (auch 12h-Format wie \"6:00 PM\") und zeigt danach alles zur Kontrolle an. Die Erkennung ist nicht perfekt – bitte vor dem Speichern prüfen.");
         const targetKindButtons = React.createElement("div", { className: "flex gap-2" },
             React.createElement("button", { type: "button", onClick: () => setTargetKind("team"), className: `flex-1 rounded-lg py-2 text-xs font-semibold border transition ${targetKind === "team" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-stone-300 hover:border-slate-400"}` }, "Team"),
             React.createElement("button", { type: "button", onClick: () => setTargetKind("player"), className: `flex-1 rounded-lg py-2 text-xs font-semibold border transition ${targetKind === "player" ? "bg-slate-900 text-white border-slate-900" : "bg-white text-slate-700 border-stone-300 hover:border-slate-400"}` }, "Einzelner Spieler"),
