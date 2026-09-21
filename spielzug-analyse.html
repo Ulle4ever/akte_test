@@ -490,6 +490,16 @@
     if(Math.min(dOff,dDef) > TEAM_MATCH_THRESHOLD) return 'unknown';
     return dOff <= dDef ? 'offense' : 'defense';
   }
+  // Skin-tone detection via YCbCr chrominance: melanin mainly changes luminance (Y), not the
+  // Cb/Cr color-difference channels, so this range catches light/medium/dark skin about equally
+  // well instead of being tuned to one tone. Used to exclude bare shoulders/arms (basketball
+  // jerseys are sleeveless) from the jersey-color sample, regardless of the player's skin color.
+  function isSkinPixel(r,g,b){
+    const y = 0.299*r + 0.587*g + 0.114*b;
+    const cb = 128 - 0.168736*r - 0.331264*g + 0.5*b;
+    const cr = 128 + 0.5*r - 0.418688*g - 0.081312*b;
+    return y>40 && cb>=75 && cb<=135 && cr>=130 && cr<=180;
+  }
   function averageColorInBox(ctx, x0,y0,x1,y1){
     const w = ctx.canvas.width, h = ctx.canvas.height;
     const minX = Math.max(0, Math.floor(Math.min(x0,x1))), maxX = Math.min(w-1, Math.ceil(Math.max(x0,x1)));
@@ -497,9 +507,17 @@
     const bw = maxX-minX, bh = maxY-minY;
     if(bw<=0 || bh<=0) return null;
     const data = ctx.getImageData(minX,minY,bw,bh).data;
-    let r=0,g=0,b=0,n=0;
-    for(let i=0;i<data.length;i+=4){ r+=data[i]; g+=data[i+1]; b+=data[i+2]; n++; }
-    return n ? [r/n, g/n, b/n] : null;
+    let r=0,g=0,b=0,n=0, total=0;
+    for(let i=0;i<data.length;i+=4){
+      total++;
+      const pr=data[i], pg=data[i+1], pb=data[i+2];
+      if(isSkinPixel(pr,pg,pb)) continue;
+      r+=pr; g+=pg; b+=pb; n++;
+    }
+    // If the box is mostly bare skin (bad crop right at the shoulder joint), there isn't enough
+    // fabric left to judge - report "no reading" rather than guessing off skin color.
+    if(!total || n < total*0.15) return null;
+    return [r/n, g/n, b/n];
   }
   function torsoAverageColor(fullCtx, keypoints){
     const pts = ['left_shoulder','right_shoulder','left_hip','right_hip']
