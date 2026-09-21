@@ -59,10 +59,17 @@
       <h2><span class="step-badge">1</span> Video laden</h2>
       <input type="file" id="fileInput" accept="video/*">
       <div id="videoWrap" style="margin-top:10px;">
-        <video id="video" controls muted playsinline></video>
+        <video id="video" muted playsinline></video>
         <canvas id="overlay"></canvas>
       </div>
-      <p class="hint">Am besten Videos aus erhöhter Kameraposition, bei denen zumindest ein paar Feldlinien sichtbar sind.</p>
+      <div class="row" id="videoControls" style="margin-top:8px;">
+        <button id="playPauseBtn" class="ghost">▶</button>
+        <button id="stepBackBtn" class="ghost">−0,1s</button>
+        <button id="stepFwdBtn" class="ghost">+0,1s</button>
+        <input type="range" id="seekSlider" min="0" max="0" step="0.01" value="0" style="flex:1;min-width:120px;">
+        <span id="timeLabel" class="hint" style="margin:0;white-space:nowrap;">00:00.0 / 00:00.0</span>
+      </div>
+      <p class="hint">Am besten Videos aus erhöhter Kameraposition, bei denen zumindest ein paar Feldlinien sichtbar sind. Die Steuerung oben funktioniert auch während der Kalibrierung.</p>
     </div>
 
     <div class="card">
@@ -157,6 +164,11 @@
   const setBallBtn = document.getElementById('setBallBtn');
   const clearBallBtn = document.getElementById('clearBallBtn');
   const unknownHintEl = document.getElementById('unknownHint');
+  const playPauseBtn = document.getElementById('playPauseBtn');
+  const stepBackBtn = document.getElementById('stepBackBtn');
+  const stepFwdBtn = document.getElementById('stepFwdBtn');
+  const seekSlider = document.getElementById('seekSlider');
+  const timeLabel = document.getElementById('timeLabel');
 
   // ---------- court geometry (FIBA half court, meters: x 0..15 sideline-sideline, y 0..14 baseline-halfcourt) ----------
   function sampleArc(cx,cy,r,a0,a1,steps){
@@ -235,6 +247,8 @@
     resizeOverlay();
     resetCalibPoints();
     setCalibMode(true);
+    seekSlider.max = video.duration || 0;
+    updateTimeLabel();
   });
   window.addEventListener('resize', resizeOverlay);
   function resizeOverlay(){
@@ -242,6 +256,29 @@
     overlay.width = rect.width; overlay.height = rect.height;
     renderCalibOverlay();
   }
+
+  // ---------- custom video transport (works even while the calibration overlay covers the video) ----------
+  function updateTimeLabel(){
+    timeLabel.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration || 0)}`;
+  }
+  playPauseBtn.addEventListener('click', ()=>{
+    if(video.paused) video.play(); else video.pause();
+  });
+  video.addEventListener('play', ()=>{ playPauseBtn.textContent = '⏸'; });
+  video.addEventListener('pause', ()=>{ playPauseBtn.textContent = '▶'; });
+  video.addEventListener('timeupdate', ()=>{
+    seekSlider.value = video.currentTime;
+    updateTimeLabel();
+  });
+  seekSlider.addEventListener('input', ()=>{
+    video.currentTime = parseFloat(seekSlider.value);
+  });
+  function stepBy(delta){
+    video.pause();
+    video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + delta));
+  }
+  stepBackBtn.addEventListener('click', ()=> stepBy(-0.1));
+  stepFwdBtn.addEventListener('click', ()=> stepBy(0.1));
 
   // ---------- coordinate conversion (native video pixels <-> displayed CSS pixels) ----------
   function nativeToDisplay(x,y){
