@@ -44,7 +44,7 @@
   .thumb img{display:block;width:100%;}
   .thumb .cap{font-size:10px;color:#fff;background:rgba(0,0,0,.55);padding:2px 4px;position:absolute;bottom:0;left:0;right:0;}
   .thumb .del{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;line-height:1;padding:0;}
-  #courtCanvas{width:100%;max-width:530px;background:#fdfaf3;border-radius:8px;border:1px solid var(--line);}
+  #courtCanvas{width:100%;max-width:680px;background:#fdfaf3;border-radius:8px;border:1px solid var(--line);}
   label.opt{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);}
   .hint{font-size:12px;color:var(--muted);margin-top:6px;}
 </style>
@@ -99,6 +99,12 @@
         <button id="captureBtn" disabled>Frame erfassen</button>
         <button id="clearFramesBtn" class="ghost">Alle Frames löschen</button>
       </div>
+      <div class="row" style="align-items:center;">
+        <label class="opt">Intervall <input type="number" id="autoInterval" value="0.5" min="0.1" step="0.1" style="width:60px;"> s</label>
+        <button id="autoCaptureBtn" disabled>Ganzen Spielzug automatisch erfassen</button>
+        <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
+      </div>
+      <p class="hint">Erfasst automatisch ab der aktuellen Videoposition bis zum Ende, in obigem Zeitabstand — so bekommst du den kompletten Spielzug ohne manuelles Klicken pro Frame.</p>
       <div id="gallery"></div>
     </div>
 
@@ -121,7 +127,7 @@
           </select>
         </label>
       </div>
-      <canvas id="courtCanvas" width="530" height="500"></canvas>
+      <canvas id="courtCanvas" width="680" height="640"></canvas>
       <p class="hint">Auf einen Spieler-Punkt klicken, um Bezeichnung/Team manuell festzulegen (gilt für alle Frames).</p>
       <p class="hint" id="unknownHint" style="display:none;"></p>
       <div class="row">
@@ -175,6 +181,9 @@
   const timeLabel = document.getElementById('timeLabel');
   const pickOffenseBtn = document.getElementById('pickOffenseBtn');
   const pickDefenseBtn = document.getElementById('pickDefenseBtn');
+  const autoInterval = document.getElementById('autoInterval');
+  const autoCaptureBtn = document.getElementById('autoCaptureBtn');
+  const autoStopBtn = document.getElementById('autoStopBtn');
 
   // ---------- court geometry (FIBA half court, meters: x 0..15 sideline-sideline, y 0..14 baseline-halfcourt) ----------
   function sampleArc(cx,cy,r,a0,a1,steps){
@@ -228,6 +237,7 @@
   let selectedFrameIndex = -1;
   let ballPlacementArmed = false;
   let colorPickTarget = null; // 'offense' | 'defense' | null
+  let autoCaptureRunning = false;
 
   const PALETTE = ["#C43E0E","#2563eb","#16a34a","#9333ea","#ca8a04","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5"];
   function trackColor(id){ return PALETTE[(id-1) % PALETTE.length]; }
@@ -582,7 +592,10 @@
   });
 
   function updateCaptureEnabled(){
-    captureBtn.disabled = !(modelsReady && homography && !calibMode && !colorPickTarget && video.src);
+    const baseReady = modelsReady && homography && !calibMode && !colorPickTarget && video.src;
+    captureBtn.disabled = !baseReady || autoCaptureRunning;
+    autoCaptureBtn.disabled = !baseReady || autoCaptureRunning;
+    calibEditBtn.disabled = autoCaptureRunning;
   }
 
   // ---------- AI models ----------
@@ -739,11 +752,9 @@
   }
 
   // ---------- frame capture ----------
-  captureBtn.addEventListener('click', async ()=>{
-    if(!homography || !poseDetector) return;
+  async function captureCurrentFrame(){
+    if(!homography || !poseDetector) return false;
     video.pause();
-    captureBtn.disabled = true;
-    setStatus('Erfasse Frame…');
     try{
       const fullCanvas = document.createElement('canvas');
       fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
@@ -782,12 +793,51 @@
       renderGallery();
       renderMainDiagram();
       setStatus(`Frame erfasst (${newPositions.length} Spieler erkannt).`, 'ok');
+      return true;
     }catch(e){
       console.error(e);
       setStatus('Fehler bei der Frame-Erfassung.', 'err');
+      return false;
     }
-    captureBtn.disabled = false;
+  }
+  captureBtn.addEventListener('click', async ()=>{
+    captureBtn.disabled = true;
+    await captureCurrentFrame();
+    updateCaptureEnabled();
   });
+
+  // ---------- auto-capture the whole sequence ----------
+  function seekAndWait(t){
+    return new Promise(resolve=>{
+      const onSeeked = ()=>{ video.removeEventListener('seeked', onSeeked); resolve(); };
+      video.addEventListener('seeked', onSeeked);
+      video.currentTime = t;
+    });
+  }
+  autoCaptureBtn.addEventListener('click', async ()=>{
+    if(!homography || !poseDetector){ alert('Bitte zuerst kalibrieren.'); return; }
+    const interval = Math.max(0.1, parseFloat(autoInterval.value) || 0.5);
+    const duration = video.duration || 0;
+    autoCaptureRunning = true;
+    autoCaptureBtn.style.display = 'none';
+    autoStopBtn.style.display = '';
+    updateCaptureEnabled();
+    let t = video.currentTime;
+    while(autoCaptureRunning && t <= duration + 0.001){
+      await seekAndWait(Math.min(t, duration));
+      await new Promise(r=>setTimeout(r, 30)); // let the seeked frame actually paint before sampling it
+      setStatus(`Automatische Erfassung: ${formatTime(t)} / ${formatTime(duration)}…`);
+      const ok = await captureCurrentFrame();
+      if(!ok) break;
+      t += interval;
+    }
+    autoCaptureRunning = false;
+    autoCaptureBtn.style.display = '';
+    autoStopBtn.style.display = 'none';
+    updateCaptureEnabled();
+    setStatus(`Automatische Erfassung abgeschlossen (${frames.length} Frames insgesamt).`, 'ok');
+  });
+  autoStopBtn.addEventListener('click', ()=>{ autoCaptureRunning = false; });
 
   function makeThumbnail(fullCanvas, poses){
     const tw = 200, th = Math.round(200 * fullCanvas.height / fullCanvas.width);
@@ -884,7 +934,7 @@
         }
       });
     }
-    const r = dotR || 12;
+    const r = dotR || 15;
     frame.players.forEach(p=>{
       const [x,y] = toPix(ox,oy,s,p.x,p.y);
       const track = tracks[p.trackId];
@@ -904,7 +954,7 @@
     ctx.restore();
   }
 
-  const OX = 40, OY = 460, S = 30;
+  const OX = 40, OY = 600, S = 40;
   function renderMainDiagram(){
     cctx.clearRect(0,0,courtCanvas.width,courtCanvas.height);
     drawCourt(cctx, OX, OY, S);
