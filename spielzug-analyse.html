@@ -32,6 +32,7 @@
   #overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
   #overlay.active{cursor:grab;pointer-events:auto;}
   #overlay.active.dragging{cursor:grabbing;}
+  #overlay.picking{cursor:crosshair;pointer-events:auto;}
   #status{font-size:12px;padding:8px 10px;border-radius:8px;background:#f1f5f9;color:var(--muted);}
   #status.ok{background:#ecfdf5;color:#047857;}
   #status.err{background:#fef2f2;color:#b91c1c;}
@@ -88,9 +89,11 @@
       <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren, dann Frame erfassen. Pro Frame werden alle sichtbaren Spieler (und wenn möglich der Ball) erkannt und im Diagramm rechts platziert.</p>
       <div class="row" style="align-items:center;">
         <label class="opt">Offense-Trikot <input type="color" id="offenseColor" value="#ffffff"></label>
+        <button id="pickOffenseBtn" class="ghost">Farbe aus Video</button>
         <label class="opt">Defense-Trikot <input type="color" id="defenseColor" value="#1d4ed8"></label>
+        <button id="pickDefenseBtn" class="ghost">Farbe aus Video</button>
       </div>
-      <p class="hint">Farben vor dem Erfassen einstellen — jeder erkannte Spieler wird automatisch anhand seiner Trikotfarbe einem Team zugeordnet (über mehrere Frames gemittelt). Nachträgliche Farbänderungen wirken nur auf neu erfasste Frames. Fehlzuordnungen lassen sich pro Spieler im Diagramm rechts manuell korrigieren.</p>
+      <p class="hint">Am besten mit "Farbe aus Video" direkt auf ein Trikot im pausierten Video klicken, statt die Farbe zu raten — Kamera-Weißabgleich färbt z.B. weiße Trikots unter Hallenlicht oft sichtbar bläulich ein, das erfasst diese Methode automatisch mit. Farben vor dem Erfassen einstellen — jeder erkannte Spieler wird automatisch anhand seiner Trikotfarbe einem Team zugeordnet (über mehrere Frames gemittelt). Nachträgliche Farbänderungen wirken nur auf neu erfasste Frames. Fehlzuordnungen lassen sich pro Spieler im Diagramm rechts manuell korrigieren.</p>
       <div class="row">
         <button id="captureBtn" disabled>Frame erfassen</button>
         <button id="clearFramesBtn" class="ghost">Alle Frames löschen</button>
@@ -169,6 +172,8 @@
   const stepFwdBtn = document.getElementById('stepFwdBtn');
   const seekSlider = document.getElementById('seekSlider');
   const timeLabel = document.getElementById('timeLabel');
+  const pickOffenseBtn = document.getElementById('pickOffenseBtn');
+  const pickDefenseBtn = document.getElementById('pickDefenseBtn');
 
   // ---------- court geometry (FIBA half court, meters: x 0..15 sideline-sideline, y 0..14 baseline-halfcourt) ----------
   function sampleArc(cx,cy,r,a0,a1,steps){
@@ -221,6 +226,7 @@
   let nextTrackId = 1;
   let selectedFrameIndex = -1;
   let ballPlacementArmed = false;
+  let colorPickTarget = null; // 'offense' | 'defense' | null
 
   const PALETTE = ["#C43E0E","#2563eb","#16a34a","#9333ea","#ca8a04","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5"];
   function trackColor(id){ return PALETTE[(id-1) % PALETTE.length]; }
@@ -241,6 +247,7 @@
     video.src = currentObjectUrl;
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
     homography = null; anchored = new Set(); handlePos = {};
+    ballPlacementArmed = false; colorPickTarget = null; updateOverlayInteractivity();
     renderGallery(); renderMainDiagram(); updateCaptureEnabled();
     setStatus('Video wird geladen…');
   });
@@ -387,9 +394,13 @@
     calibCommitBtn.disabled = !calibMode || anchored.size < 4;
     calibResetBtn.disabled = !calibMode;
   }
+  function updateOverlayInteractivity(){
+    overlay.classList.toggle('active', calibMode);
+    overlay.classList.toggle('picking', !!colorPickTarget);
+  }
   function setCalibMode(on){
     calibMode = on;
-    overlay.classList.toggle('active', on);
+    updateOverlayInteractivity();
     if(on && Object.keys(handlePos).length === 0) resetCalibPoints();
     updateCalibStatus();
     renderCalibOverlay();
@@ -461,6 +472,7 @@
     return best;
   }
   overlay.addEventListener('pointerdown', (evt)=>{
+    if(colorPickTarget){ pickColorAt(evt.clientX, evt.clientY); return; }
     if(!calibMode) return;
     const id = findHandleAt(evt.clientX, evt.clientY);
     if(!id) return;
@@ -484,8 +496,54 @@
   overlay.addEventListener('pointerup', endDrag);
   overlay.addEventListener('pointercancel', endDrag);
 
+  // ---------- pick a team color directly from the video (avoids guessing a hex value that
+  // doesn't match what the camera's white balance actually shows, e.g. blue-tinted "white") ----------
+  function pickColorAt(clientX, clientY){
+    const target = colorPickTarget;
+    colorPickTarget = null;
+    updateOverlayInteractivity();
+    updateCaptureEnabled();
+    const rect = overlay.getBoundingClientRect();
+    const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
+    const tmp = document.createElement('canvas');
+    tmp.width = video.videoWidth; tmp.height = video.videoHeight;
+    const tctx = tmp.getContext('2d', {willReadFrequently: true});
+    tctx.drawImage(video, 0, 0);
+    const r = 7;
+    const avg = averageColorInBox(tctx, nx-r, ny-r, nx+r, ny+r);
+    if(!avg){
+      setStatus('Konnte an dieser Stelle keine Farbe bestimmen (z.B. nur Haut erkannt) — bitte nochmal auf den Stoff des Trikots klicken.', 'err');
+      return;
+    }
+    const hex = rgbToHex(avg[0], avg[1], avg[2]);
+    (target === 'offense' ? offenseColorEl : defenseColorEl).value = hex;
+    setStatus(`${target === 'offense' ? 'Offense' : 'Defense'}-Farbe aus Video übernommen (${hex}).`, 'ok');
+  }
+  function armColorPick(target){
+    if(!video.src || !video.videoWidth){ alert('Bitte zuerst ein Video laden.'); return; }
+    colorPickTarget = target;
+    updateOverlayInteractivity();
+    updateCaptureEnabled();
+    setStatus(`Klicke im Video auf das ${target === 'offense' ? 'Offense' : 'Defense'}-Trikot… (Abbrechen mit Esc)`);
+  }
+  pickOffenseBtn.addEventListener('click', ()=> armColorPick('offense'));
+  pickDefenseBtn.addEventListener('click', ()=> armColorPick('defense'));
+  window.addEventListener('keydown', (evt)=>{
+    if(evt.key !== 'Escape') return;
+    if(colorPickTarget){
+      colorPickTarget = null;
+      updateOverlayInteractivity();
+      updateCaptureEnabled();
+      setStatus('Farbauswahl abgebrochen.');
+    }
+    if(ballPlacementArmed){
+      ballPlacementArmed = false;
+      setStatus('Ball-Platzierung abgebrochen.');
+    }
+  });
+
   function updateCaptureEnabled(){
-    captureBtn.disabled = !(modelsReady && homography && !calibMode && video.src);
+    captureBtn.disabled = !(modelsReady && homography && !calibMode && !colorPickTarget && video.src);
   }
 
   // ---------- AI models ----------
@@ -513,6 +571,9 @@
   function hexToRgb(hex){
     const m = hex.replace('#','');
     return [parseInt(m.substr(0,2),16), parseInt(m.substr(2,2),16), parseInt(m.substr(4,2),16)];
+  }
+  function rgbToHex(r,g,b){
+    return '#' + [r,g,b].map(v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
   }
   function rgbToHsv(r,g,b){
     r/=255; g/=255; b/=255;
