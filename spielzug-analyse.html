@@ -79,6 +79,11 @@
     <div class="card">
       <h2><span class="step-badge">3</span> Frames erfassen</h2>
       <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren, dann Frame erfassen. Pro Frame werden alle sichtbaren Spieler (und wenn möglich der Ball) erkannt und im Diagramm rechts platziert.</p>
+      <div class="row" style="align-items:center;">
+        <label class="opt">Offense-Trikot <input type="color" id="offenseColor" value="#ffffff"></label>
+        <label class="opt">Defense-Trikot <input type="color" id="defenseColor" value="#1d4ed8"></label>
+      </div>
+      <p class="hint">Farben vor dem Erfassen einstellen — jeder erkannte Spieler wird automatisch anhand seiner Trikotfarbe einem Team zugeordnet (über mehrere Frames gemittelt). Nachträgliche Farbänderungen wirken nur auf neu erfasste Frames. Fehlzuordnungen lassen sich pro Spieler im Diagramm rechts manuell korrigieren.</p>
       <div class="row">
         <button id="captureBtn" disabled>Frame erfassen</button>
         <button id="clearFramesBtn" class="ghost">Alle Frames löschen</button>
@@ -96,8 +101,21 @@
         <label class="opt"><input type="checkbox" id="showTrails" checked> Bewegungspfeil zum letzten Frame</label>
         <label class="opt"><input type="checkbox" id="showAll"> Gesamten Spielzug überlagern</label>
       </div>
+      <div class="row">
+        <label class="opt">Anzeige:
+          <select id="teamFilter">
+            <option value="all">Alle Spieler</option>
+            <option value="offense">Nur Offense</option>
+            <option value="defense">Nur Defense</option>
+          </select>
+        </label>
+      </div>
       <canvas id="courtCanvas" width="530" height="500"></canvas>
-      <p class="hint">Auf einen Spieler-Punkt klicken, um ihm eine Rückennummer/Bezeichnung zu geben (gilt für alle Frames).</p>
+      <p class="hint">Auf einen Spieler-Punkt klicken, um Bezeichnung/Team manuell festzulegen (gilt für alle Frames).</p>
+      <div class="row">
+        <button id="setBallBtn" class="ghost">Ball manuell setzen</button>
+        <button id="clearBallBtn" class="ghost">Ball entfernen</button>
+      </div>
       <div class="row">
         <button id="exportFrameBtn" class="accent">Diagramm als PNG</button>
         <button id="exportAllBtn" class="ghost">Alle Frames als Storyboard exportieren</button>
@@ -132,6 +150,11 @@
   const showAllEl = document.getElementById('showAll');
   const exportFrameBtn = document.getElementById('exportFrameBtn');
   const exportAllBtn = document.getElementById('exportAllBtn');
+  const offenseColorEl = document.getElementById('offenseColor');
+  const defenseColorEl = document.getElementById('defenseColor');
+  const teamFilterEl = document.getElementById('teamFilter');
+  const setBallBtn = document.getElementById('setBallBtn');
+  const clearBallBtn = document.getElementById('clearBallBtn');
 
   // ---------- court geometry (FIBA half court, meters: x 0..15 sideline-sideline, y 0..14 baseline-halfcourt) ----------
   function sampleArc(cx,cy,r,a0,a1,steps){
@@ -180,9 +203,10 @@
 
   let poseDetector = null, ballModel = null, modelsReady = false;
   let frames = []; // {id, time, thumb, players:[{trackId,x,y}], ball:{x,y}|null}
-  let tracks = {}; // trackId -> {id,color,label}
+  let tracks = {}; // trackId -> {id,color,label,teamVotes:{offense,defense},teamOverride}
   let nextTrackId = 1;
   let selectedFrameIndex = -1;
+  let ballPlacementArmed = false;
 
   const PALETTE = ["#C43E0E","#2563eb","#16a34a","#9333ea","#ca8a04","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5"];
   function trackColor(id){ return PALETTE[(id-1) % PALETTE.length]; }
@@ -436,6 +460,71 @@
   }
   loadModels();
 
+  // ---------- jersey-color based team classification ----------
+  function hexToRgb(hex){
+    const m = hex.replace('#','');
+    return [parseInt(m.substr(0,2),16), parseInt(m.substr(2,2),16), parseInt(m.substr(4,2),16)];
+  }
+  function rgbToHsv(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+    let h=0;
+    if(d!==0){
+      if(max===r) h = 60*(((g-b)/d)%6);
+      else if(max===g) h = 60*((b-r)/d+2);
+      else h = 60*((r-g)/d+4);
+    }
+    if(h<0) h+=360;
+    return {h, s: max===0?0:d/max, v:max};
+  }
+  function colorDistance(rgbA, rgbB){
+    const a = rgbToHsv(rgbA[0],rgbA[1],rgbA[2]), b = rgbToHsv(rgbB[0],rgbB[1],rgbB[2]);
+    let dh = Math.abs(a.h-b.h); if(dh>180) dh = 360-dh;
+    return (dh/180)*0.6 + Math.abs(a.s-b.s)*0.25 + Math.abs(a.v-b.v)*0.15;
+  }
+  const TEAM_MATCH_THRESHOLD = 0.35;
+  function classifyTeam(avgRgb){
+    if(!avgRgb) return 'unknown';
+    const dOff = colorDistance(avgRgb, hexToRgb(offenseColorEl.value));
+    const dDef = colorDistance(avgRgb, hexToRgb(defenseColorEl.value));
+    if(Math.min(dOff,dDef) > TEAM_MATCH_THRESHOLD) return 'unknown';
+    return dOff <= dDef ? 'offense' : 'defense';
+  }
+  function averageColorInBox(ctx, x0,y0,x1,y1){
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    const minX = Math.max(0, Math.floor(Math.min(x0,x1))), maxX = Math.min(w-1, Math.ceil(Math.max(x0,x1)));
+    const minY = Math.max(0, Math.floor(Math.min(y0,y1))), maxY = Math.min(h-1, Math.ceil(Math.max(y0,y1)));
+    const bw = maxX-minX, bh = maxY-minY;
+    if(bw<=0 || bh<=0) return null;
+    const data = ctx.getImageData(minX,minY,bw,bh).data;
+    let r=0,g=0,b=0,n=0;
+    for(let i=0;i<data.length;i+=4){ r+=data[i]; g+=data[i+1]; b+=data[i+2]; n++; }
+    return n ? [r/n, g/n, b/n] : null;
+  }
+  function torsoAverageColor(fullCtx, keypoints){
+    const pts = ['left_shoulder','right_shoulder','left_hip','right_hip']
+      .map(name=>kp(keypoints,name)).filter(p=>p && p.score>0.3);
+    if(pts.length < 2) return null;
+    const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
+    const cx = (Math.min(...xs)+Math.max(...xs))/2, cy = (Math.min(...ys)+Math.max(...ys))/2;
+    const w = Math.max(Math.max(...xs)-Math.min(...xs), 24) * 0.7;
+    const h = Math.max(Math.max(...ys)-Math.min(...ys), 24) * 0.7;
+    return averageColorInBox(fullCtx, cx-w/2, cy-h/2, cx+w/2, cy+h/2);
+  }
+  function effectiveTeam(trackId){
+    const t = tracks[trackId];
+    if(!t) return 'unknown';
+    if(t.teamOverride) return t.teamOverride;
+    const votes = t.teamVotes || {offense:0, defense:0};
+    if(votes.offense===0 && votes.defense===0) return 'unknown';
+    return votes.offense >= votes.defense ? 'offense' : 'defense';
+  }
+  function visiblePlayers(frame){
+    const filter = teamFilterEl.value;
+    if(filter === 'all') return frame.players;
+    return frame.players.filter(p => effectiveTeam(p.trackId) === filter);
+  }
+
   // ---------- pose helpers ----------
   function kp(keypoints, name){ return keypoints.find(k=>k.name===name); }
   function getFootPoint(keypoints){
@@ -466,13 +555,13 @@
       if(pair.d > MAX_DIST) break;
       if(usedPrev.has(pair.prevId) || usedNew.has(pair.npIdx)) continue;
       usedPrev.add(pair.prevId); usedNew.add(pair.npIdx);
-      result[pair.npIdx] = {trackId: pair.prevId, x: newPositions[pair.npIdx].x, y: newPositions[pair.npIdx].y};
+      result[pair.npIdx] = {...newPositions[pair.npIdx], trackId: pair.prevId};
     }
     for(let i=0;i<newPositions.length;i++){
       if(result[i]) continue;
       const id = nextTrackId++;
-      tracks[id] = {id, color: trackColor(id), label: String(id)};
-      result[i] = {trackId:id, x:newPositions[i].x, y:newPositions[i].y};
+      tracks[id] = {id, color: trackColor(id), label: String(id), teamVotes:{offense:0,defense:0}, teamOverride:null};
+      result[i] = {...newPositions[i], trackId:id};
     }
     return result;
   }
@@ -484,6 +573,11 @@
     captureBtn.disabled = true;
     setStatus('Erfasse Frame…');
     try{
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+      const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
+      fullCtx.drawImage(video, 0, 0);
+
       const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
       let ballCourt = null;
       if(ballModel){
@@ -500,11 +594,16 @@
         const foot = getFootPoint(pose.keypoints);
         if(!foot) continue;
         const [cx,cy] = applyHomography(homography, foot.x, foot.y);
-        newPositions.push({x:cx, y:cy});
+        const team = classifyTeam(torsoAverageColor(fullCtx, pose.keypoints));
+        newPositions.push({x:cx, y:cy, team});
       }
       const prevFrame = frames[frames.length-1] || null;
       const matched = matchTracks(prevFrame ? prevFrame.players : [], newPositions);
-      const thumb = makeThumbnail(poses);
+      matched.forEach(p=>{
+        const t = tracks[p.trackId];
+        if(t && p.team && p.team !== 'unknown') t.teamVotes[p.team]++;
+      });
+      const thumb = makeThumbnail(fullCanvas, poses);
       frames.push({id: uid(), time: video.currentTime, thumb, players: matched, ball: ballCourt});
       selectedFrameIndex = frames.length-1;
       renderGallery();
@@ -517,12 +616,12 @@
     captureBtn.disabled = false;
   });
 
-  function makeThumbnail(poses){
-    const tw = 200, th = Math.round(200 * video.videoHeight / video.videoWidth);
+  function makeThumbnail(fullCanvas, poses){
+    const tw = 200, th = Math.round(200 * fullCanvas.height / fullCanvas.width);
     const c = document.createElement('canvas'); c.width = tw; c.height = th;
     const tctx = c.getContext('2d');
-    tctx.drawImage(video, 0, 0, tw, th);
-    const sx = tw/video.videoWidth, sy = th/video.videoHeight;
+    tctx.drawImage(fullCanvas, 0, 0, tw, th);
+    const sx = tw/fullCanvas.width, sy = th/fullCanvas.height;
     poses.forEach(pose=>{
       const foot = getFootPoint(pose.keypoints);
       if(foot){
@@ -641,12 +740,12 @@
       frames.forEach((f,i)=>{
         const prev = i>0 ? frames[i-1] : null;
         const alpha = i===selectedFrameIndex ? 1 : 0.28;
-        drawPlayers(cctx, OX, OY, S, f, prev, showTrailsEl.checked, alpha);
+        drawPlayers(cctx, OX, OY, S, {...f, players: visiblePlayers(f)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, alpha);
       });
     } else {
       const frame = frames[selectedFrameIndex];
       const prev = selectedFrameIndex>0 ? frames[selectedFrameIndex-1] : null;
-      drawPlayers(cctx, OX, OY, S, frame, prev, showTrailsEl.checked, 1);
+      drawPlayers(cctx, OX, OY, S, {...frame, players: visiblePlayers(frame)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, 1);
     }
 
     cctx.save();
@@ -656,22 +755,54 @@
   }
   showTrailsEl.addEventListener('change', renderMainDiagram);
   showAllEl.addEventListener('change', renderMainDiagram);
+  teamFilterEl.addEventListener('change', renderMainDiagram);
+
+  function pixToCourt(ox,oy,s,px,py){ return [(px-ox)/s, (oy-py)/s]; }
+
+  setBallBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0){ alert('Bitte zuerst einen Frame erfassen bzw. auswählen.'); return; }
+    ballPlacementArmed = true;
+    setStatus('Klicke auf die Ball-Position im Diagramm…');
+  });
+  clearBallBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0) return;
+    frames[selectedFrameIndex].ball = null;
+    renderMainDiagram();
+  });
 
   courtCanvas.addEventListener('click', (evt)=>{
     if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
     const rect = courtCanvas.getBoundingClientRect();
     const scaleX = courtCanvas.width/rect.width, scaleY = courtCanvas.height/rect.height;
     const cx = (evt.clientX-rect.left)*scaleX, cy = (evt.clientY-rect.top)*scaleY;
+
+    if(ballPlacementArmed){
+      const [rx,ry] = pixToCourt(OX,OY,S,cx,cy);
+      frames[selectedFrameIndex].ball = {x:rx,y:ry};
+      ballPlacementArmed = false;
+      setStatus('Ball-Position gesetzt.', 'ok');
+      renderMainDiagram();
+      return;
+    }
+
     const frame = frames[selectedFrameIndex];
     let closest = null, closestD = 18;
-    frame.players.forEach(p=>{
+    visiblePlayers(frame).forEach(p=>{
       const [x,y] = toPix(OX,OY,S,p.x,p.y);
       const d = Math.hypot(x-cx,y-cy);
       if(d < closestD){ closestD = d; closest = p; }
     });
     if(closest && tracks[closest.trackId]){
-      const label = prompt('Bezeichnung für diesen Spieler (z.B. Rückennummer):', tracks[closest.trackId].label);
-      if(label != null){ tracks[closest.trackId].label = label.trim() || tracks[closest.trackId].label; renderMainDiagram(); }
+      const track = tracks[closest.trackId];
+      const label = prompt('Bezeichnung für diesen Spieler (z.B. Rückennummer):', track.label);
+      if(label != null) track.label = label.trim() || track.label;
+      const current = track.teamOverride === 'offense' ? 'o' : track.teamOverride === 'defense' ? 'd' : '';
+      const teamInput = prompt("Team manuell festlegen: 'o' = Offense, 'd' = Defense, leer = automatische Erkennung", current);
+      if(teamInput != null){
+        const v = teamInput.trim().toLowerCase();
+        track.teamOverride = v === 'o' ? 'offense' : v === 'd' ? 'defense' : null;
+      }
+      renderMainDiagram();
     }
   });
 
@@ -703,7 +834,7 @@
       bctx.translate(0, capH);
       drawCourt(bctx, ox, oy, s2);
       const prev = i>0 ? frames[i-1] : null;
-      drawPlayers(bctx, ox, oy, s2, f, prev, showTrailsEl.checked, 1, 8);
+      drawPlayers(bctx, ox, oy, s2, {...f, players: visiblePlayers(f)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, 1, 8);
       bctx.restore();
       bctx.fillStyle = '#0f172a'; bctx.font = 'bold 11px sans-serif'; bctx.textAlign='left';
       bctx.fillText(`#${i+1} · ${formatTime(f.time)}`, col*cellW+marginX, row*cellH+14);
