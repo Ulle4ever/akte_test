@@ -242,6 +242,7 @@
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
     homography = null; anchored = new Set(); handlePos = {};
     renderGallery(); renderMainDiagram(); updateCaptureEnabled();
+    setStatus('Video wird geladen…');
   });
   video.addEventListener('loadedmetadata', ()=>{
     resizeOverlay();
@@ -249,6 +250,11 @@
     setCalibMode(true);
     seekSlider.max = video.duration || 0;
     updateTimeLabel();
+    setStatus(modelsReady ? 'KI-Modelle bereit.' : 'Lade KI-Modelle…', modelsReady ? 'ok' : '');
+  });
+  video.addEventListener('error', ()=>{
+    if(!video.src) return;
+    setStatus('Dieses Video konnte nicht abgespielt werden. Viele Handys (v.a. iPhones) nehmen im HEVC/H.265-Format auf, das Chrome/Chromium nicht unterstützt. Bitte das Video vorher in H.264-MP4 umwandeln (z.B. mit HandBrake, VLC oder einem Online-Konverter) und erneut hochladen.', 'err');
   });
   window.addEventListener('resize', resizeOverlay);
   function resizeOverlay(){
