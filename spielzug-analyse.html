@@ -29,13 +29,13 @@
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0;}
   #videoWrap{position:relative;width:100%;background:#000;border-radius:8px;overflow:hidden;}
   #video{display:block;width:100%;max-height:360px;}
-  #overlay{position:absolute;inset:0;width:100%;height:100%;cursor:crosshair;}
-  table.ref{width:100%;border-collapse:collapse;font-size:12px;margin:8px 0;}
-  table.ref th,table.ref td{border:1px solid var(--line);padding:4px 6px;text-align:left;}
-  table.ref input{width:56px;font-size:12px;padding:2px 4px;}
+  #overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+  #overlay.active{cursor:grab;pointer-events:auto;}
+  #overlay.active.dragging{cursor:grabbing;}
   #status{font-size:12px;padding:8px 10px;border-radius:8px;background:#f1f5f9;color:var(--muted);}
   #status.ok{background:#ecfdf5;color:#047857;}
   #status.err{background:#fef2f2;color:#b91c1c;}
+  #calibStatus.ok{color:#047857;font-weight:600;}
   #gallery{display:flex;gap:8px;overflow-x:auto;padding:4px 0;}
   .thumb{flex:none;width:120px;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#111;position:relative;cursor:pointer;}
   .thumb.active{border-color:var(--accent);}
@@ -62,18 +62,18 @@
         <video id="video" controls muted playsinline></video>
         <canvas id="overlay"></canvas>
       </div>
-      <p class="hint">Am besten Videos aus erhöhter Kameraposition, bei denen das Spielfeld gut sichtbar ist.</p>
+      <p class="hint">Am besten Videos aus erhöhter Kameraposition, bei denen zumindest ein paar Feldlinien sichtbar sind.</p>
     </div>
 
     <div class="card">
       <h2><span class="step-badge">2</span> Spielfeld kalibrieren</h2>
-      <p class="muted">Pausiere das Video an einer Stelle, an der die Feldlinien gut zu sehen sind. Trage die realen Koordinaten (in Metern) der 4 Referenzpunkte ein (Standard = Halbfeld-Ecken) und klicke sie danach in genau dieser Reihenfolge im Video an.</p>
-      <table class="ref" id="refTable"></table>
+      <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon &mdash; egal welche &mdash; auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen.</p>
       <div class="row">
-        <button id="calibBtn">Kalibrierung starten</button>
-        <button id="calibResetBtn" class="ghost">Kalibrierung zurücksetzen</button>
+        <button id="calibEditBtn">Kalibrierung bearbeiten</button>
+        <button id="calibResetBtn" class="ghost">Punkte zurücksetzen</button>
+        <button id="calibCommitBtn" class="accent" disabled>Kalibrierung übernehmen</button>
       </div>
-      <div id="calibStatus" class="hint">Noch nicht kalibriert.</div>
+      <div id="calibStatus" class="hint">Video laden, um zu kalibrieren.</div>
     </div>
 
     <div class="card">
@@ -118,9 +118,9 @@
   const video = document.getElementById('video');
   const overlay = document.getElementById('overlay');
   const octx = overlay.getContext('2d');
-  const refTableEl = document.getElementById('refTable');
-  const calibBtn = document.getElementById('calibBtn');
+  const calibEditBtn = document.getElementById('calibEditBtn');
   const calibResetBtn = document.getElementById('calibResetBtn');
+  const calibCommitBtn = document.getElementById('calibCommitBtn');
   const calibStatus = document.getElementById('calibStatus');
   const captureBtn = document.getElementById('captureBtn');
   const clearFramesBtn = document.getElementById('clearFramesBtn');
@@ -133,16 +133,51 @@
   const exportFrameBtn = document.getElementById('exportFrameBtn');
   const exportAllBtn = document.getElementById('exportAllBtn');
 
-  // ---------- state ----------
-  let refPoints = [
-    {label:"Grundlinie links", x:0, y:0},
-    {label:"Grundlinie rechts", x:15, y:0},
-    {label:"Mittellinie links", x:0, y:14},
-    {label:"Mittellinie rechts", x:15, y:14},
+  // ---------- court geometry (FIBA half court, meters: x 0..15 sideline-sideline, y 0..14 baseline-halfcourt) ----------
+  function sampleArc(cx,cy,r,a0,a1,steps){
+    const pts = [];
+    steps = steps || 48;
+    for(let i=0;i<=steps;i++){
+      const a = (a0 + (a1-a0)*i/steps) * Math.PI/180;
+      pts.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]);
+    }
+    return pts;
+  }
+  const COURT_PATHS = [
+    [[0,0],[15,0],[15,14],[0,14],[0,0]],           // Spielfeldrand
+    [[5.05,0],[9.95,0],[9.95,5.8],[5.05,5.8],[5.05,0]], // Freiwurfraum / Zone
+    sampleArc(7.5,5.8,1.8,0,360),                  // Freiwurfkreis
+    sampleArc(7.5,1.575,1.25,0,180),                // Zone unter dem Korb
+    [[0.9,0],[0.9,2.99]],
+    [[14.1,0],[14.1,2.99]],
+    sampleArc(7.5,1.575,6.75,12,168),               // Drei-Punkte-Linie
+    sampleArc(7.5,14,1.8,180,360),                  // Mittelkreis (Halbfeld-Ausschnitt)
+    [[6.6,1.2],[8.4,1.2]],                          // Brett
+    sampleArc(7.5,1.575,0.225,0,360),               // Korb
   ];
-  let calibrating = false;
-  let calibClicks = []; // pixel coords in video space
-  let homography = null; // flat 9-array
+
+  // Draggable calibration handles: any 4+ of these can be used, whichever are visible.
+  const HANDLES = [
+    {id:'baseline_l', rx:0, ry:0}, {id:'baseline_r', rx:15, ry:0},
+    {id:'half_l', rx:0, ry:14}, {id:'half_r', rx:15, ry:14},
+    {id:'ft_l', rx:5.05, ry:5.8}, {id:'ft_r', rx:9.95, ry:5.8},
+    {id:'lane_base_l', rx:5.05, ry:0}, {id:'lane_base_r', rx:9.95, ry:0},
+    {id:'three_base_l', rx:0.9, ry:0}, {id:'three_base_r', rx:14.1, ry:0},
+    {id:'three_corner_l', rx:0.9, ry:2.99}, {id:'three_corner_r', rx:14.1, ry:2.99},
+    {id:'ftcircle_l', rx:5.7, ry:5.8}, {id:'ftcircle_r', rx:9.3, ry:5.8},
+    {id:'halfcircle_l', rx:5.7, ry:14}, {id:'halfcircle_r', rx:9.3, ry:14},
+    {id:'backboard_l', rx:6.6, ry:1.2}, {id:'backboard_r', rx:8.4, ry:1.2},
+  ];
+
+  // ---------- state ----------
+  let calibMode = false;
+  let handlePos = {};       // id -> {x,y} in NATIVE video-pixel space
+  let anchored = new Set(); // ids the user has actually dragged into place
+  let draggingId = null;
+  let liveHomography = null;       // native pixel -> court meters (candidate, while calibrating)
+  let liveDisplayHomography = null;// court meters -> native pixel (for positioning un-anchored handles)
+  let homography = null;           // COMMITTED native pixel -> court meters, used for capturing frames
+
   let poseDetector = null, ballModel = null, modelsReady = false;
   let frames = []; // {id, time, thumb, players:[{trackId,x,y}], ball:{x,y}|null}
   let tracks = {}; // trackId -> {id,color,label}
@@ -158,87 +193,38 @@
     statusEl.className = kind || '';
   }
 
-  // ---------- reference points table ----------
-  function renderRefTable(){
-    refTableEl.innerHTML = '<tr><th>#</th><th>Bezeichnung</th><th>X (m)</th><th>Y (m)</th></tr>' +
-      refPoints.map((p,i)=>`
-        <tr>
-          <td>${i+1}</td>
-          <td><input data-i="${i}" data-f="label" value="${p.label}" style="width:110px"></td>
-          <td><input data-i="${i}" data-f="x" type="number" step="0.1" value="${p.x}"></td>
-          <td><input data-i="${i}" data-f="y" type="number" step="0.1" value="${p.y}"></td>
-        </tr>`).join('');
-    refTableEl.querySelectorAll('input').forEach(inp=>{
-      inp.addEventListener('change', ()=>{
-        const i = +inp.dataset.i, f = inp.dataset.f;
-        refPoints[i][f] = f === 'label' ? inp.value : parseFloat(inp.value) || 0;
-      });
-    });
-  }
-  renderRefTable();
-
   // ---------- video loading ----------
   fileInput.addEventListener('change', ()=>{
     const file = fileInput.files[0];
     if(!file) return;
     video.src = URL.createObjectURL(file);
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
-    homography = null;
-    calibStatus.textContent = 'Noch nicht kalibriert.';
+    homography = null; anchored = new Set(); handlePos = {};
     renderGallery(); renderMainDiagram(); updateCaptureEnabled();
   });
-  video.addEventListener('loadedmetadata', resizeOverlay);
+  video.addEventListener('loadedmetadata', ()=>{
+    resizeOverlay();
+    resetCalibPoints();
+    setCalibMode(true);
+  });
   window.addEventListener('resize', resizeOverlay);
   function resizeOverlay(){
     const rect = video.getBoundingClientRect();
     overlay.width = rect.width; overlay.height = rect.height;
+    renderCalibOverlay();
   }
 
-  // ---------- calibration ----------
-  calibBtn.addEventListener('click', ()=>{
-    calibrating = true; calibClicks = [];
-    octx.clearRect(0,0,overlay.width,overlay.height);
-    calibStatus.textContent = `Klicke Punkt 1/4 im Video an: "${refPoints[0].label}"`;
-  });
-  calibResetBtn.addEventListener('click', ()=>{
-    calibrating = false; calibClicks = []; homography = null;
-    octx.clearRect(0,0,overlay.width,overlay.height);
-    calibStatus.textContent = 'Noch nicht kalibriert.';
-    updateCaptureEnabled();
-  });
-  overlay.addEventListener('click', (evt)=>{
-    if(!calibrating) return;
+  // ---------- coordinate conversion (native video pixels <-> displayed CSS pixels) ----------
+  function nativeToDisplay(x,y){
     const rect = overlay.getBoundingClientRect();
-    const scaleX = video.videoWidth / rect.width;
-    const scaleY = video.videoHeight / rect.height;
-    const px = (evt.clientX - rect.left) * scaleX;
-    const py = (evt.clientY - rect.top) * scaleY;
-    calibClicks.push([px, py]);
+    return [x * (rect.width / video.videoWidth), y * (rect.height / video.videoHeight)];
+  }
+  function displayToNative(x,y){
+    const rect = overlay.getBoundingClientRect();
+    return [x * (video.videoWidth / rect.width), y * (video.videoHeight / rect.height)];
+  }
 
-    const cx = (evt.clientX - rect.left), cy = (evt.clientY - rect.top);
-    octx.beginPath(); octx.arc(cx,cy,6,0,Math.PI*2);
-    octx.fillStyle = '#C43E0E'; octx.fill();
-    octx.strokeStyle = '#fff'; octx.lineWidth = 2; octx.stroke();
-    octx.fillStyle = '#fff'; octx.font = 'bold 11px sans-serif';
-    octx.fillText(String(calibClicks.length), cx+8, cy-8);
-
-    if(calibClicks.length < 4){
-      calibStatus.textContent = `Klicke Punkt ${calibClicks.length+1}/4 im Video an: "${refPoints[calibClicks.length].label}"`;
-    } else {
-      calibrating = false;
-      const dst = refPoints.map(p=>[p.x,p.y]);
-      try{
-        homography = computeHomography(calibClicks, dst);
-        calibStatus.textContent = 'Kalibrierung erfolgreich. Frames können jetzt erfasst werden.';
-      }catch(e){
-        homography = null;
-        calibStatus.textContent = 'Kalibrierung fehlgeschlagen (Punkte zu nah beieinander/kollinear). Bitte erneut versuchen.';
-      }
-      updateCaptureEnabled();
-    }
-  });
-
-  // ---------- homography (DLT, 4-point) ----------
+  // ---------- homography (DLT via least squares, supports >=4 correspondences) ----------
   function solveLinear(A, b){
     const n = A.length;
     const M = A.map((row,i)=>row.concat([b[i]]));
@@ -256,13 +242,21 @@
     return M.map((row,i)=>row[n]/row[i]);
   }
   function computeHomography(src, dst){
-    const A = [], b = [];
-    for(let i=0;i<4;i++){
-      const [x,y] = src[i], [X,Y] = dst[i];
-      A.push([x,y,1,0,0,0,-X*x,-X*y]); b.push(X);
-      A.push([0,0,0,x,y,1,-Y*x,-Y*y]); b.push(Y);
+    if(src.length < 4) throw new Error('need at least 4 point correspondences');
+    const AtA = Array.from({length:8},()=>new Array(8).fill(0));
+    const Atb = new Array(8).fill(0);
+    function addRow(row, val){
+      for(let i=0;i<8;i++){
+        Atb[i] += row[i]*val;
+        for(let j=0;j<8;j++) AtA[i][j] += row[i]*row[j];
+      }
     }
-    const h = solveLinear(A,b);
+    for(let k=0;k<src.length;k++){
+      const [x,y] = src[k], [X,Y] = dst[k];
+      addRow([x,y,1,0,0,0,-X*x,-X*y], X);
+      addRow([0,0,0,x,y,1,-Y*x,-Y*y], Y);
+    }
+    const h = solveLinear(AtA, Atb);
     return [h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1];
   }
   function applyHomography(H, x, y){
@@ -270,8 +264,155 @@
     return [(H[0]*x+H[1]*y+H[2])/w, (H[3]*x+H[4]*y+H[5])/w];
   }
 
+  // ---------- calibration overlay ----------
+  function defaultGuessHomography(){
+    const w = video.videoWidth || 1280, h = video.videoHeight || 720;
+    const realCorners = [[0,0],[15,0],[0,14],[15,14]];
+    const nativeGuess = [[w*0.08,h*0.92],[w*0.92,h*0.92],[w*0.30,h*0.25],[w*0.70,h*0.25]];
+    return computeHomography(realCorners, nativeGuess); // real -> native
+  }
+  function resetCalibPoints(){
+    anchored = new Set();
+    liveHomography = null; liveDisplayHomography = null;
+    const guess = defaultGuessHomography();
+    handlePos = {};
+    HANDLES.forEach(hd=>{
+      const [nx,ny] = applyHomography(guess, hd.rx, hd.ry);
+      handlePos[hd.id] = {x:nx, y:ny};
+    });
+    updateCalibStatus();
+    renderCalibOverlay();
+  }
+  function recomputeLiveCalibration(){
+    const pts = HANDLES.filter(h=>anchored.has(h.id));
+    if(pts.length < 4){ liveHomography = null; liveDisplayHomography = null; return; }
+    const realPts = pts.map(h=>[h.rx,h.ry]);
+    const nativePts = pts.map(h=>[handlePos[h.id].x, handlePos[h.id].y]);
+    try{
+      liveHomography = computeHomography(nativePts, realPts);       // native -> real
+      liveDisplayHomography = computeHomography(realPts, nativePts); // real -> native
+      HANDLES.forEach(h=>{
+        if(!anchored.has(h.id)){
+          const [nx,ny] = applyHomography(liveDisplayHomography, h.rx, h.ry);
+          handlePos[h.id] = {x:nx, y:ny};
+        }
+      });
+    }catch(e){
+      liveHomography = null; liveDisplayHomography = null;
+    }
+  }
+  function updateCalibStatus(){
+    if(homography && !calibMode){
+      calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.`;
+      calibStatus.className = 'hint ok';
+    } else if(anchored.size >= 4){
+      calibStatus.textContent = `${anchored.size} Punkte gesetzt. Passt die Ausrichtung? Dann "Kalibrierung übernehmen" klicken.`;
+      calibStatus.className = 'hint';
+    } else {
+      calibStatus.textContent = `${anchored.size}/4 Punkte gesetzt. Ziehe mindestens 4 der Punkte auf ihre reale Position im Video.`;
+      calibStatus.className = 'hint';
+    }
+    calibCommitBtn.disabled = anchored.size < 4;
+  }
+  function setCalibMode(on){
+    calibMode = on;
+    overlay.classList.toggle('active', on);
+    if(on && Object.keys(handlePos).length === 0) resetCalibPoints();
+    updateCalibStatus();
+    renderCalibOverlay();
+    updateCaptureEnabled();
+  }
+  calibEditBtn.addEventListener('click', ()=>{
+    if(!video.src){ alert('Bitte zuerst ein Video laden.'); return; }
+    setCalibMode(true);
+  });
+  calibResetBtn.addEventListener('click', ()=>{
+    if(!video.src) return;
+    resetCalibPoints();
+  });
+  calibCommitBtn.addEventListener('click', ()=>{
+    if(!liveHomography) return;
+    homography = liveHomography;
+    setCalibMode(false);
+    updateCalibStatus();
+    updateCaptureEnabled();
+  });
+
+  function renderCalibOverlay(){
+    octx.clearRect(0,0,overlay.width,overlay.height);
+    if(!calibMode || !video.videoWidth) return;
+    const H = liveDisplayHomography || (function(){ try{ return defaultGuessHomography(); }catch(e){ return null; } })();
+    octx.save();
+    octx.strokeStyle = 'rgba(196,62,14,0.85)';
+    octx.lineWidth = 2;
+    COURT_PATHS.forEach(path=>{
+      octx.beginPath();
+      path.forEach(([x,y],i)=>{
+        const [nx,ny] = anchoredTemplatePoint(x,y,H);
+        const [dx,dy] = nativeToDisplay(nx,ny);
+        i===0 ? octx.moveTo(dx,dy) : octx.lineTo(dx,dy);
+      });
+      octx.stroke();
+    });
+    octx.restore();
+
+    HANDLES.forEach(h=>{
+      const p = handlePos[h.id];
+      if(!p) return;
+      const [dx,dy] = nativeToDisplay(p.x,p.y);
+      const isAnchored = anchored.has(h.id);
+      octx.beginPath(); octx.arc(dx,dy, isAnchored?9:6, 0, Math.PI*2);
+      octx.fillStyle = isAnchored ? '#16a34a' : 'rgba(255,255,255,0.9)';
+      octx.fill();
+      octx.strokeStyle = isAnchored ? '#0f5124' : '#C43E0E';
+      octx.lineWidth = 2; octx.stroke();
+    });
+  }
+  function anchoredTemplatePoint(rx,ry,H){
+    // used only to project COURT_PATHS points for the overlay preview
+    return H ? applyHomography(H, rx, ry) : [rx, ry];
+  }
+
+  // ---------- calibration dragging (pointer events: mouse + touch) ----------
+  function findHandleAt(clientX, clientY){
+    const rect = overlay.getBoundingClientRect();
+    const dx0 = clientX - rect.left, dy0 = clientY - rect.top;
+    let best = null, bestD = 16;
+    HANDLES.forEach(h=>{
+      const p = handlePos[h.id];
+      if(!p) return;
+      const [dx,dy] = nativeToDisplay(p.x,p.y);
+      const d = Math.hypot(dx-dx0, dy-dy0);
+      if(d < bestD){ bestD = d; best = h.id; }
+    });
+    return best;
+  }
+  overlay.addEventListener('pointerdown', (evt)=>{
+    if(!calibMode) return;
+    const id = findHandleAt(evt.clientX, evt.clientY);
+    if(!id) return;
+    draggingId = id;
+    overlay.classList.add('dragging');
+    overlay.setPointerCapture(evt.pointerId);
+  });
+  overlay.addEventListener('pointermove', (evt)=>{
+    if(!calibMode || !draggingId) return;
+    const rect = overlay.getBoundingClientRect();
+    const [nx,ny] = displayToNative(evt.clientX-rect.left, evt.clientY-rect.top);
+    handlePos[draggingId] = {x:nx, y:ny};
+    anchored.add(draggingId);
+    recomputeLiveCalibration();
+    updateCalibStatus();
+    renderCalibOverlay();
+  });
+  function endDrag(evt){
+    if(draggingId){ overlay.classList.remove('dragging'); draggingId = null; }
+  }
+  overlay.addEventListener('pointerup', endDrag);
+  overlay.addEventListener('pointercancel', endDrag);
+
   function updateCaptureEnabled(){
-    captureBtn.disabled = !(modelsReady && homography && video.src);
+    captureBtn.disabled = !(modelsReady && homography && !calibMode && video.src);
   }
 
   // ---------- AI models ----------
@@ -420,49 +561,24 @@
     renderGallery(); renderMainDiagram();
   });
 
-  // ---------- court diagram rendering ----------
+  // ---------- court diagram rendering (fixed diagram canvas, not the video overlay) ----------
   function toPix(ox,oy,s,x,y){ return [ox + x*s, oy - y*s]; }
 
   function drawCourt(ctx, ox, oy, s){
     ctx.save();
-    ctx.lineWidth = Math.max(1, s*0.05);
-    ctx.strokeStyle = '#334155';
-
     const [rx1,ry1] = toPix(ox,oy,s,0,14), [rx2,ry2] = toPix(ox,oy,s,15,0);
     ctx.fillStyle = '#fdfaf3';
     ctx.fillRect(Math.min(rx1,rx2), Math.min(ry1,ry2), Math.abs(rx2-rx1), Math.abs(ry2-ry1));
-    ctx.strokeRect(Math.min(rx1,rx2), Math.min(ry1,ry2), Math.abs(rx2-rx1), Math.abs(ry2-ry1));
-
-    function poly(pts, closed){
+    ctx.lineWidth = Math.max(1, s*0.05);
+    ctx.strokeStyle = '#334155';
+    COURT_PATHS.forEach(path=>{
       ctx.beginPath();
-      pts.forEach(([x,y],i)=>{
+      path.forEach(([x,y],i)=>{
         const [px,py] = toPix(ox,oy,s,x,y);
         i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
       });
-      if(closed) ctx.closePath();
       ctx.stroke();
-    }
-    function arc(cx,cy,r,a0,a1){
-      ctx.beginPath();
-      const steps = 48;
-      for(let i=0;i<=steps;i++){
-        const a = (a0 + (a1-a0)*i/steps) * Math.PI/180;
-        const x = cx + r*Math.cos(a), y = cy + r*Math.sin(a);
-        const [px,py] = toPix(ox,oy,s,x,y);
-        i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
-      }
-      ctx.stroke();
-    }
-
-    poly([[5.05,0],[9.95,0],[9.95,5.8],[5.05,5.8]], true); // Freiwurfraum
-    arc(7.5,5.8,1.8,0,360);      // Freiwurfkreis
-    arc(7.5,1.575,1.25,0,180);   // Zone unter dem Korb
-    poly([[0.9,0],[0.9,2.99]]);
-    poly([[14.1,0],[14.1,2.99]]);
-    arc(7.5,1.575,6.75,12,168);  // Drei-Punkte-Linie
-    arc(7.5,14,1.8,180,360);     // Mittelkreis (Halbfeld-Ausschnitt)
-    poly([[6.6,1.2],[8.4,1.2]]); // Brett
-    arc(7.5,1.575,0.225,0,360); // Korb
+    });
     ctx.restore();
   }
 
