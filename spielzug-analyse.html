@@ -37,6 +37,7 @@
   #status.ok{background:#ecfdf5;color:#047857;}
   #status.err{background:#fef2f2;color:#b91c1c;}
   #calibStatus.ok{color:#047857;font-weight:600;}
+  #calibStatus.err{color:#b91c1c;font-weight:600;}
   #gallery{display:flex;gap:8px;overflow-x:auto;padding:4px 0;}
   .thumb{flex:none;width:120px;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#111;position:relative;cursor:pointer;}
   .thumb.active{border-color:var(--accent);}
@@ -352,7 +353,7 @@
   }
   function resetCalibPoints(){
     anchored = new Set();
-    liveHomography = null; liveDisplayHomography = null;
+    liveHomography = null; liveDisplayHomography = null; calibSensitivity = null;
     const guess = defaultGuessHomography();
     handlePos = {};
     HANDLES.forEach(hd=>{
@@ -362,14 +363,44 @@
     updateCalibStatus();
     renderCalibOverlay();
   }
+  // How much a typical player's projected court position shifts if one calibration point was
+  // dragged just a few pixels off from where it "should" be - realistic human imprecision.
+  // A calibration built from points that are clustered together or nearly in a line amplifies
+  // small pixel errors into large real-world position errors for anything away from those points;
+  // this catches that before the user finds out the hard way (a player projected far off-court).
+  const CALIB_JITTER_PX = 3;
+  function assessCalibrationSensitivity(nativePts, realPts){
+    const midNative = [
+      nativePts.reduce((s,p)=>s+p[0],0)/nativePts.length,
+      nativePts.reduce((s,p)=>s+p[1],0)/nativePts.length
+    ];
+    try{
+      const base = applyHomography(computeHomography(nativePts, realPts), midNative[0], midNative[1]);
+      let maxShift = 0;
+      for(let i=0;i<nativePts.length;i++){
+        for(const [dx,dy] of [[CALIB_JITTER_PX,0],[-CALIB_JITTER_PX,0],[0,CALIB_JITTER_PX],[0,-CALIB_JITTER_PX]]){
+          const perturbed = nativePts.map((p,j)=> j===i ? [p[0]+dx,p[1]+dy] : p);
+          const proj = applyHomography(computeHomography(perturbed, realPts), midNative[0], midNative[1]);
+          maxShift = Math.max(maxShift, Math.hypot(proj[0]-base[0], proj[1]-base[1]));
+        }
+      }
+      return maxShift;
+    }catch(e){
+      return Infinity;
+    }
+  }
+  const CALIB_SENSITIVITY_WARN_M = 0.5;
+  let calibSensitivity = null;
+  let committedSensitivity = null; // sensitivity of the currently active (committed) calibration
   function recomputeLiveCalibration(){
     const pts = HANDLES.filter(h=>anchored.has(h.id));
-    if(pts.length < 4){ liveHomography = null; liveDisplayHomography = null; return; }
+    if(pts.length < 4){ liveHomography = null; liveDisplayHomography = null; calibSensitivity = null; return; }
     const realPts = pts.map(h=>[h.rx,h.ry]);
     const nativePts = pts.map(h=>[handlePos[h.id].x, handlePos[h.id].y]);
     try{
       liveHomography = computeHomography(nativePts, realPts);       // native -> real
       liveDisplayHomography = computeHomography(realPts, nativePts); // real -> native
+      calibSensitivity = assessCalibrationSensitivity(nativePts, realPts);
       HANDLES.forEach(h=>{
         if(!anchored.has(h.id)){
           const [nx,ny] = applyHomography(liveDisplayHomography, h.rx, h.ry);
@@ -377,16 +408,23 @@
         }
       });
     }catch(e){
-      liveHomography = null; liveDisplayHomography = null;
+      liveHomography = null; liveDisplayHomography = null; calibSensitivity = null;
     }
+  }
+  function calibSensitivityWarning(sensitivity){
+    if(sensitivity == null || sensitivity <= CALIB_SENSITIVITY_WARN_M) return '';
+    const m = sensitivity > 100 ? '> 100' : sensitivity.toFixed(1);
+    return ` ⚠️ Diese Kalibrierung reagiert empfindlich auf kleine Ungenauigkeiten (~${m} m Verschiebung schon bei wenigen Pixeln Abweichung) — die gesetzten Punkte liegen vermutlich zu nah beieinander oder fast auf einer Linie. Für zuverlässigere Positionen weiter auseinanderliegende Punkte wählen.`;
   }
   function updateCalibStatus(){
     if(homography && !calibMode){
-      calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.`;
-      calibStatus.className = 'hint ok';
+      const warning = calibSensitivityWarning(committedSensitivity);
+      calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.${warning}`;
+      calibStatus.className = warning ? 'hint err' : 'hint ok';
     } else if(anchored.size >= 4){
-      calibStatus.textContent = `${anchored.size} Punkte gesetzt. Passt die Ausrichtung? Dann "Kalibrierung übernehmen" klicken.`;
-      calibStatus.className = 'hint';
+      const warning = calibSensitivityWarning(calibSensitivity);
+      calibStatus.textContent = `${anchored.size} Punkte gesetzt. Passt die Ausrichtung? Dann "Kalibrierung übernehmen" klicken.${warning}`;
+      calibStatus.className = warning ? 'hint err' : 'hint';
     } else {
       calibStatus.textContent = `${anchored.size}/4 Punkte gesetzt. Ziehe mindestens 4 der Punkte auf ihre reale Position im Video.`;
       calibStatus.className = 'hint';
@@ -417,6 +455,7 @@
   calibCommitBtn.addEventListener('click', ()=>{
     if(!liveHomography) return;
     homography = liveHomography;
+    committedSensitivity = calibSensitivity;
     setCalibMode(false);
     updateCalibStatus();
     updateCaptureEnabled();
