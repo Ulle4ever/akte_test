@@ -87,12 +87,16 @@
 
     <div class="card">
       <h2><span class="step-badge">3</span> Frames erfassen</h2>
-      <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren. Team wählen, dann für jeden sichtbaren Spieler direkt auf seine Position im Video klicken — die Kalibrierung rechnet das automatisch in echte Feld-Koordinaten um.</p>
+      <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren. Entweder "KI-Vorschlag" für eine automatische Grobschätzung nutzen (danach prüfen/korrigieren), oder Team wählen und Spieler direkt im Video anklicken. Beides lässt sich mischen.</p>
+      <div class="row">
+        <button id="aiSuggestBtn" class="ghost" disabled>KI-Vorschlag für aktuellen Moment</button>
+      </div>
       <div class="row">
         <button id="placeOffenseBtn" disabled>+ Offense-Spieler setzen</button>
         <button id="placeDefenseBtn" class="ghost" disabled>+ Defense-Spieler setzen</button>
       </div>
       <div id="placementStatus" class="hint">Video laden und kalibrieren, um Positionen zu setzen.</div>
+      <p class="hint">Falsch gesetzten/von der KI vorgeschlagenen Punkt im Video mit <strong>Shift+Klick</strong> wieder entfernen.</p>
       <div class="row">
         <button id="finishFrameBtn" class="accent" disabled>Frame abschließen</button>
         <button id="discardFrameBtn" class="ghost" disabled>Verwerfen</button>
@@ -128,7 +132,8 @@
         </label>
       </div>
       <canvas id="courtCanvas" width="680" height="640"></canvas>
-      <p class="hint">Spieler-Punkt <strong>ziehen</strong>, um seine Position in diesem Frame zu korrigieren (gestrichelter Ring = manuell korrigiert). Kurz <strong>klicken</strong> (ohne zu ziehen), um Bezeichnung/Team für alle Frames festzulegen.</p>
+      <p class="hint">Spieler-Punkt <strong>ziehen</strong>, um seine Position in diesem Frame zu korrigieren (gestrichelter Ring = manuell korrigiert). Kurz <strong>klicken</strong> (ohne zu ziehen), um Bezeichnung/Team für alle Frames festzulegen. <strong>Shift+Klick</strong> entfernt einen fälschlich gesetzten Spieler.</p>
+      <p class="hint" id="unknownHint" style="display:none;"></p>
       <div class="row">
         <button id="setBallBtn" class="ghost">Ball manuell setzen</button>
         <button id="clearBallBtn" class="ghost">Ball entfernen</button>
@@ -156,6 +161,8 @@
   </div>
 </div>
 
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -169,11 +176,13 @@
   const calibResetBtn = document.getElementById('calibResetBtn');
   const calibCommitBtn = document.getElementById('calibCommitBtn');
   const calibStatus = document.getElementById('calibStatus');
+  const aiSuggestBtn = document.getElementById('aiSuggestBtn');
   const placeOffenseBtn = document.getElementById('placeOffenseBtn');
   const placeDefenseBtn = document.getElementById('placeDefenseBtn');
   const finishFrameBtn = document.getElementById('finishFrameBtn');
   const discardFrameBtn = document.getElementById('discardFrameBtn');
   const placementStatusEl = document.getElementById('placementStatus');
+  const unknownHintEl = document.getElementById('unknownHint');
   const clearFramesBtn = document.getElementById('clearFramesBtn');
   const galleryEl = document.getElementById('gallery');
   const statusEl = document.getElementById('status');
@@ -255,6 +264,7 @@
   let ballPlacementArmed = false;
   let placementArmed = null; // 'offense' | 'defense' | null - clicking the video adds a player of this team
   let pendingPositions = []; // {x,y,nx,ny,team} being placed for the frame not yet finished
+  let poseDetector = null, modelLoading = false; // lazily loaded only when "KI-Vorschlag" is first used
   let actionPick = null; // {type, need, picked:[trackId,...]} while marking an action
   let pointerDown = null; // {x,y,trackId|null,moved} - tracks a court-canvas mousedown for drag-vs-click detection
 
@@ -585,6 +595,7 @@
     return best;
   }
   overlay.addEventListener('pointerdown', (evt)=>{
+    if(evt.shiftKey && pendingPositions.length){ removePendingNear(evt.clientX, evt.clientY); return; }
     if(placementArmed){ placePlayerAt(evt.clientX, evt.clientY); return; }
     if(!calibMode) return;
     const id = findHandleAt(evt.clientX, evt.clientY);
@@ -639,6 +650,85 @@
     renderCalibOverlay();
     updatePlacementStatus();
   }
+  function removePendingNear(clientX, clientY){
+    const rect = overlay.getBoundingClientRect();
+    const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
+    let bestI = -1, bestD = 25; // native-pixel hit radius
+    pendingPositions.forEach((p,i)=>{
+      const d = Math.hypot(p.nx-nx, p.ny-ny);
+      if(d < bestD){ bestD = d; bestI = i; }
+    });
+    if(bestI >= 0){
+      pendingPositions.splice(bestI,1);
+      renderCalibOverlay();
+      updatePlacementStatus();
+      setStatus('Position entfernt.');
+    }
+  }
+
+  // ---------- optional KI-Vorschlag: real MoveNet pose detection suggests starting positions,
+  // which still need to be checked/corrected the same way as manually placed ones (drag to fix,
+  // shift+click to remove, click to assign team) - the AI never gets the final say. ----------
+  function kp(keypoints, name){ return keypoints.find(k=>k.name===name); }
+  function getFootPoint(keypoints){
+    const la = kp(keypoints,'left_ankle'), ra = kp(keypoints,'right_ankle');
+    if(la && ra && la.score>0.3 && ra.score>0.3) return {x:(la.x+ra.x)/2, y:(la.y+ra.y)/2};
+    if(la && la.score>0.3) return {x:la.x, y:la.y};
+    if(ra && ra.score>0.3) return {x:ra.x, y:ra.y};
+    const lh = kp(keypoints,'left_hip'), rh = kp(keypoints,'right_hip');
+    if(lh && rh && lh.score>0.3 && rh.score>0.3) return {x:(lh.x+rh.x)/2, y:(lh.y+rh.y)/2};
+    if(lh && lh.score>0.3) return {x:lh.x, y:lh.y};
+    if(rh && rh.score>0.3) return {x:rh.x, y:rh.y};
+    return null;
+  }
+  async function loadModelIfNeeded(){
+    if(poseDetector || modelLoading) return;
+    modelLoading = true;
+    updatePlacementEnabled();
+    setStatus('KI-Modell wird geladen…');
+    try{
+      await tf.setBackend('webgl'); await tf.ready();
+      poseDetector = await poseDetection.createDetector(
+        poseDetection.SupportedModels.MoveNet,
+        {modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING}
+      );
+    }catch(e){
+      console.error(e);
+      setStatus('KI-Modell konnte nicht geladen werden (Internetverbindung prüfen). Manuelles Setzen funktioniert trotzdem.', 'err');
+    }
+    modelLoading = false;
+    updatePlacementEnabled();
+  }
+  aiSuggestBtn.addEventListener('click', async ()=>{
+    if(!homography) return;
+    await loadModelIfNeeded();
+    if(!poseDetector) return;
+    aiSuggestBtn.disabled = true;
+    setStatus('KI analysiert aktuellen Moment…');
+    try{
+      const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
+      // Anything projected well outside the court is almost certainly not a player - a
+      // spectator, bench personnel, or a stray false-positive - not worth suggesting.
+      const COURT_MARGIN_M = 3;
+      let added = 0;
+      poses.forEach(pose=>{
+        const foot = getFootPoint(pose.keypoints);
+        if(!foot) return;
+        const [cx,cy] = applyHomography(homography, foot.x, foot.y);
+        if(cx < -COURT_MARGIN_M || cx > 15+COURT_MARGIN_M || cy < -COURT_MARGIN_M || cy > 14+COURT_MARGIN_M) return;
+        if(pendingPositions.some(p => Math.hypot(p.x-cx,p.y-cy) < 0.8)) return; // already have a point there
+        pendingPositions.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team:'unknown'});
+        added++;
+      });
+      renderCalibOverlay();
+      updatePlacementStatus();
+      setStatus(`KI-Vorschlag: ${added} Position(en) hinzugefügt. Bitte prüfen: Ausreißer mit Shift+Klick entfernen, fehlende Spieler manuell ergänzen, Team wird nach "Frame abschließen" per Klick zugeordnet.`, 'ok');
+    }catch(e){
+      console.error(e);
+      setStatus('Fehler bei der KI-Erkennung.', 'err');
+    }
+    updatePlacementEnabled();
+  });
   placeOffenseBtn.addEventListener('click', ()=>{
     placementArmed = 'offense';
     updateOverlayInteractivity();
@@ -652,13 +742,15 @@
   function updatePlacementStatus(){
     const off = pendingPositions.filter(p=>p.team==='offense').length;
     const def = pendingPositions.filter(p=>p.team==='defense').length;
+    const unk = pendingPositions.filter(p=>p.team==='unknown').length;
     if(!pendingPositions.length && !placementArmed){
       placementStatusEl.textContent = homography
-        ? '"+ Offense" oder "+ Defense" wählen, dann auf die Spieler im Video klicken.'
+        ? '"KI-Vorschlag" nutzen oder "+ Offense"/"+ Defense" wählen und auf die Spieler im Video klicken.'
         : 'Video laden und kalibrieren, um Positionen zu setzen.';
     } else {
       const armedHint = placementArmed ? ` — weitere Klicks setzen ${placementArmed === 'offense' ? 'Offense' : 'Defense'}-Spieler (Esc zum Pausieren).` : '';
-      placementStatusEl.textContent = `${off} Offense, ${def} Defense gesetzt.${armedHint} Fertig? "Frame abschließen" klicken.`;
+      const unkHint = unk ? ` ${unk} von KI vorgeschlagen, Team wird nach "Frame abschließen" per Klick auf den Spieler zugeordnet.` : '';
+      placementStatusEl.textContent = `${off} Offense, ${def} Defense gesetzt.${unkHint}${armedHint} Fertig? "Frame abschließen" klicken.`;
     }
     finishFrameBtn.disabled = !pendingPositions.length;
     discardFrameBtn.disabled = !pendingPositions.length;
@@ -668,6 +760,7 @@
     const ready = !!homography && !calibMode && !!video.src;
     placeOffenseBtn.disabled = !ready;
     placeDefenseBtn.disabled = !ready;
+    aiSuggestBtn.disabled = !ready || modelLoading;
   }
 
   function effectiveTeam(trackId){
@@ -833,7 +926,7 @@
       const [x,y] = toPix(ox,oy,s,p.x,p.y);
       const track = tracks[p.trackId];
       ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
-      ctx.fillStyle = track ? track.color : '#64748b'; ctx.fill();
+      ctx.fillStyle = track ? (track.team === 'unknown' ? '#94a3b8' : track.color) : '#64748b'; ctx.fill();
       ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
       ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.round(r)}px sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
@@ -935,7 +1028,18 @@
     }
     cctx.restore();
 
+    updateUnknownHint();
     renderActionList();
+  }
+  function updateUnknownHint(){
+    const frame = frames[selectedFrameIndex];
+    const unknownCount = frame.players.filter(p => effectiveTeam(p.trackId) === 'unknown').length;
+    if(unknownCount > 0){
+      unknownHintEl.textContent = `${unknownCount} von der KI vorgeschlagene(r) Spieler noch ohne Team — anklicken, um Bezeichnung/Team festzulegen.`;
+      unknownHintEl.style.display = '';
+    } else {
+      unknownHintEl.style.display = 'none';
+    }
   }
   function playerLabel(trackId){
     const t = tracks[trackId];
@@ -1054,6 +1158,13 @@
 
     const closest = findPlayerAt(cx,cy);
 
+    if(evt.shiftKey && closest){
+      frame.players = frame.players.filter(p => p.trackId !== closest.trackId);
+      setStatus('Spieler aus diesem Frame entfernt.', 'ok');
+      renderMainDiagram();
+      return;
+    }
+
     if(actionPick){
       if(!closest || !tracks[closest.trackId]) return;
       if(actionPick.picked.includes(closest.trackId)) return;
@@ -1074,7 +1185,7 @@
       const track = tracks[closest.trackId];
       const label = prompt('Bezeichnung für diesen Spieler (z.B. Rückennummer):', track.label);
       if(label != null) track.label = label.trim() || track.label;
-      const teamInput = prompt("Team: 'o' = Offense, 'd' = Defense", track.team === 'offense' ? 'o' : 'd');
+      const teamInput = prompt("Team: 'o' = Offense, 'd' = Defense", track.team === 'offense' ? 'o' : track.team === 'defense' ? 'd' : '');
       if(teamInput != null){
         const v = teamInput.trim().toLowerCase();
         if(v === 'o') track.team = 'offense';
