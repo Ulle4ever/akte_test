@@ -115,6 +115,12 @@
     <div class="card">
       <h2><span class="step-badge">4</span> Taktik-Diagramm</h2>
       <div class="row">
+        <label class="opt" style="flex:1;min-width:240px;">Play-Bezeichnung:
+          <input type="text" id="playName" placeholder="z.B. Gegner #23 – High Pick and Roll" style="flex:1;min-width:180px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;">
+        </label>
+      </div>
+      <p class="hint">Wird auf dem Diagramm sowie im Dateinamen beim Export verwendet — hilfreich, wenn du mehrere geschnittene Spielzüge (z.B. beim Gegner-Scouting) zu einem Playbook sammelst.</p>
+      <div class="row">
         <label class="opt"><input type="checkbox" id="showTrails" checked> Bewegungspfeil zum letzten Frame</label>
         <label class="opt"><input type="checkbox" id="showAll"> Gesamten Spielzug überlagern</label>
       </div>
@@ -192,6 +198,10 @@
   const addActionBtn = document.getElementById('addActionBtn');
   const clearActionsBtn = document.getElementById('clearActionsBtn');
   const actionListEl = document.getElementById('actionList');
+  const playNameEl = document.getElementById('playName');
+  function sanitizeFilename(s){
+    return (s||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'spielzug';
+  }
   const unknownHintEl = document.getElementById('unknownHint');
   const playPauseBtn = document.getElementById('playPauseBtn');
   const stepBackBtn = document.getElementById('stepBackBtn');
@@ -248,6 +258,9 @@
   let liveHomography = null;       // native pixel -> court meters (candidate, while calibrating)
   let liveDisplayHomography = null;// court meters -> native pixel (for positioning un-anchored handles)
   let homography = null;           // COMMITTED native pixel -> court meters, used for capturing frames
+  let lastCalibration = null;      // {videoWidth,videoHeight,handlePos,anchored} of the last COMMITTED calibration -
+                                    // carried over to the next video if its resolution matches (same camera/broadcast,
+                                    // just a different cut clip), so scouting multiple plays doesn't mean recalibrating each one.
 
   let poseDetector = null, ballModel = null, modelsReady = false;
   let frames = []; // {id, time, thumb, players:[{trackId,x,y}], ball:{x,y}|null}
@@ -289,14 +302,33 @@
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
     homography = null; anchored = new Set(); handlePos = {};
     ballPlacementArmed = false; colorPickTarget = null; actionPick = null; pointerDown = null;
+    playNameEl.value = '';
     updateOverlayInteractivity();
     renderGallery(); renderMainDiagram(); updateCaptureEnabled();
     setStatus('Video wird geladen…');
   });
   video.addEventListener('loadedmetadata', ()=>{
     resizeOverlay();
-    resetCalibPoints();
-    setCalibMode(true);
+    // Scouting workflow: many clips cut from the same broadcast/camera share one resolution and
+    // framing, so re-anchoring the court by hand for every single cut would be wasted repeat work -
+    // reuse the last committed calibration whenever the new video's resolution matches exactly.
+    const canReuse = lastCalibration && lastCalibration.videoWidth === video.videoWidth && lastCalibration.videoHeight === video.videoHeight;
+    if(canReuse){
+      anchored = new Set(lastCalibration.anchored);
+      handlePos = {};
+      HANDLES.forEach(h=>{ if(lastCalibration.handlePos[h.id]) handlePos[h.id] = {...lastCalibration.handlePos[h.id]}; });
+      recomputeLiveCalibration();
+    }
+    if(canReuse && liveHomography){
+      homography = liveHomography;
+      committedSensitivity = calibSensitivity;
+      setCalibMode(false);
+      calibStatus.textContent = `Kalibrierung vom vorherigen Video übernommen (gleiche Auflösung erkannt, ${anchored.size} Referenzpunkte). Frames können direkt erfasst werden - bei Bedarf über "Kalibrierung bearbeiten" anpassen.`;
+      calibStatus.className = 'hint ok';
+    } else {
+      resetCalibPoints();
+      setCalibMode(true);
+    }
     seekSlider.max = video.duration || 0;
     updateTimeLabel();
     setStatus(modelsReady ? 'KI-Modelle bereit.' : 'Lade KI-Modelle…', modelsReady ? 'ok' : '');
@@ -497,6 +529,11 @@
     if(!liveHomography) return;
     homography = liveHomography;
     committedSensitivity = calibSensitivity;
+    lastCalibration = {
+      videoWidth: video.videoWidth, videoHeight: video.videoHeight,
+      handlePos: Object.fromEntries(Array.from(anchored).map(id=>[id, {...handlePos[id]}])),
+      anchored: new Set(anchored),
+    };
     setCalibMode(false);
     updateCalibStatus();
     updateCaptureEnabled();
@@ -1075,6 +1112,10 @@
     cctx.save();
     cctx.fillStyle = '#0f172a'; cctx.font = 'bold 13px sans-serif'; cctx.textAlign='left';
     cctx.fillText(`Frame #${selectedFrameIndex+1} · ${formatTime(frames[selectedFrameIndex].time)}`, 12, 20);
+    if(playNameEl.value.trim()){
+      cctx.font = '12px sans-serif'; cctx.fillStyle = '#64748b';
+      cctx.fillText(playNameEl.value.trim(), 12, 36);
+    }
     cctx.restore();
 
     updateUnknownHint();
@@ -1119,6 +1160,7 @@
   }
   showTrailsEl.addEventListener('change', renderMainDiagram);
   showAllEl.addEventListener('change', renderMainDiagram);
+  playNameEl.addEventListener('input', renderMainDiagram);
   teamFilterEl.addEventListener('change', renderMainDiagram);
 
   function pixToCourt(ox,oy,s,px,py){ return [(px-ox)/s, (oy-py)/s]; }
@@ -1246,21 +1288,26 @@
   }
   exportFrameBtn.addEventListener('click', ()=>{
     if(selectedFrameIndex < 0) { alert('Bitte zuerst einen Frame erfassen bzw. auswählen.'); return; }
-    downloadCanvas(courtCanvas, `spielzug-frame-${selectedFrameIndex+1}.png`);
+    downloadCanvas(courtCanvas, `${sanitizeFilename(playNameEl.value)}-frame-${selectedFrameIndex+1}.png`);
   });
   exportAllBtn.addEventListener('click', ()=>{
     if(!frames.length){ alert('Keine Frames vorhanden.'); return; }
     const s2 = 15, marginX = 20, marginY = 20, capH = 18;
+    const titleH = playNameEl.value.trim() ? 28 : 0;
     const cellW = 15*s2 + marginX*2, cellH = 14*s2 + marginY*2 + capH;
     const cols = Math.min(4, frames.length);
     const rows = Math.ceil(frames.length/cols);
     const big = document.createElement('canvas');
-    big.width = cellW*cols; big.height = cellH*rows;
+    big.width = cellW*cols; big.height = cellH*rows + titleH;
     const bctx = big.getContext('2d');
     bctx.fillStyle = '#fff'; bctx.fillRect(0,0,big.width,big.height);
+    if(titleH){
+      bctx.fillStyle = '#0f172a'; bctx.font = 'bold 15px sans-serif'; bctx.textAlign='left';
+      bctx.fillText(playNameEl.value.trim(), marginX, 20);
+    }
     frames.forEach((f,i)=>{
       const col = i%cols, row = Math.floor(i/cols);
-      const ox = col*cellW + marginX, oy = row*cellH + marginY + 14*s2;
+      const ox = col*cellW + marginX, oy = row*cellH + marginY + 14*s2 + titleH;
       bctx.save();
       bctx.translate(0, capH);
       drawCourt(bctx, ox, oy, s2);
@@ -1269,9 +1316,9 @@
       drawActions(bctx, ox, oy, s2, f);
       bctx.restore();
       bctx.fillStyle = '#0f172a'; bctx.font = 'bold 11px sans-serif'; bctx.textAlign='left';
-      bctx.fillText(`#${i+1} · ${formatTime(f.time)}`, col*cellW+marginX, row*cellH+14);
+      bctx.fillText(`#${i+1} · ${formatTime(f.time)}`, col*cellW+marginX, row*cellH+14+titleH);
     });
-    downloadCanvas(big, 'spielzug-storyboard.png');
+    downloadCanvas(big, `${sanitizeFilename(playNameEl.value)}-storyboard.png`);
   });
 
   renderMainDiagram();
