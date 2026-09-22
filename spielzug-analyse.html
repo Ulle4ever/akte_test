@@ -772,11 +772,16 @@
           ballCourt = {x:cx,y:cy};
         }
       }
+      // Anything projected well outside the court (plus a margin for out-of-bounds plays) is
+      // almost certainly not a player on the court - a spectator, bench personnel, or a bad
+      // detection (e.g. a false-positive box spanning half the scene) - not someone to plot.
+      const COURT_MARGIN_M = 3;
       const newPositions = [];
       for(const pose of poses){
         const foot = getFootPoint(pose.keypoints);
         if(!foot) continue;
         const [cx,cy] = applyHomography(homography, foot.x, foot.y);
+        if(cx < -COURT_MARGIN_M || cx > 15+COURT_MARGIN_M || cy < -COURT_MARGIN_M || cy > 14+COURT_MARGIN_M) continue;
         const team = classifyTeam(torsoAverageColor(fullCtx, pose.keypoints));
         newPositions.push({x:cx, y:cy, team});
       }
