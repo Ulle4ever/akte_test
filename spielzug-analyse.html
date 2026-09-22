@@ -128,12 +128,27 @@
         </label>
       </div>
       <canvas id="courtCanvas" width="680" height="640"></canvas>
-      <p class="hint">Auf einen Spieler-Punkt klicken, um Bezeichnung/Team manuell festzulegen (gilt für alle Frames).</p>
+      <p class="hint">Spieler-Punkt <strong>ziehen</strong>, um seine Position in diesem Frame zu korrigieren (gestrichelter Ring = manuell korrigiert). Kurz <strong>klicken</strong> (ohne zu ziehen), um Bezeichnung/Team für alle Frames festzulegen.</p>
       <p class="hint" id="unknownHint" style="display:none;"></p>
       <div class="row">
         <button id="setBallBtn" class="ghost">Ball manuell setzen</button>
         <button id="clearBallBtn" class="ghost">Ball entfernen</button>
       </div>
+      <div class="row" style="align-items:center;">
+        <label class="opt">Aktion:
+          <select id="actionType">
+            <option value="pass">Pass</option>
+            <option value="block">Block/Screen</option>
+            <option value="dribble">Dribbling</option>
+            <option value="cut">Cut</option>
+            <option value="shot">Wurf</option>
+          </select>
+        </label>
+        <button id="addActionBtn" class="ghost">Aktion markieren…</button>
+        <button id="clearActionsBtn" class="ghost">Aktionen (Frame) löschen</button>
+      </div>
+      <p class="hint">Bei Pass/Block danach zwei Spieler im Diagramm anklicken (erst Ausgangs-, dann Zielspieler), bei den anderen einen.</p>
+      <div id="actionList"></div>
       <div class="row">
         <button id="exportFrameBtn" class="accent">Diagramm als PNG</button>
         <button id="exportAllBtn" class="ghost">Alle Frames als Storyboard exportieren</button>
@@ -173,6 +188,10 @@
   const teamFilterEl = document.getElementById('teamFilter');
   const setBallBtn = document.getElementById('setBallBtn');
   const clearBallBtn = document.getElementById('clearBallBtn');
+  const actionTypeEl = document.getElementById('actionType');
+  const addActionBtn = document.getElementById('addActionBtn');
+  const clearActionsBtn = document.getElementById('clearActionsBtn');
+  const actionListEl = document.getElementById('actionList');
   const unknownHintEl = document.getElementById('unknownHint');
   const playPauseBtn = document.getElementById('playPauseBtn');
   const stepBackBtn = document.getElementById('stepBackBtn');
@@ -238,8 +257,19 @@
   let ballPlacementArmed = false;
   let colorPickTarget = null; // 'offense' | 'defense' | null
   let autoCaptureRunning = false;
+  let actionPick = null; // {type, need, picked:[trackId,...]} while marking an action
+  let pointerDown = null; // {x,y,trackId|null,moved} - tracks a court-canvas mousedown for drag-vs-click detection
 
   const PALETTE = ["#C43E0E","#2563eb","#16a34a","#9333ea","#ca8a04","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5"];
+  // Lightweight semantic action markers a user can tag on top of the auto-detected positions -
+  // the AI gives the raw positions, tagging what actually happened (pass, screen, ...) stays manual.
+  const ACTION_TYPES = {
+    pass:    {label:'Pass',       players:2, color:'#0f172a'},
+    block:   {label:'Block',      players:2, color:'#b91c1c'},
+    dribble: {label:'Dribbling',  players:1, color:'#0891b2'},
+    cut:     {label:'Cut',        players:1, color:'#7c3aed'},
+    shot:    {label:'Wurf',       players:1, color:'#ea580c'},
+  };
   function trackColor(id){ return PALETTE[(id-1) % PALETTE.length]; }
   function uid(){ return Math.random().toString(36).slice(2,10); }
 
@@ -258,7 +288,8 @@
     video.src = currentObjectUrl;
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
     homography = null; anchored = new Set(); handlePos = {};
-    ballPlacementArmed = false; colorPickTarget = null; updateOverlayInteractivity();
+    ballPlacementArmed = false; colorPickTarget = null; actionPick = null; pointerDown = null;
+    updateOverlayInteractivity();
     renderGallery(); renderMainDiagram(); updateCaptureEnabled();
     setStatus('Video wird geladen…');
   });
@@ -589,6 +620,10 @@
       ballPlacementArmed = false;
       setStatus('Ball-Platzierung abgebrochen.');
     }
+    if(actionPick){
+      actionPick = null;
+      setStatus('Aktions-Markierung abgebrochen.');
+    }
   });
 
   function updateCaptureEnabled(){
@@ -793,7 +828,7 @@
         if(t && p.team && p.team !== 'unknown') t.teamVotes[p.team]++;
       });
       const thumb = makeThumbnail(fullCanvas, poses);
-      frames.push({id: uid(), time: video.currentTime, thumb, players: matched, ball: ballCourt});
+      frames.push({id: uid(), time: video.currentTime, thumb, players: matched, ball: ballCourt, actions: []});
       selectedFrameIndex = frames.length-1;
       renderGallery();
       renderMainDiagram();
@@ -949,6 +984,12 @@
       ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.round(r)}px sans-serif`;
       ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
       ctx.fillText(track ? track.label : '?', x, y);
+      if(p.manualPosition){
+        ctx.save();
+        ctx.setLineDash([3,2]); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x,y,r+4,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
     });
     if(frame.ball){
       const [x,y] = toPix(ox,oy,s,frame.ball.x,frame.ball.y);
@@ -956,6 +997,58 @@
       ctx.fillStyle = '#f97316'; ctx.fill();
       ctx.strokeStyle = '#7c2d12'; ctx.lineWidth = 1.5; ctx.stroke();
     }
+    ctx.restore();
+  }
+
+  // Manually-tagged actions (pass/block/dribble/cut/shot) - the AI never infers these, they are
+  // purely what the user marks on top of the (auto- or manually-corrected) player positions.
+  function drawActions(ctx, ox,oy,s, frame){
+    if(!frame.actions || !frame.actions.length) return;
+    ctx.save();
+    frame.actions.forEach(act=>{
+      const cfg = ACTION_TYPES[act.type];
+      if(!cfg) return;
+      const pa = frame.players.find(q=>q.trackId===act.a);
+      if(!pa) return;
+      const [ax,ay] = toPix(ox,oy,s,pa.x,pa.y);
+      ctx.strokeStyle = cfg.color; ctx.fillStyle = cfg.color; ctx.lineWidth = 2;
+      ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      if(cfg.players === 2){
+        const pb = frame.players.find(q=>q.trackId===act.b);
+        if(!pb) return;
+        const [bx,by] = toPix(ox,oy,s,pb.x,pb.y);
+        if(act.type === 'block'){
+          ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+          const angle = Math.atan2(by-ay, bx-ax);
+          const midx = (ax+bx)/2, midy = (ay+by)/2, tick = 9;
+          ctx.beginPath();
+          ctx.moveTo(midx + tick*Math.cos(angle+Math.PI/2), midy + tick*Math.sin(angle+Math.PI/2));
+          ctx.lineTo(midx - tick*Math.cos(angle+Math.PI/2), midy - tick*Math.sin(angle+Math.PI/2));
+          ctx.stroke();
+        } else {
+          ctx.setLineDash([6,4]);
+          ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.fillText(cfg.label, (ax+bx)/2, (ay+by)/2 - 8);
+      } else if(act.type === 'shot'){
+        ctx.fillText(cfg.label, ax, ay - 26);
+        ctx.beginPath(); ctx.arc(ax, ay-16, 5, 0, Math.PI*2); ctx.stroke();
+      } else if(act.type === 'dribble'){
+        ctx.fillText(cfg.label, ax, ay - 22);
+        ctx.beginPath(); ctx.arc(ax+16, ay, 6, 0.2*Math.PI, 1.8*Math.PI); ctx.stroke();
+      } else if(act.type === 'cut'){
+        ctx.fillText(cfg.label, ax, ay - 22);
+        const ex = ax+22, ey = ay-14;
+        ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(ex,ey); ctx.stroke();
+        const ang = Math.atan2(ey-ay, ex-ax), ah = 6;
+        ctx.beginPath();
+        ctx.moveTo(ex,ey);
+        ctx.lineTo(ex - ah*Math.cos(ang-Math.PI/6), ey - ah*Math.sin(ang-Math.PI/6));
+        ctx.lineTo(ex - ah*Math.cos(ang+Math.PI/6), ey - ah*Math.sin(ang+Math.PI/6));
+        ctx.closePath(); ctx.fill();
+      }
+    });
     ctx.restore();
   }
 
@@ -970,11 +1063,13 @@
         const prev = i>0 ? frames[i-1] : null;
         const alpha = i===selectedFrameIndex ? 1 : 0.28;
         drawPlayers(cctx, OX, OY, S, {...f, players: visiblePlayers(f)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, alpha);
+        if(i===selectedFrameIndex) drawActions(cctx, OX, OY, S, f);
       });
     } else {
       const frame = frames[selectedFrameIndex];
       const prev = selectedFrameIndex>0 ? frames[selectedFrameIndex-1] : null;
       drawPlayers(cctx, OX, OY, S, {...frame, players: visiblePlayers(frame)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, 1);
+      drawActions(cctx, OX, OY, S, frame);
     }
 
     cctx.save();
@@ -983,6 +1078,33 @@
     cctx.restore();
 
     updateUnknownHint();
+    renderActionList();
+  }
+  function playerLabel(trackId){
+    const t = tracks[trackId];
+    return t ? t.label : '?';
+  }
+  function renderActionList(){
+    actionListEl.innerHTML = '';
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
+    const frame = frames[selectedFrameIndex];
+    const actions = frame.actions || [];
+    actions.forEach((act,i)=>{
+      const cfg = ACTION_TYPES[act.type];
+      const span = document.createElement('span');
+      span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;border-radius:6px;padding:2px 6px;margin:2px 4px 2px 0;font-size:12px;';
+      const desc = cfg.players===2 ? `${cfg.label}: ${playerLabel(act.a)} → ${playerLabel(act.b)}` : `${cfg.label}: ${playerLabel(act.a)}`;
+      span.textContent = desc + ' ';
+      const del = document.createElement('button');
+      del.textContent = '×';
+      del.style.cssText = 'background:none;border:none;color:#b91c1c;cursor:pointer;font-weight:700;padding:0 2px;font-size:13px;';
+      del.addEventListener('click', ()=>{
+        actions.splice(i,1);
+        renderMainDiagram();
+      });
+      span.appendChild(del);
+      actionListEl.appendChild(span);
+    });
   }
   function updateUnknownHint(){
     if(selectedFrameIndex < 0 || teamFilterEl.value === 'all'){ unknownHintEl.style.display = 'none'; return; }
@@ -1012,28 +1134,95 @@
     renderMainDiagram();
   });
 
-  courtCanvas.addEventListener('click', (evt)=>{
-    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
+  addActionBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0){ alert('Bitte zuerst einen Frame erfassen bzw. auswählen.'); return; }
+    const type = actionTypeEl.value;
+    const need = ACTION_TYPES[type].players;
+    actionPick = {type, need, picked: []};
+    setStatus(`Aktion "${ACTION_TYPES[type].label}": klicke im Diagramm auf ${need===2 ? 'den Ausgangsspieler, dann den Zielspieler' : 'den betroffenen Spieler'}…`);
+  });
+  clearActionsBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0) return;
+    frames[selectedFrameIndex].actions = [];
+    renderMainDiagram();
+  });
+
+  function courtEventPos(evt){
     const rect = courtCanvas.getBoundingClientRect();
     const scaleX = courtCanvas.width/rect.width, scaleY = courtCanvas.height/rect.height;
-    const cx = (evt.clientX-rect.left)*scaleX, cy = (evt.clientY-rect.top)*scaleY;
+    return [(evt.clientX-rect.left)*scaleX, (evt.clientY-rect.top)*scaleY];
+  }
+  function findPlayerAt(cx,cy){
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return null;
+    let closest = null, closestD = 18;
+    visiblePlayers(frames[selectedFrameIndex]).forEach(p=>{
+      const [x,y] = toPix(OX,OY,S,p.x,p.y);
+      const d = Math.hypot(x-cx,y-cy);
+      if(d < closestD){ closestD = d; closest = p; }
+    });
+    return closest;
+  }
+
+  // A player point can be dragged (correct its position in this frame only) or clicked without
+  // moving (open the rename/team prompt, or feed an armed ball/action pick) - mousedown+mousemove+
+  // mouseup is tracked manually so a small accidental jiggle during a click isn't misread as a drag.
+  const DRAG_THRESHOLD_PX = 3;
+  courtCanvas.addEventListener('mousedown', (evt)=>{
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
+    const [cx,cy] = courtEventPos(evt);
+    const p = findPlayerAt(cx,cy);
+    pointerDown = {x:cx, y:cy, trackId: p ? p.trackId : null, moved:false};
+  });
+  courtCanvas.addEventListener('mousemove', (evt)=>{
+    if(!pointerDown || !pointerDown.trackId) return;
+    if(ballPlacementArmed || actionPick) return; // those modes only react on release, never drag
+    const [cx,cy] = courtEventPos(evt);
+    if(!pointerDown.moved && Math.hypot(cx-pointerDown.x, cy-pointerDown.y) < DRAG_THRESHOLD_PX) return;
+    pointerDown.moved = true;
+    const [rx,ry] = pixToCourt(OX,OY,S,cx,cy);
+    const entry = frames[selectedFrameIndex].players.find(q=>q.trackId===pointerDown.trackId);
+    if(entry){ entry.x = rx; entry.y = ry; entry.manualPosition = true; renderMainDiagram(); }
+  });
+  window.addEventListener('mouseup', (evt)=>{
+    if(!pointerDown) return;
+    const wasDrag = pointerDown.moved;
+    pointerDown = null;
+    if(wasDrag){ setStatus('Position manuell korrigiert.', 'ok'); return; }
+    handleCourtClick(evt);
+  });
+
+  function handleCourtClick(evt){
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
+    const [cx,cy] = courtEventPos(evt);
+    const frame = frames[selectedFrameIndex];
 
     if(ballPlacementArmed){
       const [rx,ry] = pixToCourt(OX,OY,S,cx,cy);
-      frames[selectedFrameIndex].ball = {x:rx,y:ry};
+      frame.ball = {x:rx,y:ry};
       ballPlacementArmed = false;
       setStatus('Ball-Position gesetzt.', 'ok');
       renderMainDiagram();
       return;
     }
 
-    const frame = frames[selectedFrameIndex];
-    let closest = null, closestD = 18;
-    visiblePlayers(frame).forEach(p=>{
-      const [x,y] = toPix(OX,OY,S,p.x,p.y);
-      const d = Math.hypot(x-cx,y-cy);
-      if(d < closestD){ closestD = d; closest = p; }
-    });
+    const closest = findPlayerAt(cx,cy);
+
+    if(actionPick){
+      if(!closest || !tracks[closest.trackId]) return;
+      if(actionPick.picked.includes(closest.trackId)) return;
+      actionPick.picked.push(closest.trackId);
+      if(actionPick.picked.length < actionPick.need){
+        setStatus(`Aktion "${ACTION_TYPES[actionPick.type].label}": jetzt den Zielspieler anklicken…`);
+        return;
+      }
+      frame.actions = frame.actions || [];
+      frame.actions.push({type: actionPick.type, a: actionPick.picked[0], b: actionPick.picked[1] || null});
+      actionPick = null;
+      setStatus('Aktion markiert.', 'ok');
+      renderMainDiagram();
+      return;
+    }
+
     if(closest && tracks[closest.trackId]){
       const track = tracks[closest.trackId];
       const label = prompt('Bezeichnung für diesen Spieler (z.B. Rückennummer):', track.label);
@@ -1046,7 +1235,7 @@
       }
       renderMainDiagram();
     }
-  });
+  }
 
   // ---------- export ----------
   function downloadCanvas(canvas, filename){
@@ -1077,6 +1266,7 @@
       drawCourt(bctx, ox, oy, s2);
       const prev = i>0 ? frames[i-1] : null;
       drawPlayers(bctx, ox, oy, s2, {...f, players: visiblePlayers(f)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, 1, 8);
+      drawActions(bctx, ox, oy, s2, f);
       bctx.restore();
       bctx.fillStyle = '#0f172a'; bctx.font = 'bold 11px sans-serif'; bctx.textAlign='left';
       bctx.fillText(`#${i+1} · ${formatTime(f.time)}`, col*cellW+marginX, row*cellH+14);
