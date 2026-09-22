@@ -52,7 +52,7 @@
 <body>
 <header>
   <h1>Spielzug-Analyse — Video zu Taktik-Diagramm</h1>
-  <p>Lädt ein Spielvideo, erkennt Spielerpositionen per KI (im Browser, es wird nichts hochgeladen) und erstellt daraus automatisch Taktik-Diagramme für einzelne Spielsituationen.</p>
+  <p>Lädt ein Spielvideo, wandelt die Feldlinien-Kalibrierung in echte Feld-Koordinaten um und lässt dich Spielerpositionen direkt im Video anklicken — daraus entsteht automatisch ein geometrisch korrektes Taktik-Diagramm, ohne dass du es selbst zeichnen musst.</p>
 </header>
 
 <div class="wrap">
@@ -87,28 +87,22 @@
 
     <div class="card">
       <h2><span class="step-badge">3</span> Frames erfassen</h2>
-      <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren, dann Frame erfassen. Pro Frame werden alle sichtbaren Spieler (und wenn möglich der Ball) erkannt und im Diagramm rechts platziert.</p>
-      <div class="row" style="align-items:center;">
-        <label class="opt">Offense-Trikot <input type="color" id="offenseColor" value="#ffffff"></label>
-        <button id="pickOffenseBtn" class="ghost">Farbe aus Video</button>
-        <label class="opt">Defense-Trikot <input type="color" id="defenseColor" value="#1d4ed8"></label>
-        <button id="pickDefenseBtn" class="ghost">Farbe aus Video</button>
-      </div>
-      <p class="hint">Am besten mit "Farbe aus Video" direkt auf ein Trikot im pausierten Video klicken, statt die Farbe zu raten — Kamera-Weißabgleich färbt z.B. weiße Trikots unter Hallenlicht oft sichtbar bläulich ein, das erfasst diese Methode automatisch mit. Farben vor dem Erfassen einstellen — jeder erkannte Spieler wird automatisch anhand seiner Trikotfarbe einem Team zugeordnet (über mehrere Frames gemittelt). Nachträgliche Farbänderungen wirken nur auf neu erfasste Frames. Fehlzuordnungen lassen sich pro Spieler im Diagramm rechts manuell korrigieren.</p>
+      <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren. Team wählen, dann für jeden sichtbaren Spieler direkt auf seine Position im Video klicken — die Kalibrierung rechnet das automatisch in echte Feld-Koordinaten um.</p>
       <div class="row">
-        <button id="captureBtn" disabled>Frame erfassen</button>
+        <button id="placeOffenseBtn" disabled>+ Offense-Spieler setzen</button>
+        <button id="placeDefenseBtn" class="ghost" disabled>+ Defense-Spieler setzen</button>
+      </div>
+      <div id="placementStatus" class="hint">Video laden und kalibrieren, um Positionen zu setzen.</div>
+      <div class="row">
+        <button id="finishFrameBtn" class="accent" disabled>Frame abschließen</button>
+        <button id="discardFrameBtn" class="ghost" disabled>Verwerfen</button>
         <button id="clearFramesBtn" class="ghost">Alle Frames löschen</button>
       </div>
-      <div class="row" style="align-items:center;">
-        <label class="opt">Intervall <input type="number" id="autoInterval" value="0.5" min="0.1" step="0.1" style="width:60px;"> s</label>
-        <button id="autoCaptureBtn" disabled>Ganzen Spielzug automatisch erfassen</button>
-        <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
-      </div>
-      <p class="hint">Erfasst automatisch ab der aktuellen Videoposition bis zum Ende, in obigem Zeitabstand — so bekommst du den kompletten Spielzug ohne manuelles Klicken pro Frame.</p>
+      <p class="hint">Für einen weiteren Frame (z.B. Endposition eines Laufwegs) im Video weiterscrubben und erneut Positionen setzen — Spieler werden anhand der Nähe zur vorherigen Position automatisch demselben Punkt zugeordnet (Farbe/Nummer bleibt erhalten), Abbrechen der Positionierung mit Esc.</p>
       <div id="gallery"></div>
     </div>
 
-    <div id="status">Lade KI-Modelle…</div>
+    <div id="status">Video laden, um zu beginnen.</div>
   </div>
 
   <div>
@@ -135,7 +129,6 @@
       </div>
       <canvas id="courtCanvas" width="680" height="640"></canvas>
       <p class="hint">Spieler-Punkt <strong>ziehen</strong>, um seine Position in diesem Frame zu korrigieren (gestrichelter Ring = manuell korrigiert). Kurz <strong>klicken</strong> (ohne zu ziehen), um Bezeichnung/Team für alle Frames festzulegen.</p>
-      <p class="hint" id="unknownHint" style="display:none;"></p>
       <div class="row">
         <button id="setBallBtn" class="ghost">Ball manuell setzen</button>
         <button id="clearBallBtn" class="ghost">Ball entfernen</button>
@@ -163,9 +156,6 @@
   </div>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
-<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <script>
 (function(){
   "use strict";
@@ -179,7 +169,11 @@
   const calibResetBtn = document.getElementById('calibResetBtn');
   const calibCommitBtn = document.getElementById('calibCommitBtn');
   const calibStatus = document.getElementById('calibStatus');
-  const captureBtn = document.getElementById('captureBtn');
+  const placeOffenseBtn = document.getElementById('placeOffenseBtn');
+  const placeDefenseBtn = document.getElementById('placeDefenseBtn');
+  const finishFrameBtn = document.getElementById('finishFrameBtn');
+  const discardFrameBtn = document.getElementById('discardFrameBtn');
+  const placementStatusEl = document.getElementById('placementStatus');
   const clearFramesBtn = document.getElementById('clearFramesBtn');
   const galleryEl = document.getElementById('gallery');
   const statusEl = document.getElementById('status');
@@ -189,8 +183,6 @@
   const showAllEl = document.getElementById('showAll');
   const exportFrameBtn = document.getElementById('exportFrameBtn');
   const exportAllBtn = document.getElementById('exportAllBtn');
-  const offenseColorEl = document.getElementById('offenseColor');
-  const defenseColorEl = document.getElementById('defenseColor');
   const teamFilterEl = document.getElementById('teamFilter');
   const setBallBtn = document.getElementById('setBallBtn');
   const clearBallBtn = document.getElementById('clearBallBtn');
@@ -202,17 +194,11 @@
   function sanitizeFilename(s){
     return (s||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'spielzug';
   }
-  const unknownHintEl = document.getElementById('unknownHint');
   const playPauseBtn = document.getElementById('playPauseBtn');
   const stepBackBtn = document.getElementById('stepBackBtn');
   const stepFwdBtn = document.getElementById('stepFwdBtn');
   const seekSlider = document.getElementById('seekSlider');
   const timeLabel = document.getElementById('timeLabel');
-  const pickOffenseBtn = document.getElementById('pickOffenseBtn');
-  const pickDefenseBtn = document.getElementById('pickDefenseBtn');
-  const autoInterval = document.getElementById('autoInterval');
-  const autoCaptureBtn = document.getElementById('autoCaptureBtn');
-  const autoStopBtn = document.getElementById('autoStopBtn');
 
   // ---------- court geometry (FIBA half court, meters: x 0..15 sideline-sideline, y 0..14 baseline-halfcourt) ----------
   function sampleArc(cx,cy,r,a0,a1,steps){
@@ -262,14 +248,13 @@
                                     // carried over to the next video if its resolution matches (same camera/broadcast,
                                     // just a different cut clip), so scouting multiple plays doesn't mean recalibrating each one.
 
-  let poseDetector = null, ballModel = null, modelsReady = false;
-  let frames = []; // {id, time, thumb, players:[{trackId,x,y}], ball:{x,y}|null}
-  let tracks = {}; // trackId -> {id,color,label,teamVotes:{offense,defense},teamOverride}
+  let frames = []; // {id, time, thumb, players:[{trackId,x,y}], ball:{x,y}|null, actions:[]}
+  let tracks = {}; // trackId -> {id,color,label,team}
   let nextTrackId = 1;
   let selectedFrameIndex = -1;
   let ballPlacementArmed = false;
-  let colorPickTarget = null; // 'offense' | 'defense' | null
-  let autoCaptureRunning = false;
+  let placementArmed = null; // 'offense' | 'defense' | null - clicking the video adds a player of this team
+  let pendingPositions = []; // {x,y,nx,ny,team} being placed for the frame not yet finished
   let actionPick = null; // {type, need, picked:[trackId,...]} while marking an action
   let pointerDown = null; // {x,y,trackId|null,moved} - tracks a court-canvas mousedown for drag-vs-click detection
 
@@ -301,10 +286,10 @@
     video.src = currentObjectUrl;
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
     homography = null; anchored = new Set(); handlePos = {};
-    ballPlacementArmed = false; colorPickTarget = null; actionPick = null; pointerDown = null;
+    ballPlacementArmed = false; placementArmed = null; pendingPositions = []; actionPick = null; pointerDown = null;
     playNameEl.value = '';
     updateOverlayInteractivity();
-    renderGallery(); renderMainDiagram(); updateCaptureEnabled();
+    renderGallery(); renderMainDiagram(); updatePlacementEnabled(); updatePlacementStatus();
     setStatus('Video wird geladen…');
   });
   video.addEventListener('loadedmetadata', ()=>{
@@ -331,7 +316,8 @@
     }
     seekSlider.max = video.duration || 0;
     updateTimeLabel();
-    setStatus(modelsReady ? 'KI-Modelle bereit.' : 'Lade KI-Modelle…', modelsReady ? 'ok' : '');
+    updatePlacementEnabled();
+    setStatus('Video bereit.', 'ok');
   });
   video.addEventListener('error', ()=>{
     if(!video.src) return;
@@ -507,7 +493,7 @@
   }
   function updateOverlayInteractivity(){
     overlay.classList.toggle('active', calibMode);
-    overlay.classList.toggle('picking', !!colorPickTarget);
+    overlay.classList.toggle('picking', !!placementArmed);
   }
   function setCalibMode(on){
     calibMode = on;
@@ -515,7 +501,7 @@
     if(on && Object.keys(handlePos).length === 0) resetCalibPoints();
     updateCalibStatus();
     renderCalibOverlay();
-    updateCaptureEnabled();
+    updatePlacementEnabled();
   }
   calibEditBtn.addEventListener('click', ()=>{
     if(!video.src){ alert('Bitte zuerst ein Video laden.'); return; }
@@ -536,37 +522,47 @@
     };
     setCalibMode(false);
     updateCalibStatus();
-    updateCaptureEnabled();
+    updatePlacementEnabled();
   });
 
   function renderCalibOverlay(){
     octx.clearRect(0,0,overlay.width,overlay.height);
-    if(!calibMode || !video.videoWidth) return;
-    const H = liveDisplayHomography || (function(){ try{ return defaultGuessHomography(); }catch(e){ return null; } })();
-    octx.save();
-    octx.strokeStyle = 'rgba(196,62,14,0.85)';
-    octx.lineWidth = 2;
-    COURT_PATHS.forEach(path=>{
-      octx.beginPath();
-      path.forEach(([x,y],i)=>{
-        const [nx,ny] = anchoredTemplatePoint(x,y,H);
-        const [dx,dy] = nativeToDisplay(nx,ny);
-        i===0 ? octx.moveTo(dx,dy) : octx.lineTo(dx,dy);
+    if(calibMode && video.videoWidth){
+      const H = liveDisplayHomography || (function(){ try{ return defaultGuessHomography(); }catch(e){ return null; } })();
+      octx.save();
+      octx.strokeStyle = 'rgba(196,62,14,0.85)';
+      octx.lineWidth = 2;
+      COURT_PATHS.forEach(path=>{
+        octx.beginPath();
+        path.forEach(([x,y],i)=>{
+          const [nx,ny] = anchoredTemplatePoint(x,y,H);
+          const [dx,dy] = nativeToDisplay(nx,ny);
+          i===0 ? octx.moveTo(dx,dy) : octx.lineTo(dx,dy);
+        });
+        octx.stroke();
       });
-      octx.stroke();
-    });
-    octx.restore();
+      octx.restore();
 
-    HANDLES.forEach(h=>{
-      const p = handlePos[h.id];
-      if(!p) return;
-      const [dx,dy] = nativeToDisplay(p.x,p.y);
-      const isAnchored = anchored.has(h.id);
-      octx.beginPath(); octx.arc(dx,dy, isAnchored?9:6, 0, Math.PI*2);
-      octx.fillStyle = isAnchored ? '#16a34a' : 'rgba(255,255,255,0.9)';
+      HANDLES.forEach(h=>{
+        const p = handlePos[h.id];
+        if(!p) return;
+        const [dx,dy] = nativeToDisplay(p.x,p.y);
+        const isAnchored = anchored.has(h.id);
+        octx.beginPath(); octx.arc(dx,dy, isAnchored?9:6, 0, Math.PI*2);
+        octx.fillStyle = isAnchored ? '#16a34a' : 'rgba(255,255,255,0.9)';
+        octx.fill();
+        octx.strokeStyle = isAnchored ? '#0f5124' : '#C43E0E';
+        octx.lineWidth = 2; octx.stroke();
+      });
+    }
+    // Player positions placed for the frame currently being built - shown directly on the video
+    // regardless of calibration mode, so you can see at a glance who's already been placed.
+    pendingPositions.forEach(p=>{
+      const [dx,dy] = nativeToDisplay(p.nx,p.ny);
+      octx.beginPath(); octx.arc(dx,dy,7,0,Math.PI*2);
+      octx.fillStyle = p.team === 'offense' ? '#C43E0E' : '#2563eb';
       octx.fill();
-      octx.strokeStyle = isAnchored ? '#0f5124' : '#C43E0E';
-      octx.lineWidth = 2; octx.stroke();
+      octx.strokeStyle = '#fff'; octx.lineWidth = 2; octx.stroke();
     });
   }
   function anchoredTemplatePoint(rx,ry,H){
@@ -589,7 +585,7 @@
     return best;
   }
   overlay.addEventListener('pointerdown', (evt)=>{
-    if(colorPickTarget){ pickColorAt(evt.clientX, evt.clientY); return; }
+    if(placementArmed){ placePlayerAt(evt.clientX, evt.clientY); return; }
     if(!calibMode) return;
     const id = findHandleAt(evt.clientX, evt.clientY);
     if(!id) return;
@@ -613,45 +609,14 @@
   overlay.addEventListener('pointerup', endDrag);
   overlay.addEventListener('pointercancel', endDrag);
 
-  // ---------- pick a team color directly from the video (avoids guessing a hex value that
-  // doesn't match what the camera's white balance actually shows, e.g. blue-tinted "white") ----------
-  function pickColorAt(clientX, clientY){
-    const target = colorPickTarget;
-    colorPickTarget = null;
-    updateOverlayInteractivity();
-    updateCaptureEnabled();
-    const rect = overlay.getBoundingClientRect();
-    const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
-    const tmp = document.createElement('canvas');
-    tmp.width = video.videoWidth; tmp.height = video.videoHeight;
-    const tctx = tmp.getContext('2d', {willReadFrequently: true});
-    tctx.drawImage(video, 0, 0);
-    const r = 7;
-    const avg = averageColorInBox(tctx, nx-r, ny-r, nx+r, ny+r);
-    if(!avg){
-      setStatus('Konnte an dieser Stelle keine Farbe bestimmen (z.B. nur Haut erkannt) — bitte nochmal auf den Stoff des Trikots klicken.', 'err');
-      return;
-    }
-    const hex = rgbToHex(avg[0], avg[1], avg[2]);
-    (target === 'offense' ? offenseColorEl : defenseColorEl).value = hex;
-    setStatus(`${target === 'offense' ? 'Offense' : 'Defense'}-Farbe aus Video übernommen (${hex}).`, 'ok');
-  }
-  function armColorPick(target){
-    if(!video.src || !video.videoWidth){ alert('Bitte zuerst ein Video laden.'); return; }
-    colorPickTarget = target;
-    updateOverlayInteractivity();
-    updateCaptureEnabled();
-    setStatus(`Klicke im Video auf das ${target === 'offense' ? 'Offense' : 'Defense'}-Trikot… (Abbrechen mit Esc)`);
-  }
-  pickOffenseBtn.addEventListener('click', ()=> armColorPick('offense'));
-  pickDefenseBtn.addEventListener('click', ()=> armColorPick('defense'));
   window.addEventListener('keydown', (evt)=>{
     if(evt.key !== 'Escape') return;
-    if(colorPickTarget){
-      colorPickTarget = null;
+    if(placementArmed){
+      placementArmed = null;
       updateOverlayInteractivity();
-      updateCaptureEnabled();
-      setStatus('Farbauswahl abgebrochen.');
+      updatePlacementEnabled();
+      updatePlacementStatus();
+      setStatus('Positionierung pausiert.');
     }
     if(ballPlacementArmed){
       ballPlacementArmed = false;
@@ -663,132 +628,56 @@
     }
   });
 
-  function updateCaptureEnabled(){
-    const baseReady = modelsReady && homography && !calibMode && !colorPickTarget && video.src;
-    captureBtn.disabled = !baseReady || autoCaptureRunning;
-    autoCaptureBtn.disabled = !baseReady || autoCaptureRunning;
-    calibEditBtn.disabled = autoCaptureRunning;
+  // ---------- manual player placement: click directly on the video, converted through the
+  // committed calibration into real court coordinates - no detection model, no false positives,
+  // no per-frame correction cycle. What you click is exactly what ends up in the diagram. ----------
+  function placePlayerAt(clientX, clientY){
+    const rect = overlay.getBoundingClientRect();
+    const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
+    const [cx, cy] = applyHomography(homography, nx, ny);
+    pendingPositions.push({x:cx, y:cy, nx, ny, team: placementArmed});
+    renderCalibOverlay();
+    updatePlacementStatus();
+  }
+  placeOffenseBtn.addEventListener('click', ()=>{
+    placementArmed = 'offense';
+    updateOverlayInteractivity();
+    updatePlacementStatus();
+  });
+  placeDefenseBtn.addEventListener('click', ()=>{
+    placementArmed = 'defense';
+    updateOverlayInteractivity();
+    updatePlacementStatus();
+  });
+  function updatePlacementStatus(){
+    const off = pendingPositions.filter(p=>p.team==='offense').length;
+    const def = pendingPositions.filter(p=>p.team==='defense').length;
+    if(!pendingPositions.length && !placementArmed){
+      placementStatusEl.textContent = homography
+        ? '"+ Offense" oder "+ Defense" wählen, dann auf die Spieler im Video klicken.'
+        : 'Video laden und kalibrieren, um Positionen zu setzen.';
+    } else {
+      const armedHint = placementArmed ? ` — weitere Klicks setzen ${placementArmed === 'offense' ? 'Offense' : 'Defense'}-Spieler (Esc zum Pausieren).` : '';
+      placementStatusEl.textContent = `${off} Offense, ${def} Defense gesetzt.${armedHint} Fertig? "Frame abschließen" klicken.`;
+    }
+    finishFrameBtn.disabled = !pendingPositions.length;
+    discardFrameBtn.disabled = !pendingPositions.length;
   }
 
-  // ---------- AI models ----------
-  async function loadModels(){
-    try{
-      await tf.setBackend('webgl'); await tf.ready();
-      poseDetector = await poseDetection.createDetector(
-        poseDetection.SupportedModels.MoveNet,
-        {modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING}
-      );
-      setStatus('Personen-Erkennung geladen. Lade Ball-Erkennung…');
-      try{ ballModel = await cocoSsd.load(); }
-      catch(e){ console.warn('Ball-Erkennung nicht verfügbar', e); }
-      modelsReady = true;
-      setStatus('KI-Modelle bereit.', 'ok');
-    }catch(e){
-      console.error(e);
-      setStatus('Fehler beim Laden der KI-Modelle. Internetverbindung prüfen und Seite neu laden.', 'err');
-    }
-    updateCaptureEnabled();
+  function updatePlacementEnabled(){
+    const ready = !!homography && !calibMode && !!video.src;
+    placeOffenseBtn.disabled = !ready;
+    placeDefenseBtn.disabled = !ready;
   }
-  loadModels();
 
-  // ---------- jersey-color based team classification ----------
-  function hexToRgb(hex){
-    const m = hex.replace('#','');
-    return [parseInt(m.substr(0,2),16), parseInt(m.substr(2,2),16), parseInt(m.substr(4,2),16)];
-  }
-  function rgbToHex(r,g,b){
-    return '#' + [r,g,b].map(v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
-  }
-  function rgbToHsv(r,g,b){
-    r/=255; g/=255; b/=255;
-    const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
-    let h=0;
-    if(d!==0){
-      if(max===r) h = 60*(((g-b)/d)%6);
-      else if(max===g) h = 60*((b-r)/d+2);
-      else h = 60*((r-g)/d+4);
-    }
-    if(h<0) h+=360;
-    return {h, s: max===0?0:d/max, v:max};
-  }
-  function colorDistance(rgbA, rgbB){
-    const a = rgbToHsv(rgbA[0],rgbA[1],rgbA[2]), b = rgbToHsv(rgbB[0],rgbB[1],rgbB[2]);
-    let dh = Math.abs(a.h-b.h); if(dh>180) dh = 360-dh;
-    return (dh/180)*0.6 + Math.abs(a.s-b.s)*0.25 + Math.abs(a.v-b.v)*0.15;
-  }
-  const TEAM_MATCH_THRESHOLD = 0.35;
-  function classifyTeam(avgRgb){
-    if(!avgRgb) return 'unknown';
-    const dOff = colorDistance(avgRgb, hexToRgb(offenseColorEl.value));
-    const dDef = colorDistance(avgRgb, hexToRgb(defenseColorEl.value));
-    if(Math.min(dOff,dDef) > TEAM_MATCH_THRESHOLD) return 'unknown';
-    return dOff <= dDef ? 'offense' : 'defense';
-  }
-  // Skin-tone detection via YCbCr chrominance: melanin mainly changes luminance (Y), not the
-  // Cb/Cr color-difference channels, so this range catches light/medium/dark skin about equally
-  // well instead of being tuned to one tone. Used to exclude bare shoulders/arms (basketball
-  // jerseys are sleeveless) from the jersey-color sample, regardless of the player's skin color.
-  function isSkinPixel(r,g,b){
-    const y = 0.299*r + 0.587*g + 0.114*b;
-    const cb = 128 - 0.168736*r - 0.331264*g + 0.5*b;
-    const cr = 128 + 0.5*r - 0.418688*g - 0.081312*b;
-    return y>40 && cb>=75 && cb<=135 && cr>=130 && cr<=180;
-  }
-  function averageColorInBox(ctx, x0,y0,x1,y1){
-    const w = ctx.canvas.width, h = ctx.canvas.height;
-    const minX = Math.max(0, Math.floor(Math.min(x0,x1))), maxX = Math.min(w-1, Math.ceil(Math.max(x0,x1)));
-    const minY = Math.max(0, Math.floor(Math.min(y0,y1))), maxY = Math.min(h-1, Math.ceil(Math.max(y0,y1)));
-    const bw = maxX-minX, bh = maxY-minY;
-    if(bw<=0 || bh<=0) return null;
-    const data = ctx.getImageData(minX,minY,bw,bh).data;
-    let r=0,g=0,b=0,n=0, total=0;
-    for(let i=0;i<data.length;i+=4){
-      total++;
-      const pr=data[i], pg=data[i+1], pb=data[i+2];
-      if(isSkinPixel(pr,pg,pb)) continue;
-      r+=pr; g+=pg; b+=pb; n++;
-    }
-    // If the box is mostly bare skin (bad crop right at the shoulder joint), there isn't enough
-    // fabric left to judge - report "no reading" rather than guessing off skin color.
-    if(!total || n < total*0.15) return null;
-    return [r/n, g/n, b/n];
-  }
-  function torsoAverageColor(fullCtx, keypoints){
-    const pts = ['left_shoulder','right_shoulder','left_hip','right_hip']
-      .map(name=>kp(keypoints,name)).filter(p=>p && p.score>0.3);
-    if(pts.length < 2) return null;
-    const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
-    const cx = (Math.min(...xs)+Math.max(...xs))/2, cy = (Math.min(...ys)+Math.max(...ys))/2;
-    const w = Math.max(Math.max(...xs)-Math.min(...xs), 24) * 0.7;
-    const h = Math.max(Math.max(...ys)-Math.min(...ys), 24) * 0.7;
-    return averageColorInBox(fullCtx, cx-w/2, cy-h/2, cx+w/2, cy+h/2);
-  }
   function effectiveTeam(trackId){
     const t = tracks[trackId];
-    if(!t) return 'unknown';
-    if(t.teamOverride) return t.teamOverride;
-    const votes = t.teamVotes || {offense:0, defense:0};
-    if(votes.offense===0 && votes.defense===0) return 'unknown';
-    return votes.offense >= votes.defense ? 'offense' : 'defense';
+    return t ? t.team : 'unknown';
   }
   function visiblePlayers(frame){
     const filter = teamFilterEl.value;
     if(filter === 'all') return frame.players;
     return frame.players.filter(p => effectiveTeam(p.trackId) === filter);
-  }
-
-  // ---------- pose helpers ----------
-  function kp(keypoints, name){ return keypoints.find(k=>k.name===name); }
-  function getFootPoint(keypoints){
-    const la = kp(keypoints,'left_ankle'), ra = kp(keypoints,'right_ankle');
-    if(la && ra && la.score>0.3 && ra.score>0.3) return {x:(la.x+ra.x)/2, y:(la.y+ra.y)/2};
-    if(la && la.score>0.3) return {x:la.x, y:la.y};
-    if(ra && ra.score>0.3) return {x:ra.x, y:ra.y};
-    const lh = kp(keypoints,'left_hip'), rh = kp(keypoints,'right_hip');
-    if(lh && rh && lh.score>0.3 && rh.score>0.3) return {x:(lh.x+rh.x)/2, y:(lh.y+rh.y)/2};
-    if(lh && lh.score>0.3) return {x:lh.x, y:lh.y};
-    if(rh && rh.score>0.3) return {x:rh.x, y:rh.y};
-    return null;
   }
 
   const MAX_PLAYER_SPEED_MPS = 8;  // generous upper bound (sprint speed) for track-matching
@@ -817,120 +706,48 @@
     for(let i=0;i<newPositions.length;i++){
       if(result[i]) continue;
       const id = nextTrackId++;
-      tracks[id] = {id, color: trackColor(id), label: String(id), teamVotes:{offense:0,defense:0}, teamOverride:null};
-      result[i] = {...newPositions[i], trackId:id};
+      tracks[id] = {id, color: trackColor(id), label: String(id), team: newPositions[i].team};
+      result[i] = {x:newPositions[i].x, y:newPositions[i].y, trackId:id};
     }
     return result;
   }
 
-  // ---------- frame capture ----------
-  async function captureCurrentFrame(){
-    if(!homography || !poseDetector) return false;
-    video.pause();
-    try{
-      const fullCanvas = document.createElement('canvas');
-      fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
-      const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
-      fullCtx.drawImage(video, 0, 0);
-
-      const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
-      let ballCourt = null;
-      if(ballModel){
-        const preds = await ballModel.detect(video);
-        const balls = preds.filter(p=>p.class==='sports ball' && p.score>0.15).sort((a,b)=>b.score-a.score);
-        if(balls.length){
-          const [bx,by,bw,bh] = balls[0].bbox;
-          const [cx,cy] = applyHomography(homography, bx+bw/2, by+bh);
-          ballCourt = {x:cx,y:cy};
-        }
-      }
-      // Anything projected well outside the court (plus a margin for out-of-bounds plays) is
-      // almost certainly not a player on the court - a spectator, bench personnel, or a bad
-      // detection (e.g. a false-positive box spanning half the scene) - not someone to plot.
-      const COURT_MARGIN_M = 3;
-      const newPositions = [];
-      for(const pose of poses){
-        const foot = getFootPoint(pose.keypoints);
-        if(!foot) continue;
-        const [cx,cy] = applyHomography(homography, foot.x, foot.y);
-        if(cx < -COURT_MARGIN_M || cx > 15+COURT_MARGIN_M || cy < -COURT_MARGIN_M || cy > 14+COURT_MARGIN_M) continue;
-        const team = classifyTeam(torsoAverageColor(fullCtx, pose.keypoints));
-        newPositions.push({x:cx, y:cy, team});
-      }
-      const prevFrame = frames[frames.length-1] || null;
-      const elapsed = prevFrame ? Math.max(0, video.currentTime - prevFrame.time) : 0;
-      const matched = matchTracks(prevFrame ? prevFrame.players : [], newPositions, elapsed);
-      matched.forEach(p=>{
-        const t = tracks[p.trackId];
-        if(t && p.team && p.team !== 'unknown') t.teamVotes[p.team]++;
-      });
-      const thumb = makeThumbnail(fullCanvas, poses);
-      frames.push({id: uid(), time: video.currentTime, thumb, players: matched, ball: ballCourt, actions: []});
-      selectedFrameIndex = frames.length-1;
-      renderGallery();
-      renderMainDiagram();
-      setStatus(`Frame erfasst (${newPositions.length} Spieler erkannt).`, 'ok');
-      return true;
-    }catch(e){
-      console.error(e);
-      setStatus('Fehler bei der Frame-Erfassung.', 'err');
-      return false;
-    }
-  }
-  captureBtn.addEventListener('click', async ()=>{
-    captureBtn.disabled = true;
-    await captureCurrentFrame();
-    updateCaptureEnabled();
-  });
-
-  // ---------- auto-capture the whole sequence ----------
-  function seekAndWait(t){
-    return new Promise(resolve=>{
-      const onSeeked = ()=>{ video.removeEventListener('seeked', onSeeked); resolve(); };
-      video.addEventListener('seeked', onSeeked);
-      video.currentTime = t;
-    });
-  }
-  autoCaptureBtn.addEventListener('click', async ()=>{
-    if(!homography || !poseDetector){ alert('Bitte zuerst kalibrieren.'); return; }
-    const interval = Math.max(0.1, parseFloat(autoInterval.value) || 0.5);
-    const duration = video.duration || 0;
-    autoCaptureRunning = true;
-    autoCaptureBtn.style.display = 'none';
-    autoStopBtn.style.display = '';
-    updateCaptureEnabled();
-    let t = video.currentTime;
-    while(autoCaptureRunning && t <= duration + 0.001){
-      await seekAndWait(Math.min(t, duration));
-      await new Promise(r=>setTimeout(r, 30)); // let the seeked frame actually paint before sampling it
-      setStatus(`Automatische Erfassung: ${formatTime(t)} / ${formatTime(duration)}…`);
-      const ok = await captureCurrentFrame();
-      if(!ok) break;
-      t += interval;
-    }
-    autoCaptureRunning = false;
-    autoCaptureBtn.style.display = '';
-    autoStopBtn.style.display = 'none';
-    updateCaptureEnabled();
-    setStatus(`Automatische Erfassung abgeschlossen (${frames.length} Frames insgesamt).`, 'ok');
-  });
-  autoStopBtn.addEventListener('click', ()=>{ autoCaptureRunning = false; });
-
-  function makeThumbnail(fullCanvas, poses){
+  // ---------- finish/discard the frame currently being placed ----------
+  function makeThumbnail(fullCanvas, positions){
     const tw = 200, th = Math.round(200 * fullCanvas.height / fullCanvas.width);
     const c = document.createElement('canvas'); c.width = tw; c.height = th;
     const tctx = c.getContext('2d');
     tctx.drawImage(fullCanvas, 0, 0, tw, th);
     const sx = tw/fullCanvas.width, sy = th/fullCanvas.height;
-    poses.forEach(pose=>{
-      const foot = getFootPoint(pose.keypoints);
-      if(foot){
-        tctx.beginPath(); tctx.arc(foot.x*sx, foot.y*sy, 3, 0, Math.PI*2);
-        tctx.fillStyle = '#dc2626'; tctx.fill();
-      }
+    positions.forEach(p=>{
+      tctx.beginPath(); tctx.arc(p.nx*sx, p.ny*sy, 3, 0, Math.PI*2);
+      tctx.fillStyle = p.team === 'offense' ? '#C43E0E' : '#2563eb';
+      tctx.fill();
     });
     return c.toDataURL('image/png');
   }
+  finishFrameBtn.addEventListener('click', ()=>{
+    if(!pendingPositions.length) return;
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+    fullCanvas.getContext('2d').drawImage(video, 0, 0);
+    const prevFrame = frames[frames.length-1] || null;
+    const elapsed = prevFrame ? Math.max(0, video.currentTime - prevFrame.time) : 0;
+    const matched = matchTracks(prevFrame ? prevFrame.players : [], pendingPositions, elapsed);
+    const thumb = makeThumbnail(fullCanvas, pendingPositions);
+    frames.push({id: uid(), time: video.currentTime, thumb, players: matched, ball: null, actions: []});
+    selectedFrameIndex = frames.length - 1;
+    const count = pendingPositions.length;
+    pendingPositions = []; placementArmed = null;
+    updateOverlayInteractivity(); renderCalibOverlay();
+    renderGallery(); renderMainDiagram(); updatePlacementStatus();
+    setStatus(`Frame erfasst (${count} Spieler gesetzt).`, 'ok');
+  });
+  discardFrameBtn.addEventListener('click', ()=>{
+    pendingPositions = []; placementArmed = null;
+    updateOverlayInteractivity(); renderCalibOverlay(); updatePlacementStatus();
+    setStatus('Positionierung verworfen.');
+  });
 
   function formatTime(t){
     const rounded = Math.round(t*10)/10;
@@ -1118,7 +935,6 @@
     }
     cctx.restore();
 
-    updateUnknownHint();
     renderActionList();
   }
   function playerLabel(trackId){
@@ -1146,17 +962,6 @@
       span.appendChild(del);
       actionListEl.appendChild(span);
     });
-  }
-  function updateUnknownHint(){
-    if(selectedFrameIndex < 0 || teamFilterEl.value === 'all'){ unknownHintEl.style.display = 'none'; return; }
-    const frame = frames[selectedFrameIndex];
-    const unknownCount = frame.players.filter(p => effectiveTeam(p.trackId) === 'unknown').length;
-    if(unknownCount > 0){
-      unknownHintEl.textContent = `${unknownCount} Spieler noch nicht eindeutig zugeordnet — nur unter "Alle Spieler" sichtbar und dort per Klick korrigierbar.`;
-      unknownHintEl.style.display = '';
-    } else {
-      unknownHintEl.style.display = 'none';
-    }
   }
   showTrailsEl.addEventListener('change', renderMainDiagram);
   showAllEl.addEventListener('change', renderMainDiagram);
@@ -1269,11 +1074,11 @@
       const track = tracks[closest.trackId];
       const label = prompt('Bezeichnung für diesen Spieler (z.B. Rückennummer):', track.label);
       if(label != null) track.label = label.trim() || track.label;
-      const current = track.teamOverride === 'offense' ? 'o' : track.teamOverride === 'defense' ? 'd' : '';
-      const teamInput = prompt("Team manuell festlegen: 'o' = Offense, 'd' = Defense, leer = automatische Erkennung", current);
+      const teamInput = prompt("Team: 'o' = Offense, 'd' = Defense", track.team === 'offense' ? 'o' : 'd');
       if(teamInput != null){
         const v = teamInput.trim().toLowerCase();
-        track.teamOverride = v === 'o' ? 'offense' : v === 'd' ? 'defense' : null;
+        if(v === 'o') track.team = 'offense';
+        else if(v === 'd') track.team = 'defense';
       }
       renderMainDiagram();
     }
@@ -1321,6 +1126,7 @@
     downloadCanvas(big, `${sanitizeFilename(playNameEl.value)}-storyboard.png`);
   });
 
+  updatePlacementStatus();
   renderMainDiagram();
 })();
 </script>
