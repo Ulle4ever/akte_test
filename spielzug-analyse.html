@@ -64,6 +64,7 @@
   details.card:not([open]) > *:not(summary),
   details.subtoggle:not([open]) > *:not(summary){display:none;}
   .wizard-banner{margin:0 24px 12px;padding:10px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px;font-weight:600;}
+  .callout{font-size:12px;font-weight:600;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;margin:8px 0;}
 </style>
 </head>
 <body>
@@ -139,6 +140,7 @@
         </div>
         <p class="hint">Erfasst ab der aktuellen Videoposition bis zum Ende automatisch per KI-Vorschlag, im gewählten Zeitabstand. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten — bei Fragmentierung hilft "Tracks zusammenführen" im Diagramm.</p>
       </details>
+      <p class="callout">Wichtig: Immer exakt auf die Stelle klicken, an der die <strong>Füße den Boden berühren</strong> — nicht auf Trikot, Kopf oder Körpermitte. Der Klickpunkt wird als Bodenposition auf dem Feld interpretiert; ein falscher Punkt kann die reale Position um mehrere Meter verfälschen, besonders bei seitlichen/schrägen Kamerawinkeln. Die "KI-Vorschlag"-Funktion macht das automatisch richtig (sie erkennt die Fußgelenke) — beim manuellen Setzen musst du selbst darauf achten.</p>
       <div class="row">
         <button id="placeOffenseBtn" disabled>+ Offense-Spieler setzen</button>
         <button id="placeDefenseBtn" class="ghost" disabled>+ Defense-Spieler setzen</button>
