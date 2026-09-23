@@ -154,6 +154,7 @@
       <canvas id="courtCanvas" width="680" height="640"></canvas>
       <p class="hint">Spieler-Punkt <strong>ziehen</strong>, um seine Position in diesem Frame zu korrigieren (gestrichelter Ring = manuell korrigiert). Kurz <strong>klicken</strong> (ohne zu ziehen), um Bezeichnung/Team für alle Frames festzulegen. <strong>Shift+Klick</strong> entfernt einen fälschlich gesetzten Spieler.</p>
       <p class="hint" id="unknownHint" style="display:none;"></p>
+      <div id="playerLegend" class="hint"></div>
       <div class="row">
         <button id="setBallBtn" class="ghost">Ball manuell setzen</button>
         <button id="clearBallBtn" class="ghost">Ball entfernen</button>
@@ -209,6 +210,7 @@
   const discardFrameBtn = document.getElementById('discardFrameBtn');
   const placementStatusEl = document.getElementById('placementStatus');
   const unknownHintEl = document.getElementById('unknownHint');
+  const playerLegendEl = document.getElementById('playerLegend');
   const clearFramesBtn = document.getElementById('clearFramesBtn');
   const galleryEl = document.getElementById('gallery');
   const statusEl = document.getElementById('status');
@@ -956,7 +958,7 @@
     for(let i=0;i<newPositions.length;i++){
       if(result[i]) continue;
       const id = nextTrackId++;
-      tracks[id] = {id, color: trackColor(id), label: String(id), team: newPositions[i].team};
+      tracks[id] = {id, color: trackColor(id), label: String(id), name: null, team: newPositions[i].team};
       result[i] = {x:newPositions[i].x, y:newPositions[i].y, trackId:id};
     }
     return result;
@@ -1186,7 +1188,16 @@
     cctx.restore();
 
     updateUnknownHint();
+    renderPlayerLegend();
     renderActionList();
+  }
+  function renderPlayerLegend(){
+    const frame = frames[selectedFrameIndex];
+    const named = visiblePlayers(frame).map(p => tracks[p.trackId]).filter(t => t && t.name);
+    if(!named.length){ playerLegendEl.innerHTML = ''; return; }
+    playerLegendEl.innerHTML = 'Namen: ' + named.map(t =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${t.color};"></span>${t.label} – ${t.name}</span>`
+    ).join('');
   }
   function updateUnknownHint(){
     const frame = frames[selectedFrameIndex];
@@ -1200,7 +1211,8 @@
   }
   function playerLabel(trackId){
     const t = tracks[trackId];
-    return t ? t.label : '?';
+    if(!t) return '?';
+    return t.name ? `${t.label} (${t.name})` : t.label;
   }
   function renderActionList(){
     actionListEl.innerHTML = '';
@@ -1353,7 +1365,8 @@
         const num = numInput.trim();
         if(num){
           const match = roster.find(r => r.number === num);
-          track.label = match ? `${num} ${match.name}` : num;
+          track.label = num;
+          track.name = match ? match.name : null;
         }
       }
       renderMainDiagram();
