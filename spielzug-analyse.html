@@ -116,7 +116,7 @@
 
     <details class="card" id="calibCard" open>
       <summary><span class="step-badge">2</span> Spielfeld kalibrieren <span id="calibSummaryHint" class="muted" style="font-weight:400;"></span></summary>
-      <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen. Wichtig: Die Punkte dürfen nicht alle auf derselben Linie liegen (z.B. nicht nur entlang der Grundlinie) &mdash; nimm mindestens einen Punkt, der weiter in die Tiefe des Feldes zeigt (z.B. Freiwurflinie oder Mittellinie), sonst lässt sich die Kalibrierung nicht eindeutig berechnen.</p>
+      <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen. Wichtig: Die Punkte dürfen nicht alle auf derselben Linie liegen (z.B. nicht nur entlang der Grundlinie) &mdash; nimm mindestens einen Punkt, der weiter in die Tiefe des Feldes zeigt (z.B. Freiwurflinie oder Mittellinie), sonst lässt sich die Kalibrierung nicht eindeutig berechnen. Genauso wichtig: die Punkte sollten möglichst über den <strong>gesamten Bereich verteilt sein, in dem später Spieler stehen</strong> &mdash; nur den Freiwurfraum zu kalibrieren reicht nicht, auch wenn er am leichtesten zu erkennen ist. Je enger die Punkte beieinanderliegen, desto ungenauer wird die Position für alles, was weiter weg davon angeklickt wird.</p>
       <div class="row">
         <button id="calibEditBtn">Kalibrierung bearbeiten</button>
         <button id="calibResetBtn" class="ghost">Punkte zurücksetzen</button>
@@ -451,9 +451,11 @@
     if(canReuse && liveHomography){
       homography = liveHomography;
       committedSensitivity = calibSensitivity;
+      committedCoverageFrac = calibCoverageFrac;
       setCalibMode(false);
-      calibStatus.textContent = `Kalibrierung vom vorherigen Video übernommen (gleiche Auflösung erkannt, ${anchored.size} Referenzpunkte). Frames können direkt erfasst werden - bei Bedarf über "Kalibrierung bearbeiten" anpassen.`;
-      calibStatus.className = 'hint ok';
+      const carryOverMsg = calibSensitivityMessage(committedSensitivity, committedCoverageFrac, true);
+      calibStatus.textContent = `Kalibrierung vom vorherigen Video übernommen (gleiche Auflösung erkannt, ${anchored.size} Referenzpunkte). Frames können direkt erfasst werden - bei Bedarf über "Kalibrierung bearbeiten" anpassen.${carryOverMsg.text}`;
+      calibStatus.className = carryOverMsg.text ? 'hint err' : 'hint ok';
     } else {
       resetCalibPoints();
       setCalibMode(true);
@@ -593,32 +595,61 @@
       return Infinity;
     }
   }
+  // The check above only reveals whether the calibration is over-fit to noise IN THE HANDLES
+  // THEMSELVES - it says nothing about whether the same calibration stays usable for a player
+  // standing far from those handles (e.g. all 4 points clustered inside the free-throw key, but
+  // players get clicked anywhere across the visible court). A calibration can be perfectly stable
+  // right at its own anchor points while still placing a player 20+ meters off-court elsewhere -
+  // and projecting arbitrary pixels elsewhere in the frame can't tell the difference either, since a
+  // GOOD calibration also projects genuinely off-court pixels (crowd, ceiling) to wild real-world
+  // coordinates entirely correctly. What's actually checkable without guessing at frame content is
+  // simpler: how much of the COURT'S OWN extent do the anchored points themselves span? Points
+  // confined to a small fraction of the court's width/depth (e.g. just the free-throw key, ~33%
+  // wide/41% deep) have to extrapolate far beyond where they were anchored for anything else - and
+  // since a captured play typically spans much more of the half-court than just the paint, that
+  // extrapolation is almost guaranteed to happen.
+  const COURT_WIDTH_M = 15, COURT_DEPTH_M = 14;
+  function assessCourtSpanCoverage(realPts){
+    const xs = realPts.map(p=>p[0]), ys = realPts.map(p=>p[1]);
+    const fracX = (Math.max(...xs) - Math.min(...xs)) / COURT_WIDTH_M;
+    const fracY = (Math.max(...ys) - Math.min(...ys)) / COURT_DEPTH_M;
+    return Math.min(fracX, fracY);
+  }
   const CALIB_SENSITIVITY_WARN_M = 0.5;
-  // Above this, the calibration isn't just imprecise, it's practically unusable (e.g. all anchored
-  // points sit on - or very near - the same straight line, such as picking only points along one
-  // visible baseline). Below this line it's a soft warning the user can still commit past; at or
-  // above it, committing is blocked outright so a silently-broken calibration never looks "ready".
+  // Above this, the calibration isn't just imprecise, it's practically unusable - the anchored
+  // points sit on (or very near) the same straight line (e.g. only along one baseline). Below this
+  // line it's a soft warning the user can still commit past; at or above it, committing is blocked
+  // outright so a silently-broken calibration never looks "ready".
   const CALIB_SENSITIVITY_BLOCK_M = 3;
-  function calibSensitivityMessage(sensitivity, hasHomography){
-    if(!hasHomography || sensitivity == null || !isFinite(sensitivity) || sensitivity > CALIB_SENSITIVITY_BLOCK_M){
+  // Below this fraction of the court's width/depth, warn that the points are too clustered to
+  // reliably cover the whole visible play - not a hard block, since a tightly-zoomed shot that
+  // genuinely never shows more of the court than this is a legitimate (if unusual) case.
+  const COURT_COVERAGE_WARN_FRAC = 0.5;
+  function calibSensitivityMessage(pointSensitivity, coverageFrac, hasHomography){
+    if(!hasHomography || pointSensitivity == null || !isFinite(pointSensitivity) || pointSensitivity > CALIB_SENSITIVITY_BLOCK_M){
       return { blocking: true, text: ' ⚠️ Diese Punkte lassen sich nicht eindeutig zu einer Feld-Kalibrierung auflösen — sie liegen (fast) exakt auf einer Linie (z.B. alle auf derselben Grundlinie). Wähle mindestens einen zusätzlichen Punkt, der in die Tiefe des Feldes zeigt (z.B. Freiwurflinie, Mittellinie oder Drei-Punkte-Bogen), statt nur entlang einer einzigen Linie.' };
     }
-    if(sensitivity > CALIB_SENSITIVITY_WARN_M){
-      return { blocking: false, text: ` ⚠️ Diese Kalibrierung reagiert empfindlich auf kleine Ungenauigkeiten (~${sensitivity.toFixed(1)} m Verschiebung schon bei wenigen Pixeln Abweichung) — die gesetzten Punkte liegen vermutlich zu nah beieinander oder fast auf einer Linie. Für zuverlässigere Positionen weiter auseinanderliegende Punkte wählen.` };
+    const lowCoverage = coverageFrac != null && coverageFrac < COURT_COVERAGE_WARN_FRAC;
+    if(lowCoverage){
+      return { blocking: false, text: ' ⚠️ Die gesetzten Punkte decken nur einen kleinen Teil des Spielfelds ab (z.B. nur den Freiwurfraum) — für Spieler außerhalb dieses Bereichs kann die berechnete Position um mehrere Meter danebenliegen, im Extremfall weit außerhalb des Feldes. Falls im Video mehr vom Feld sichtbar ist, zusätzliche, weiter auseinanderliegende Referenzpunkte setzen (z.B. Mittellinie, Drei-Punkte-Bogen oder Seitenlinien).' };
+    }
+    if(pointSensitivity > CALIB_SENSITIVITY_WARN_M){
+      return { blocking: false, text: ` ⚠️ Diese Kalibrierung reagiert empfindlich auf kleine Ungenauigkeiten (~${pointSensitivity.toFixed(1)} m Verschiebung schon bei wenigen Pixeln Abweichung) — die gesetzten Punkte liegen vermutlich zu nah beieinander oder fast auf einer Linie. Für zuverlässigere Positionen weiter auseinanderliegende Punkte wählen.` };
     }
     return { blocking: false, text: '' };
   }
-  let calibSensitivity = null;
-  let committedSensitivity = null; // sensitivity of the currently active (committed) calibration
+  let calibSensitivity = null, calibCoverageFrac = null;
+  let committedSensitivity = null, committedCoverageFrac = null; // of the currently active (committed) calibration
   function recomputeLiveCalibration(){
     const pts = HANDLES.filter(h=>anchored.has(h.id));
-    if(pts.length < 4){ liveHomography = null; liveDisplayHomography = null; calibSensitivity = null; return; }
+    if(pts.length < 4){ liveHomography = null; liveDisplayHomography = null; calibSensitivity = null; calibCoverageFrac = null; return; }
     const realPts = pts.map(h=>[h.rx,h.ry]);
     const nativePts = pts.map(h=>[handlePos[h.id].x, handlePos[h.id].y]);
     try{
       liveHomography = computeHomography(nativePts, realPts);       // native -> real
       liveDisplayHomography = computeHomography(realPts, nativePts); // real -> native
       calibSensitivity = assessCalibrationSensitivity(nativePts, realPts);
+      calibCoverageFrac = assessCourtSpanCoverage(realPts);
       HANDLES.forEach(h=>{
         if(!anchored.has(h.id)){
           const [nx,ny] = applyHomography(liveDisplayHomography, h.rx, h.ry);
@@ -626,25 +657,20 @@
         }
       });
     }catch(e){
-      liveHomography = null; liveDisplayHomography = null; calibSensitivity = null;
+      liveHomography = null; liveDisplayHomography = null; calibSensitivity = null; calibCoverageFrac = null;
     }
-  }
-  function calibSensitivityWarning(sensitivity){
-    if(sensitivity == null || sensitivity <= CALIB_SENSITIVITY_WARN_M) return '';
-    const m = sensitivity > 100 ? '> 100' : sensitivity.toFixed(1);
-    return ` ⚠️ Diese Kalibrierung reagiert empfindlich auf kleine Ungenauigkeiten (~${m} m Verschiebung schon bei wenigen Pixeln Abweichung) — die gesetzten Punkte liegen vermutlich zu nah beieinander oder fast auf einer Linie. Für zuverlässigere Positionen weiter auseinanderliegende Punkte wählen.`;
   }
   function updateCalibStatus(){
     // The calibration card auto-collapses once committed (see setCalibMode) - a short echo of the
     // status stays in the summary line itself so a sensitivity warning is never hidden just because
     // the card is closed, and so it's clear at a glance whether recalibration is worth opening for.
     if(homography && !calibMode){
-      const warning = calibSensitivityWarning(committedSensitivity);
-      calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.${warning}`;
-      calibStatus.className = warning ? 'hint err' : 'hint ok';
-      calibSummaryHintEl.textContent = warning ? '· ⚠️ Kalibrierung prüfen' : '· kalibriert ✓';
+      const msg = calibSensitivityMessage(committedSensitivity, committedCoverageFrac, true);
+      calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.${msg.text}`;
+      calibStatus.className = msg.text ? 'hint err' : 'hint ok';
+      calibSummaryHintEl.textContent = msg.text ? '· ⚠️ Kalibrierung prüfen' : '· kalibriert ✓';
     } else if(anchored.size >= 4){
-      const msg = calibSensitivityMessage(calibSensitivity, !!liveHomography);
+      const msg = calibSensitivityMessage(calibSensitivity, calibCoverageFrac, !!liveHomography);
       calibStatus.textContent = msg.blocking
         ? `${anchored.size} Punkte gesetzt, aber so nicht verwendbar.${msg.text}`
         : `${anchored.size} Punkte gesetzt. Passt die Ausrichtung? Dann "Kalibrierung übernehmen" klicken.${msg.text}`;
@@ -656,8 +682,9 @@
       calibSummaryHintEl.textContent = '';
     }
     // Blocked when the anchored points can't be resolved into a usable calibration (e.g. all on one
-    // line) - otherwise the button looks ready but committing would silently do nothing.
-    calibCommitBtn.disabled = !calibMode || anchored.size < 4 || calibSensitivityMessage(calibSensitivity, !!liveHomography).blocking;
+    // line, or clustered so tightly they don't generalize to the rest of the visible court) -
+    // otherwise the button looks ready but committing would silently do nothing or produce garbage.
+    calibCommitBtn.disabled = !calibMode || anchored.size < 4 || calibSensitivityMessage(calibSensitivity, calibCoverageFrac, !!liveHomography).blocking;
     calibResetBtn.disabled = !calibMode;
   }
   function updateOverlayInteractivity(){
@@ -688,6 +715,7 @@
     if(!liveHomography) return;
     homography = liveHomography;
     committedSensitivity = calibSensitivity;
+    committedCoverageFrac = calibCoverageFrac;
     lastCalibration = {
       videoWidth: video.videoWidth, videoHeight: video.videoHeight,
       handlePos: Object.fromEntries(Array.from(anchored).map(id=>[id, {...handlePos[id]}])),
