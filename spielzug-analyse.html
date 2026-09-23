@@ -1006,7 +1006,20 @@
       await tf.setBackend('webgl'); await tf.ready();
       poseDetector = await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
-        {modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING}
+        {
+          modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
+          // Broadcast footage typically shows players small and distant (the whole point of this
+          // tool is capturing a wide tactical view, not a close-up) - the library's default 256px
+          // internal resize compresses that even further before the model ever sees it. Raising this
+          // (up to the library's recommended max of 512, must be a multiple of 32) trades some speed
+          // for meaningfully better detection of small/far-away figures.
+          multiPoseMaxDimension: 480,
+          // Default is tuned conservatively to avoid noisy false positives; since every suggestion
+          // still requires manual review (shift+click removes outliers) and we additionally filter
+          // by per-keypoint ankle/hip confidence in getFootPoint() below, it's worth accepting more
+          // borderline-confidence poses here rather than silently dropping real players.
+          minPoseScore: 0.15,
+        }
       );
     }catch(e){
       console.error(e);
@@ -1015,30 +1028,64 @@
     modelLoading = false;
     updatePlacementEnabled();
   }
+  // A calibration built from points confined to a small part of the court (see calibCoverageFrac)
+  // has to extrapolate further for anything else, so its projected positions for genuine players can
+  // land further from the true court boundary than a normal calibration's would - the "is this even
+  // remotely near the court" sanity filter below loosens a little accordingly. Deliberately kept
+  // modest (not wide open): the real fix for a poor-coverage calibration is fixing the calibration
+  // itself (already flagged clearly via calibSensitivityMessage), not accepting ever more distant,
+  // increasingly likely-to-be-false-positive candidates as a substitute.
+  function courtMarginForCalibration(){
+    return (committedCoverageFrac != null && committedCoverageFrac < 0.5) ? 5 : 3;
+  }
   // Core of "KI-Vorschlag", factored out so both the manual button and the auto-capture loop
-  // (below) share the exact same detection+classification logic.
-  async function runAiSuggestion(){
+  // (below) share the exact same detection+classification logic. With aggregate=true (the manual
+  // button), samples a few nearby moments in addition to the exact current instant and merges the
+  // results - a player who's momentarily blurred or occluded at this one precise frame is often
+  // clearly detectable a fraction of a second before or after, so this catches misses that a single
+  // snapshot never would. The auto-capture loop passes aggregate=false to stay fast, since it already
+  // samples the whole play at regular intervals and can rely on "Tracks zusammenführen" for gaps.
+  const AI_AGGREGATION_OFFSETS_S = [0, -0.2, 0.2];
+  const AI_DEDUP_DIST_M = 0.8; // treat detections this close together as the same player
+  async function runAiSuggestion(aggregate){
     if(!homography || !poseDetector) return {added:0, guessed:0};
-    const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
-    // Sample jersey colors from this exact frame, if offense/defense colors were configured,
-    // so the suggestion can pre-fill a team guess instead of always leaving it unresolved.
-    const fullCanvas = document.createElement('canvas');
-    fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
-    const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
-    fullCtx.drawImage(video, 0, 0);
-    // Anything projected well outside the court is almost certainly not a player - a
-    // spectator, bench personnel, or a stray false-positive - not worth suggesting.
-    const COURT_MARGIN_M = 3;
+    const courtMargin = courtMarginForCalibration();
+    const originalTime = video.currentTime;
+    const duration = video.duration || 0;
+    const offsets = aggregate ? AI_AGGREGATION_OFFSETS_S : [0];
+    const candidates = []; // {x, y, nx, ny, team, score}
+    for(const offset of offsets){
+      const t = Math.max(0, Math.min(duration, originalTime + offset));
+      if(t !== video.currentTime) await seekAndWaitApp(t);
+      const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
+      // Sample jersey colors from this exact sampled frame, if offense/defense colors were
+      // configured, so the suggestion can pre-fill a team guess instead of always leaving it open.
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+      const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
+      fullCtx.drawImage(video, 0, 0);
+      poses.forEach(pose=>{
+        const foot = getFootPoint(pose.keypoints);
+        if(!foot) return;
+        const [cx,cy] = applyHomography(homography, foot.x, foot.y);
+        // Anything projected well outside the court is almost certainly not a player - a
+        // spectator, bench personnel, or a stray false-positive - not worth suggesting.
+        if(cx < -courtMargin || cx > 15+courtMargin || cy < -courtMargin || cy > 14+courtMargin) return;
+        const score = pose.score || 0;
+        const dupIdx = candidates.findIndex(c => Math.hypot(c.x-cx,c.y-cy) < AI_DEDUP_DIST_M);
+        if(dupIdx >= 0){
+          if(score > candidates[dupIdx].score) candidates[dupIdx] = {x:cx, y:cy, nx:foot.x, ny:foot.y, team: classifyTeam(torsoAverageColor(fullCtx, pose.keypoints)), score};
+          return;
+        }
+        candidates.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team: classifyTeam(torsoAverageColor(fullCtx, pose.keypoints)), score});
+      });
+    }
+    if(video.currentTime !== originalTime) await seekAndWaitApp(originalTime);
     let added = 0, guessed = 0;
-    poses.forEach(pose=>{
-      const foot = getFootPoint(pose.keypoints);
-      if(!foot) return;
-      const [cx,cy] = applyHomography(homography, foot.x, foot.y);
-      if(cx < -COURT_MARGIN_M || cx > 15+COURT_MARGIN_M || cy < -COURT_MARGIN_M || cy > 14+COURT_MARGIN_M) return;
-      if(pendingPositions.some(p => Math.hypot(p.x-cx,p.y-cy) < 0.8)) return; // already have a point there
-      const team = classifyTeam(torsoAverageColor(fullCtx, pose.keypoints));
-      if(team !== 'unknown') guessed++;
-      pendingPositions.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team});
+    candidates.forEach(c=>{
+      if(pendingPositions.some(p => Math.hypot(p.x-c.x,p.y-c.y) < 0.8)) return; // already have a point there
+      if(c.team !== 'unknown') guessed++;
+      pendingPositions.push({x:c.x, y:c.y, nx:c.nx, ny:c.ny, team:c.team});
       added++;
     });
     renderCalibOverlay();
@@ -1050,9 +1097,9 @@
     await loadModelIfNeeded();
     if(!poseDetector) return;
     aiSuggestBtn.disabled = true;
-    setStatus('KI analysiert aktuellen Moment…');
+    setStatus('KI analysiert aktuellen Moment (prüft auch benachbarte Momente für Spieler, die kurz verdeckt sind)…');
     try{
-      const {added, guessed} = await runAiSuggestion();
+      const {added, guessed} = await runAiSuggestion(true);
       const guessHint = guessed ? ` Team bei ${guessed} davon anhand der Trikotfarbe vorgeschlagen (bitte gegenprüfen).` : '';
       setStatus(`KI-Vorschlag: ${added} Position(en) hinzugefügt.${guessHint} Ausreißer mit Shift+Klick entfernen, fehlende Spieler manuell ergänzen.`, 'ok');
     }catch(e){
@@ -1330,7 +1377,7 @@
       await new Promise(r=>setTimeout(r, 30)); // let the seeked frame actually paint before sampling it
       setStatus(`Automatische Erfassung: ${formatTime(t)} / ${formatTime(duration)}…`);
       try{
-        await runAiSuggestion();
+        await runAiSuggestion(false); // stay fast across the whole play - single sample per step
         const count = finishCurrentFrame();
         // Nothing detected at this one instant - skip it and keep going instead of abandoning the
         // rest of the play; a single missed moment (occlusion, camera glare) shouldn't end the scan.
