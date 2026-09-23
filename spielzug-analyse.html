@@ -1479,8 +1479,42 @@
     ctx.restore();
   }
 
-  const OX = 40, OY = 600, S = 40;
+  // The diagram's origin/scale used to be fixed to exactly the half-court rectangle, with only a
+  // fixed 40px margin around it - any player placed even slightly outside that rectangle (baseline,
+  // bench area, a slightly imprecise calibration) got silently clipped off the edge of the canvas,
+  // looking like the click "didn't register" even though the position was stored correctly. Instead,
+  // the view now fits itself to include every player/ball position across the WHOLE captured play,
+  // never just the fixed court bounds.
+  let OX = 40, OY = 600, S = 40;
+  const DIAGRAM_MARGIN_PX = 40;
+  const DIAGRAM_PAD_M = 0.8; // breathing room beyond the outermost player, not flush to the canvas edge
+  function computeCourtFit(points){
+    let minX = 0, maxX = 15, minY = 0, maxY = 14;
+    points.forEach(p=>{
+      if(p.x < minX) minX = p.x;
+      if(p.x > maxX) maxX = p.x;
+      if(p.y < minY) minY = p.y;
+      if(p.y > maxY) maxY = p.y;
+    });
+    minX -= DIAGRAM_PAD_M; maxX += DIAGRAM_PAD_M; minY -= DIAGRAM_PAD_M; maxY += DIAGRAM_PAD_M;
+    const availW = courtCanvas.width - DIAGRAM_MARGIN_PX*2, availH = courtCanvas.height - DIAGRAM_MARGIN_PX*2;
+    const s = Math.min(availW/(maxX-minX), availH/(maxY-minY));
+    return { ox: DIAGRAM_MARGIN_PX - minX*s, oy: DIAGRAM_MARGIN_PX + maxY*s, s };
+  }
+  // Fit is computed from EVERY frame's players/ball, not just the selected one, and reused for all
+  // of them - otherwise switching frames (or toggling "gesamten Spielzug überlagern") would rescale
+  // the view underneath a movement trail, making arrows between frames geometrically wrong.
+  function updateDiagramFit(){
+    const pts = [];
+    frames.forEach(f=>{
+      f.players.forEach(p=>pts.push(p));
+      if(f.ball) pts.push(f.ball);
+    });
+    const fit = computeCourtFit(pts);
+    OX = fit.ox; OY = fit.oy; S = fit.s;
+  }
   function renderMainDiagram(){
+    updateDiagramFit();
     cctx.clearRect(0,0,courtCanvas.width,courtCanvas.height);
     drawCourt(cctx, OX, OY, S);
     if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
@@ -1732,9 +1766,24 @@
   });
   exportAllBtn.addEventListener('click', ()=>{
     if(!frames.length){ alert('Keine Frames vorhanden.'); return; }
+    // Same reasoning as the main diagram: don't hard-crop to exactly the 15x14m court rectangle -
+    // grow each cell to include every player/ball position across the whole play instead of
+    // clipping anyone standing outside it.
+    let minX = 0, maxX = 15, minY = 0, maxY = 14;
+    frames.forEach(f=>{
+      f.players.forEach(p=>{
+        if(p.x < minX) minX = p.x; if(p.x > maxX) maxX = p.x;
+        if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
+      });
+      if(f.ball){
+        if(f.ball.x < minX) minX = f.ball.x; if(f.ball.x > maxX) maxX = f.ball.x;
+        if(f.ball.y < minY) minY = f.ball.y; if(f.ball.y > maxY) maxY = f.ball.y;
+      }
+    });
+    minX -= DIAGRAM_PAD_M; maxX += DIAGRAM_PAD_M; minY -= DIAGRAM_PAD_M; maxY += DIAGRAM_PAD_M;
     const s2 = 15, marginX = 20, marginY = 20, capH = 18;
     const titleH = playNameEl.value.trim() ? 28 : 0;
-    const cellW = 15*s2 + marginX*2, cellH = 14*s2 + marginY*2 + capH;
+    const cellW = (maxX-minX)*s2 + marginX*2, cellH = (maxY-minY)*s2 + marginY*2 + capH;
     const cols = Math.min(4, frames.length);
     const rows = Math.ceil(frames.length/cols);
     const big = document.createElement('canvas');
@@ -1747,7 +1796,7 @@
     }
     frames.forEach((f,i)=>{
       const col = i%cols, row = Math.floor(i/cols);
-      const ox = col*cellW + marginX, oy = row*cellH + marginY + 14*s2 + titleH;
+      const ox = col*cellW + marginX - minX*s2, oy = row*cellH + marginY + maxY*s2 + titleH;
       bctx.save();
       bctx.translate(0, capH);
       drawCourt(bctx, ox, oy, s2);
