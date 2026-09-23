@@ -47,6 +47,23 @@
   #courtCanvas{width:100%;max-width:680px;background:#fdfaf3;border-radius:8px;border:1px solid var(--line);}
   label.opt{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);}
   .hint{font-size:12px;color:var(--muted);margin-top:6px;}
+  details.card > summary{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;}
+  details.card > summary::-webkit-details-marker{display:none;}
+  details.card > summary::before{content:'▸';display:inline-block;width:14px;color:var(--muted);transition:transform .15s;flex:none;}
+  details.card[open] > summary::before{transform:rotate(90deg);}
+  details.subtoggle{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);}
+  details.subtoggle > summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);list-style:none;display:flex;align-items:center;gap:6px;}
+  details.subtoggle > summary::-webkit-details-marker{display:none;}
+  details.subtoggle > summary::before{content:'▸';display:inline-block;width:12px;color:var(--muted);transition:transform .15s;flex:none;font-size:11px;}
+  details.subtoggle[open] > summary::before{transform:rotate(90deg);}
+  details.subtoggle > *:not(summary){margin-top:8px;}
+  /* A direct child that sets its own "display" (e.g. .row's display:flex) otherwise overrides the
+     browser's built-in "hide non-summary content while closed" rule, because author CSS always wins
+     over the user-agent stylesheet for that property regardless of selector specificity - without
+     this, a collapsed card would look closed but its buttons/inputs would stay fully clickable. */
+  details.card:not([open]) > *:not(summary),
+  details.subtoggle:not([open]) > *:not(summary){display:none;}
+  .wizard-banner{margin:0 24px 12px;padding:10px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px;font-weight:600;}
 </style>
 </head>
 <body>
@@ -54,6 +71,8 @@
   <h1>Spielzug-Analyse — Video zu Taktik-Diagramm</h1>
   <p>Lädt ein Spielvideo, wandelt die Feldlinien-Kalibrierung in echte Feld-Koordinaten um und lässt dich Spielerpositionen direkt im Video anklicken — daraus entsteht automatisch ein geometrisch korrektes Taktik-Diagramm, ohne dass du es selbst zeichnen musst.</p>
 </header>
+
+<div id="wizardBanner" class="wizard-banner">Schritt 1 von 4: Video laden, um zu beginnen.</div>
 
 <div class="wrap">
   <div>
@@ -74,8 +93,8 @@
       <p class="hint">Am besten Videos aus erhöhter Kameraposition, bei denen zumindest ein paar Feldlinien sichtbar sind. Die Steuerung oben funktioniert auch während der Kalibrierung.</p>
     </div>
 
-    <div class="card">
-      <h2><span class="step-badge">2</span> Kader &amp; Trikotfarben (optional)</h2>
+    <details class="card" id="rosterCard">
+      <summary><span class="step-badge" style="background:var(--muted);">★</span> Kader &amp; Trikotfarben (optional)</summary>
       <p class="muted">Hilft der KI-Vorschlag-Funktion, Team und Rückennummer automatisch vorzuschlagen. Ohne diese Angaben funktioniert alles weiterhin rein manuell.</p>
       <div class="row" style="align-items:center;">
         <label class="opt">Offense-Trikot <input type="color" id="offenseColor" value="#ffffff"></label>
@@ -92,10 +111,10 @@
           <textarea id="defenseRoster" rows="4" placeholder="5 Gegner&#10;11 Gegner" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;"></textarea>
         </label>
       </div>
-    </div>
+    </details>
 
-    <div class="card">
-      <h2><span class="step-badge">3</span> Spielfeld kalibrieren</h2>
+    <details class="card" id="calibCard" open>
+      <summary><span class="step-badge">2</span> Spielfeld kalibrieren <span id="calibSummaryHint" class="muted" style="font-weight:400;"></span></summary>
       <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon &mdash; egal welche &mdash; auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen.</p>
       <div class="row">
         <button id="calibEditBtn">Kalibrierung bearbeiten</button>
@@ -103,20 +122,23 @@
         <button id="calibCommitBtn" class="accent" disabled>Kalibrierung übernehmen</button>
       </div>
       <div id="calibStatus" class="hint">Video laden, um zu kalibrieren.</div>
-    </div>
+    </details>
 
     <div class="card">
-      <h2><span class="step-badge">4</span> Frames erfassen</h2>
+      <h2><span class="step-badge">3</span> Frames erfassen</h2>
       <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren. Entweder "KI-Vorschlag" für eine automatische Grobschätzung nutzen (danach prüfen/korrigieren), oder Team wählen und Spieler direkt im Video anklicken. Beides lässt sich mischen.</p>
       <div class="row">
         <button id="aiSuggestBtn" class="ghost" disabled>KI-Vorschlag für aktuellen Moment</button>
       </div>
-      <div class="row" style="align-items:center;">
-        <label class="opt">Intervall <input type="number" id="autoInterval" value="1.5" min="0.3" step="0.1" style="width:60px;"> s</label>
-        <button id="autoCaptureBtn" class="ghost" disabled>Ganzen Spielzug automatisch erfassen (KI)</button>
-        <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
-      </div>
-      <p class="hint">Erfasst ab der aktuellen Videoposition bis zum Ende automatisch per KI-Vorschlag, im gewählten Zeitabstand. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten — bei Fragmentierung hilft "Tracks zusammenführen" im Diagramm.</p>
+      <details class="subtoggle">
+        <summary>Erweitert: Ganzen Spielzug automatisch erfassen</summary>
+        <div class="row" style="align-items:center;">
+          <label class="opt">Intervall <input type="number" id="autoInterval" value="1.5" min="0.3" step="0.1" style="width:60px;"> s</label>
+          <button id="autoCaptureBtn" class="ghost" disabled>Ganzen Spielzug automatisch erfassen (KI)</button>
+          <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
+        </div>
+        <p class="hint">Erfasst ab der aktuellen Videoposition bis zum Ende automatisch per KI-Vorschlag, im gewählten Zeitabstand. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten — bei Fragmentierung hilft "Tracks zusammenführen" im Diagramm.</p>
+      </details>
       <div class="row">
         <button id="placeOffenseBtn" disabled>+ Offense-Spieler setzen</button>
         <button id="placeDefenseBtn" class="ghost" disabled>+ Defense-Spieler setzen</button>
@@ -130,12 +152,15 @@
       </div>
       <p class="hint">Für einen weiteren Frame (z.B. Endposition eines Laufwegs) im Video weiterscrubben und erneut Positionen setzen — Spieler werden anhand der Nähe zur vorherigen Position automatisch demselben Punkt zugeordnet (Farbe/Nummer bleibt erhalten), Abbrechen der Positionierung mit Esc.</p>
       <div id="gallery"></div>
-      <div class="row" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
-        <button id="saveProjectBtn" class="ghost">Projekt speichern (JSON)</button>
-        <button id="loadProjectBtn" class="ghost">Projekt laden (JSON)</button>
-        <input type="file" id="projectFileInput" accept="application/json" style="display:none;">
-      </div>
-      <p class="hint">Sichert Frames, Spieler, Namen, Kader und Trikotfarben dieses Spielzugs in einer Datei (nicht das Video selbst) — damit lässt sich die Analyse später fortsetzen oder als Playbook-Eintrag archivieren, ohne bei einem Absturz oder versehentlich geschlossenen Tab alles zu verlieren.</p>
+      <details class="subtoggle">
+        <summary>Erweitert: Projekt sichern / laden</summary>
+        <div class="row">
+          <button id="saveProjectBtn" class="ghost">Projekt speichern (JSON)</button>
+          <button id="loadProjectBtn" class="ghost">Projekt laden (JSON)</button>
+          <input type="file" id="projectFileInput" accept="application/json" style="display:none;">
+        </div>
+        <p class="hint">Sichert Frames, Spieler, Namen, Kader und Trikotfarben dieses Spielzugs in einer Datei (nicht das Video selbst) — damit lässt sich die Analyse später fortsetzen oder als Playbook-Eintrag archivieren, ohne bei einem Absturz oder versehentlich geschlossenen Tab alles zu verlieren.</p>
+      </details>
     </div>
 
     <div id="status">Video laden, um zu beginnen.</div>
@@ -143,7 +168,7 @@
 
   <div>
     <div class="card">
-      <h2><span class="step-badge">5</span> Taktik-Diagramm</h2>
+      <h2><span class="step-badge">4</span> Taktik-Diagramm</h2>
       <div class="row">
         <label class="opt" style="flex:1;min-width:240px;">Play-Bezeichnung:
           <input type="text" id="playName" placeholder="z.B. Gegner #23 – High Pick and Roll" style="flex:1;min-width:180px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;">
@@ -171,25 +196,28 @@
         <button id="setBallBtn" class="ghost">Ball manuell setzen</button>
         <button id="clearBallBtn" class="ghost">Ball entfernen</button>
       </div>
-      <div class="row" style="align-items:center;">
-        <label class="opt">Aktion:
-          <select id="actionType">
-            <option value="pass">Pass</option>
-            <option value="block">Block/Screen</option>
-            <option value="dribble">Dribbling</option>
-            <option value="cut">Cut</option>
-            <option value="shot">Wurf</option>
-          </select>
-        </label>
-        <button id="addActionBtn" class="ghost">Aktion markieren…</button>
-        <button id="clearActionsBtn" class="ghost">Aktionen (Frame) löschen</button>
-      </div>
-      <p class="hint">Bei Pass/Block danach zwei Spieler im Diagramm anklicken (erst Ausgangs-, dann Zielspieler), bei den anderen einen.</p>
-      <div id="actionList"></div>
-      <div class="row" style="align-items:center;">
-        <button id="mergeTracksBtn" class="ghost">Tracks zusammenführen…</button>
-      </div>
-      <p class="hint">Falls ein Spieler durch einen Erkennungsaussetzer eine neue Nummer bekommen hat: Button klicken, dann nacheinander den bestehenden Punkt und den fälschlich neuen Punkt anklicken (auch in unterschiedlichen Frames über die Galerie erreichbar) — beide werden zu einem Spieler zusammengeführt.</p>
+      <details class="subtoggle">
+        <summary>Erweitert: Aktionen markieren &amp; Tracks zusammenführen</summary>
+        <div class="row" style="align-items:center;">
+          <label class="opt">Aktion:
+            <select id="actionType">
+              <option value="pass">Pass</option>
+              <option value="block">Block/Screen</option>
+              <option value="dribble">Dribbling</option>
+              <option value="cut">Cut</option>
+              <option value="shot">Wurf</option>
+            </select>
+          </label>
+          <button id="addActionBtn" class="ghost">Aktion markieren…</button>
+          <button id="clearActionsBtn" class="ghost">Aktionen (Frame) löschen</button>
+        </div>
+        <p class="hint">Bei Pass/Block danach zwei Spieler im Diagramm anklicken (erst Ausgangs-, dann Zielspieler), bei den anderen einen.</p>
+        <div id="actionList"></div>
+        <div class="row" style="align-items:center;">
+          <button id="mergeTracksBtn" class="ghost">Tracks zusammenführen…</button>
+        </div>
+        <p class="hint">Falls ein Spieler durch einen Erkennungsaussetzer eine neue Nummer bekommen hat: Button klicken, dann nacheinander den bestehenden Punkt und den fälschlich neuen Punkt anklicken (auch in unterschiedlichen Frames über die Galerie erreichbar) — beide werden zu einem Spieler zusammengeführt.</p>
+      </details>
       <div class="row">
         <button id="exportFrameBtn" class="accent">Diagramm als PNG</button>
         <button id="exportAllBtn" class="ghost">Alle Frames als Storyboard exportieren</button>
@@ -213,6 +241,7 @@
   const calibResetBtn = document.getElementById('calibResetBtn');
   const calibCommitBtn = document.getElementById('calibCommitBtn');
   const calibStatus = document.getElementById('calibStatus');
+  const calibSummaryHintEl = document.getElementById('calibSummaryHint');
   const offenseColorEl = document.getElementById('offenseColor');
   const defenseColorEl = document.getElementById('defenseColor');
   const pickOffenseBtn = document.getElementById('pickOffenseBtn');
@@ -259,6 +288,25 @@
   const stepFwdBtn = document.getElementById('stepFwdBtn');
   const seekSlider = document.getElementById('seekSlider');
   const timeLabel = document.getElementById('timeLabel');
+  const wizardBannerEl = document.getElementById('wizardBanner');
+  const calibCardEl = document.getElementById('calibCard');
+
+  // ---------- wizard banner: a lightweight "what do I do next" guide. The video (needed for
+  // scrubbing to every frame) and the diagram (needed to see results while still capturing more
+  // frames) both stay visible at all times - only the guidance text changes, nothing is hidden,
+  // so this never fights the tool's actual back-and-forth workflow the way a real hide-everything-
+  // but-the-current-step wizard would. ----------
+  function updateWizardBanner(){
+    if(!video.src){
+      wizardBannerEl.textContent = 'Schritt 1 von 4: Video laden, um zu beginnen.';
+    } else if(!homography){
+      wizardBannerEl.textContent = 'Schritt 2 von 4: Spielfeld kalibrieren — die Punkte über dem Video auf ihre reale Position ziehen.';
+    } else if(!frames.length){
+      wizardBannerEl.textContent = 'Schritt 3 von 4: Ersten Frame erfassen — "KI-Vorschlag" nutzen oder Spieler direkt im Video anklicken.';
+    } else {
+      wizardBannerEl.textContent = `Schritt 4 von 4: Weitere Frames erfassen und das Taktik-Diagramm rechts prüfen, korrigieren und exportieren. (${frames.length} Frame${frames.length===1?'':'s'} erfasst)`;
+    }
+  }
 
   // ---------- court geometry (FIBA half court, meters: x 0..15 sideline-sideline, y 0..14 baseline-halfcourt) ----------
   function sampleArc(cx,cy,r,a0,a1,steps){
@@ -383,6 +431,7 @@
     playNameEl.value = '';
     updateOverlayInteractivity();
     renderGallery(); renderMainDiagram(); updatePlacementEnabled(); updatePlacementStatus();
+    updateWizardBanner();
     setStatus('Video wird geladen…');
   });
   video.addEventListener('loadedmetadata', ()=>{
@@ -410,6 +459,7 @@
     seekSlider.max = video.duration || 0;
     updateTimeLabel();
     updatePlacementEnabled();
+    updateWizardBanner();
     setStatus('Video bereit.', 'ok');
   });
   video.addEventListener('error', ()=>{
@@ -569,17 +619,23 @@
     return ` ⚠️ Diese Kalibrierung reagiert empfindlich auf kleine Ungenauigkeiten (~${m} m Verschiebung schon bei wenigen Pixeln Abweichung) — die gesetzten Punkte liegen vermutlich zu nah beieinander oder fast auf einer Linie. Für zuverlässigere Positionen weiter auseinanderliegende Punkte wählen.`;
   }
   function updateCalibStatus(){
+    // The calibration card auto-collapses once committed (see setCalibMode) - a short echo of the
+    // status stays in the summary line itself so a sensitivity warning is never hidden just because
+    // the card is closed, and so it's clear at a glance whether recalibration is worth opening for.
     if(homography && !calibMode){
       const warning = calibSensitivityWarning(committedSensitivity);
       calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.${warning}`;
       calibStatus.className = warning ? 'hint err' : 'hint ok';
+      calibSummaryHintEl.textContent = warning ? '· ⚠️ Kalibrierung prüfen' : '· kalibriert ✓';
     } else if(anchored.size >= 4){
       const warning = calibSensitivityWarning(calibSensitivity);
       calibStatus.textContent = `${anchored.size} Punkte gesetzt. Passt die Ausrichtung? Dann "Kalibrierung übernehmen" klicken.${warning}`;
       calibStatus.className = warning ? 'hint err' : 'hint';
+      calibSummaryHintEl.textContent = '';
     } else {
       calibStatus.textContent = `${anchored.size}/4 Punkte gesetzt. Ziehe mindestens 4 der Punkte auf ihre reale Position im Video.`;
       calibStatus.className = 'hint';
+      calibSummaryHintEl.textContent = '';
     }
     calibCommitBtn.disabled = !calibMode || anchored.size < 4;
     calibResetBtn.disabled = !calibMode;
@@ -595,6 +651,10 @@
     updateCalibStatus();
     renderCalibOverlay();
     updatePlacementEnabled();
+    // Auto-expand the calibration card while it needs attention, auto-collapse it once committed
+    // (or reused from a carried-over calibration) - a user who manually opens/closes it in between
+    // these calls is left alone, since this only fires on an actual mode transition.
+    calibCardEl.open = on;
   }
   calibEditBtn.addEventListener('click', ()=>{
     if(!video.src){ alert('Bitte zuerst ein Video laden.'); return; }
@@ -616,6 +676,7 @@
     setCalibMode(false);
     updateCalibStatus();
     updatePlacementEnabled();
+    updateWizardBanner();
   });
 
   function renderCalibOverlay(){
@@ -1097,7 +1158,7 @@
     pendingPositions = [];
     cancelAllPickModes();
     updateOverlayInteractivity();
-    renderGallery(); renderMainDiagram(); updatePlacementStatus(); updatePlacementEnabled();
+    renderGallery(); renderMainDiagram(); updatePlacementStatus(); updatePlacementEnabled(); updateWizardBanner();
   }
   function downloadJSON(obj, filename){
     const blob = new Blob([JSON.stringify(obj)], {type:'application/json'});
@@ -1173,6 +1234,7 @@
     pendingPositions = []; placementArmed = null;
     updateOverlayInteractivity(); renderCalibOverlay();
     renderGallery(); renderMainDiagram(); updatePlacementStatus();
+    updateWizardBanner();
     return count;
   }
   finishFrameBtn.addEventListener('click', ()=>{
@@ -1268,7 +1330,7 @@
     if(!frames.length) return;
     if(!confirm(`Wirklich alle ${frames.length} Frame(s) dieses Spielzugs unwiderruflich löschen?`)) return;
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
-    renderGallery(); renderMainDiagram();
+    renderGallery(); renderMainDiagram(); updateWizardBanner();
   });
 
   // ---------- court diagram rendering (fixed diagram canvas, not the video overlay) ----------
@@ -1683,6 +1745,7 @@
 
   updatePlacementStatus();
   renderMainDiagram();
+  updateWizardBanner();
 })();
 </script>
 </body>
