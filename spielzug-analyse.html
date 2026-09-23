@@ -308,6 +308,11 @@
   let pendingPositions = []; // {x,y,nx,ny,team} being placed for the frame not yet finished
   let poseDetector = null, modelLoading = false; // lazily loaded only when "KI-Vorschlag" is first used
   let colorPickTarget = null; // 'offense' | 'defense' | null - next video click sets that team's jersey color
+  let offenseColorSet = false, defenseColorSet = false; // true once the user actually configures a
+  // color (not just the unconfigured <input type=color> default) - classifyTeam() must never guess
+  // a team off colors nobody actually set, or "optional" jersey colors silently stop being optional.
+  offenseColorEl.addEventListener('input', ()=>{ offenseColorSet = true; });
+  defenseColorEl.addEventListener('input', ()=>{ defenseColorSet = true; });
 
   // ---------- roster (optional): number+name pairs the user enters once per team ----------
   function parseRoster(text){
@@ -321,6 +326,16 @@
   }
   let actionPick = null; // {type, need, picked:[trackId,...]} while marking an action
   let mergePick = null; // [trackId] while picking the two tracks to merge into one player
+
+  // Exactly one "what does my next click do" mode should ever be active - arming a new one always
+  // cancels whatever else was armed, so a leftover pick mode never silently swallows an unrelated click.
+  function cancelAllPickModes(){
+    colorPickTarget = null;
+    placementArmed = null;
+    ballPlacementArmed = false;
+    actionPick = null;
+    mergePick = null;
+  }
   let pointerDown = null; // {x,y,trackId|null,moved} - tracks a court-canvas mousedown for drag-vs-click detection
 
   const PALETTE = ["#C43E0E","#2563eb","#16a34a","#9333ea","#ca8a04","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5"];
@@ -625,7 +640,7 @@
     pendingPositions.forEach(p=>{
       const [dx,dy] = nativeToDisplay(p.nx,p.ny);
       octx.beginPath(); octx.arc(dx,dy,7,0,Math.PI*2);
-      octx.fillStyle = p.team === 'offense' ? '#C43E0E' : '#2563eb';
+      octx.fillStyle = pendingColor(p.team);
       octx.fill();
       octx.strokeStyle = '#fff'; octx.lineWidth = 2; octx.stroke();
     });
@@ -708,6 +723,12 @@
   // ---------- manual player placement: click directly on the video, converted through the
   // committed calibration into real court coordinates - no detection model, no false positives,
   // no per-frame correction cycle. What you click is exactly what ends up in the diagram. ----------
+  // Shared so a pending point never looks like a team it wasn't actually assigned to - 'unknown'
+  // (from an AI suggestion the jersey colors couldn't classify) must render distinctly from Defense,
+  // not fall into blue by default, right at the moment the user is supposed to be checking it.
+  function pendingColor(team){
+    return team === 'offense' ? '#C43E0E' : team === 'defense' ? '#2563eb' : '#94a3b8';
+  }
   function placePlayerAt(clientX, clientY){
     const rect = overlay.getBoundingClientRect();
     const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
@@ -777,6 +798,7 @@
   const TEAM_MATCH_THRESHOLD = 0.35;
   function classifyTeam(avgRgb){
     if(!avgRgb) return 'unknown';
+    if(!offenseColorSet || !defenseColorSet) return 'unknown'; // never guess off un-configured defaults
     const dOff = colorDistance(avgRgb, hexToRgb(offenseColorEl.value));
     const dDef = colorDistance(avgRgb, hexToRgb(defenseColorEl.value));
     if(Math.min(dOff,dDef) > TEAM_MATCH_THRESHOLD) return 'unknown';
@@ -838,13 +860,16 @@
     }
     const hex = rgbToHex(avg[0], avg[1], avg[2]);
     (target === 'offense' ? offenseColorEl : defenseColorEl).value = hex;
+    if(target === 'offense') offenseColorSet = true; else defenseColorSet = true;
     setStatus(`${target === 'offense' ? 'Offense' : 'Defense'}-Farbe aus Video übernommen (${hex}).`, 'ok');
   }
   function armColorPick(target){
     if(!video.src || !video.videoWidth){ alert('Bitte zuerst ein Video laden.'); return; }
+    cancelAllPickModes();
     colorPickTarget = target;
     updateOverlayInteractivity();
     updatePlacementEnabled();
+    updatePlacementStatus();
     setStatus(`Klicke im Video auf das ${target === 'offense' ? 'Offense' : 'Defense'}-Trikot… (Abbrechen mit Esc)`);
   }
   pickOffenseBtn.addEventListener('click', ()=> armColorPick('offense'));
@@ -915,11 +940,13 @@
     updatePlacementEnabled();
   });
   placeOffenseBtn.addEventListener('click', ()=>{
+    cancelAllPickModes();
     placementArmed = 'offense';
     updateOverlayInteractivity();
     updatePlacementStatus();
   });
   placeDefenseBtn.addEventListener('click', ()=>{
+    cancelAllPickModes();
     placementArmed = 'defense';
     updateOverlayInteractivity();
     updatePlacementStatus();
@@ -947,8 +974,11 @@
     placeDefenseBtn.disabled = !ready;
     aiSuggestBtn.disabled = !ready || modelLoading;
     autoCaptureBtn.disabled = !ready || modelLoading;
-    finishFrameBtn.disabled = !ready || !pendingPositions.length;
-    discardFrameBtn.disabled = !ready || !pendingPositions.length;
+    // Finishing/discarding already-placed points must stay available even while re-editing the
+    // calibration or picking a jersey color mid-placement - otherwise those points get stranded
+    // (can't finish, can't discard) until the user backs out of that other mode first.
+    finishFrameBtn.disabled = autoCaptureRunning || !pendingPositions.length;
+    discardFrameBtn.disabled = autoCaptureRunning || !pendingPositions.length;
   }
 
   function effectiveTeam(trackId){
@@ -1008,12 +1038,18 @@
         if(act.a===mergeId) act.a = keepId;
         if(act.b===mergeId) act.b = keepId;
       });
+      // if the merged pair were also the two participants of an action (e.g. a Pass tagged between
+      // them before the merge revealed they're the same player), remapping both ends onto the same
+      // id would leave a meaningless "pass to yourself" - drop it instead.
+      f.actions = (f.actions||[]).filter(act => act.b == null || act.a !== act.b);
     });
     delete tracks[mergeId];
   }
   mergeTracksBtn.addEventListener('click', ()=>{
     if(!frames.length){ alert('Noch keine Frames vorhanden.'); return; }
+    cancelAllPickModes();
     mergePick = [];
+    updateOverlayInteractivity(); updatePlacementEnabled(); updatePlacementStatus();
     setStatus('Tracks zusammenführen: zuerst den bestehenden (richtigen) Spieler-Punkt anklicken…');
   });
 
@@ -1026,7 +1062,7 @@
     const sx = tw/fullCanvas.width, sy = th/fullCanvas.height;
     positions.forEach(p=>{
       tctx.beginPath(); tctx.arc(p.nx*sx, p.ny*sy, 3, 0, Math.PI*2);
-      tctx.fillStyle = p.team === 'offense' ? '#C43E0E' : '#2563eb';
+      tctx.fillStyle = pendingColor(p.team);
       tctx.fill();
     });
     return c.toDataURL('image/png');
@@ -1076,6 +1112,10 @@
     if(!homography){ alert('Bitte zuerst kalibrieren.'); return; }
     await loadModelIfNeeded();
     if(!poseDetector) return;
+    // Any leftover points from an abandoned manual/AI placement belong to whatever moment they were
+    // placed at, not to this run's first sampled instant - starting the loop with them still pending
+    // would silently fold them into the wrong frame.
+    if(pendingPositions.length){ pendingPositions = []; renderCalibOverlay(); updatePlacementStatus(); }
     const interval = Math.max(0.3, parseFloat(autoIntervalEl.value) || 1.5);
     const duration = video.duration || 0;
     autoCaptureRunning = true;
@@ -1083,7 +1123,7 @@
     autoStopBtn.style.display = '';
     updatePlacementEnabled();
     let t = video.currentTime;
-    let totalAdded = 0;
+    let totalAdded = 0, totalSkipped = 0;
     while(autoCaptureRunning && t <= duration + 0.001){
       await seekAndWaitApp(Math.min(t, duration));
       await new Promise(r=>setTimeout(r, 30)); // let the seeked frame actually paint before sampling it
@@ -1091,8 +1131,9 @@
       try{
         await runAiSuggestion();
         const count = finishCurrentFrame();
-        if(!count) break; // nothing detected at all - stop rather than spin on empty frames
-        totalAdded++;
+        // Nothing detected at this one instant - skip it and keep going instead of abandoning the
+        // rest of the play; a single missed moment (occlusion, camera glare) shouldn't end the scan.
+        if(count) totalAdded++; else totalSkipped++;
       }catch(e){
         console.error(e);
         break;
@@ -1103,7 +1144,8 @@
     autoCaptureBtn.style.display = '';
     autoStopBtn.style.display = 'none';
     updatePlacementEnabled();
-    setStatus(`Automatische Erfassung abgeschlossen (${frames.length} Frames insgesamt). Ergebnis prüfen — bei fragmentierten Spielern "Tracks zusammenführen" nutzen.`, 'ok');
+    const skipHint = totalSkipped ? ` (${totalSkipped} Moment(e) ohne Erkennung übersprungen)` : '';
+    setStatus(`Automatische Erfassung abgeschlossen (${frames.length} Frames insgesamt${skipHint}). Ergebnis prüfen — bei fragmentierten Spielern "Tracks zusammenführen" nutzen.`, 'ok');
   });
   autoStopBtn.addEventListener('click', ()=>{ autoCaptureRunning = false; });
 
@@ -1351,7 +1393,9 @@
 
   setBallBtn.addEventListener('click', ()=>{
     if(selectedFrameIndex < 0){ alert('Bitte zuerst einen Frame erfassen bzw. auswählen.'); return; }
+    cancelAllPickModes();
     ballPlacementArmed = true;
+    updateOverlayInteractivity(); updatePlacementEnabled(); updatePlacementStatus();
     setStatus('Klicke auf die Ball-Position im Diagramm…');
   });
   clearBallBtn.addEventListener('click', ()=>{
@@ -1362,9 +1406,11 @@
 
   addActionBtn.addEventListener('click', ()=>{
     if(selectedFrameIndex < 0){ alert('Bitte zuerst einen Frame erfassen bzw. auswählen.'); return; }
+    cancelAllPickModes();
     const type = actionTypeEl.value;
     const need = ACTION_TYPES[type].players;
     actionPick = {type, need, picked: []};
+    updateOverlayInteractivity(); updatePlacementEnabled(); updatePlacementStatus();
     setStatus(`Aktion "${ACTION_TYPES[type].label}": klicke im Diagramm auf ${need===2 ? 'den Ausgangsspieler, dann den Zielspieler' : 'den betroffenen Spieler'}…`);
   });
   clearActionsBtn.addEventListener('click', ()=>{
@@ -1435,6 +1481,8 @@
 
     if(evt.shiftKey && closest){
       frame.players = frame.players.filter(p => p.trackId !== closest.trackId);
+      // drop any action that pointed at the now-removed player rather than leaving a dead reference
+      frame.actions = (frame.actions||[]).filter(act => act.a !== closest.trackId && act.b !== closest.trackId);
       setStatus('Spieler aus diesem Frame entfernt.', 'ok');
       renderMainDiagram();
       return;
