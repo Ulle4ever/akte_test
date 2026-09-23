@@ -115,7 +115,7 @@
 
     <details class="card" id="calibCard" open>
       <summary><span class="step-badge">2</span> Spielfeld kalibrieren <span id="calibSummaryHint" class="muted" style="font-weight:400;"></span></summary>
-      <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon &mdash; egal welche &mdash; auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen.</p>
+      <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen. Wichtig: Die Punkte dürfen nicht alle auf derselben Linie liegen (z.B. nicht nur entlang der Grundlinie) &mdash; nimm mindestens einen Punkt, der weiter in die Tiefe des Feldes zeigt (z.B. Freiwurflinie oder Mittellinie), sonst lässt sich die Kalibrierung nicht eindeutig berechnen.</p>
       <div class="row">
         <button id="calibEditBtn">Kalibrierung bearbeiten</button>
         <button id="calibResetBtn" class="ghost">Punkte zurücksetzen</button>
@@ -592,6 +592,20 @@
     }
   }
   const CALIB_SENSITIVITY_WARN_M = 0.5;
+  // Above this, the calibration isn't just imprecise, it's practically unusable (e.g. all anchored
+  // points sit on - or very near - the same straight line, such as picking only points along one
+  // visible baseline). Below this line it's a soft warning the user can still commit past; at or
+  // above it, committing is blocked outright so a silently-broken calibration never looks "ready".
+  const CALIB_SENSITIVITY_BLOCK_M = 3;
+  function calibSensitivityMessage(sensitivity, hasHomography){
+    if(!hasHomography || sensitivity == null || !isFinite(sensitivity) || sensitivity > CALIB_SENSITIVITY_BLOCK_M){
+      return { blocking: true, text: ' ⚠️ Diese Punkte lassen sich nicht eindeutig zu einer Feld-Kalibrierung auflösen — sie liegen (fast) exakt auf einer Linie (z.B. alle auf derselben Grundlinie). Wähle mindestens einen zusätzlichen Punkt, der in die Tiefe des Feldes zeigt (z.B. Freiwurflinie, Mittellinie oder Drei-Punkte-Bogen), statt nur entlang einer einzigen Linie.' };
+    }
+    if(sensitivity > CALIB_SENSITIVITY_WARN_M){
+      return { blocking: false, text: ` ⚠️ Diese Kalibrierung reagiert empfindlich auf kleine Ungenauigkeiten (~${sensitivity.toFixed(1)} m Verschiebung schon bei wenigen Pixeln Abweichung) — die gesetzten Punkte liegen vermutlich zu nah beieinander oder fast auf einer Linie. Für zuverlässigere Positionen weiter auseinanderliegende Punkte wählen.` };
+    }
+    return { blocking: false, text: '' };
+  }
   let calibSensitivity = null;
   let committedSensitivity = null; // sensitivity of the currently active (committed) calibration
   function recomputeLiveCalibration(){
@@ -628,16 +642,20 @@
       calibStatus.className = warning ? 'hint err' : 'hint ok';
       calibSummaryHintEl.textContent = warning ? '· ⚠️ Kalibrierung prüfen' : '· kalibriert ✓';
     } else if(anchored.size >= 4){
-      const warning = calibSensitivityWarning(calibSensitivity);
-      calibStatus.textContent = `${anchored.size} Punkte gesetzt. Passt die Ausrichtung? Dann "Kalibrierung übernehmen" klicken.${warning}`;
-      calibStatus.className = warning ? 'hint err' : 'hint';
+      const msg = calibSensitivityMessage(calibSensitivity, !!liveHomography);
+      calibStatus.textContent = msg.blocking
+        ? `${anchored.size} Punkte gesetzt, aber so nicht verwendbar.${msg.text}`
+        : `${anchored.size} Punkte gesetzt. Passt die Ausrichtung? Dann "Kalibrierung übernehmen" klicken.${msg.text}`;
+      calibStatus.className = msg.text ? 'hint err' : 'hint';
       calibSummaryHintEl.textContent = '';
     } else {
       calibStatus.textContent = `${anchored.size}/4 Punkte gesetzt. Ziehe mindestens 4 der Punkte auf ihre reale Position im Video.`;
       calibStatus.className = 'hint';
       calibSummaryHintEl.textContent = '';
     }
-    calibCommitBtn.disabled = !calibMode || anchored.size < 4;
+    // Blocked when the anchored points can't be resolved into a usable calibration (e.g. all on one
+    // line) - otherwise the button looks ready but committing would silently do nothing.
+    calibCommitBtn.disabled = !calibMode || anchored.size < 4 || calibSensitivityMessage(calibSensitivity, !!liveHomography).blocking;
     calibResetBtn.disabled = !calibMode;
   }
   function updateOverlayInteractivity(){
