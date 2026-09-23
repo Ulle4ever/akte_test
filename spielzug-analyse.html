@@ -75,7 +75,27 @@
     </div>
 
     <div class="card">
-      <h2><span class="step-badge">2</span> Spielfeld kalibrieren</h2>
+      <h2><span class="step-badge">2</span> Kader &amp; Trikotfarben (optional)</h2>
+      <p class="muted">Hilft der KI-Vorschlag-Funktion, Team und Rückennummer automatisch vorzuschlagen. Ohne diese Angaben funktioniert alles weiterhin rein manuell.</p>
+      <div class="row" style="align-items:center;">
+        <label class="opt">Offense-Trikot <input type="color" id="offenseColor" value="#ffffff"></label>
+        <button id="pickOffenseBtn" class="ghost">Farbe aus Video</button>
+        <label class="opt">Defense-Trikot <input type="color" id="defenseColor" value="#1d4ed8"></label>
+        <button id="pickDefenseBtn" class="ghost">Farbe aus Video</button>
+      </div>
+      <p class="hint">Am besten mit "Farbe aus Video" direkt auf ein Trikot im pausierten Video klicken, statt die Farbe zu raten.</p>
+      <div class="row" style="align-items:flex-start;">
+        <label class="opt" style="flex-direction:column;align-items:stretch;flex:1;min-width:200px;">Offense-Kader (eine Zeile pro Spieler: Nummer Name)
+          <textarea id="offenseRoster" rows="4" placeholder="4 Mueller&#10;7 Schmidt&#10;23 Yilmaz" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;"></textarea>
+        </label>
+        <label class="opt" style="flex-direction:column;align-items:stretch;flex:1;min-width:200px;">Defense-Kader (eine Zeile pro Spieler: Nummer Name)
+          <textarea id="defenseRoster" rows="4" placeholder="5 Gegner&#10;11 Gegner" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;"></textarea>
+        </label>
+      </div>
+    </div>
+
+    <div class="card">
+      <h2><span class="step-badge">3</span> Spielfeld kalibrieren</h2>
       <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon &mdash; egal welche &mdash; auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen.</p>
       <div class="row">
         <button id="calibEditBtn">Kalibrierung bearbeiten</button>
@@ -86,7 +106,7 @@
     </div>
 
     <div class="card">
-      <h2><span class="step-badge">3</span> Frames erfassen</h2>
+      <h2><span class="step-badge">4</span> Frames erfassen</h2>
       <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren. Entweder "KI-Vorschlag" für eine automatische Grobschätzung nutzen (danach prüfen/korrigieren), oder Team wählen und Spieler direkt im Video anklicken. Beides lässt sich mischen.</p>
       <div class="row">
         <button id="aiSuggestBtn" class="ghost" disabled>KI-Vorschlag für aktuellen Moment</button>
@@ -111,7 +131,7 @@
 
   <div>
     <div class="card">
-      <h2><span class="step-badge">4</span> Taktik-Diagramm</h2>
+      <h2><span class="step-badge">5</span> Taktik-Diagramm</h2>
       <div class="row">
         <label class="opt" style="flex:1;min-width:240px;">Play-Bezeichnung:
           <input type="text" id="playName" placeholder="z.B. Gegner #23 – High Pick and Roll" style="flex:1;min-width:180px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;">
@@ -176,6 +196,12 @@
   const calibResetBtn = document.getElementById('calibResetBtn');
   const calibCommitBtn = document.getElementById('calibCommitBtn');
   const calibStatus = document.getElementById('calibStatus');
+  const offenseColorEl = document.getElementById('offenseColor');
+  const defenseColorEl = document.getElementById('defenseColor');
+  const pickOffenseBtn = document.getElementById('pickOffenseBtn');
+  const pickDefenseBtn = document.getElementById('pickDefenseBtn');
+  const offenseRosterEl = document.getElementById('offenseRoster');
+  const defenseRosterEl = document.getElementById('defenseRoster');
   const aiSuggestBtn = document.getElementById('aiSuggestBtn');
   const placeOffenseBtn = document.getElementById('placeOffenseBtn');
   const placeDefenseBtn = document.getElementById('placeDefenseBtn');
@@ -265,6 +291,18 @@
   let placementArmed = null; // 'offense' | 'defense' | null - clicking the video adds a player of this team
   let pendingPositions = []; // {x,y,nx,ny,team} being placed for the frame not yet finished
   let poseDetector = null, modelLoading = false; // lazily loaded only when "KI-Vorschlag" is first used
+  let colorPickTarget = null; // 'offense' | 'defense' | null - next video click sets that team's jersey color
+
+  // ---------- roster (optional): number+name pairs the user enters once per team ----------
+  function parseRoster(text){
+    return text.split('\n').map(line=>{
+      const m = line.trim().match(/^(\S+)\s+(.+)$/);
+      return m ? {number: m[1], name: m[2].trim()} : null;
+    }).filter(Boolean);
+  }
+  function rosterFor(team){
+    return parseRoster((team === 'offense' ? offenseRosterEl : defenseRosterEl).value);
+  }
   let actionPick = null; // {type, need, picked:[trackId,...]} while marking an action
   let pointerDown = null; // {x,y,trackId|null,moved} - tracks a court-canvas mousedown for drag-vs-click detection
 
@@ -503,7 +541,7 @@
   }
   function updateOverlayInteractivity(){
     overlay.classList.toggle('active', calibMode);
-    overlay.classList.toggle('picking', !!placementArmed);
+    overlay.classList.toggle('picking', !!placementArmed || !!colorPickTarget);
   }
   function setCalibMode(on){
     calibMode = on;
@@ -595,6 +633,7 @@
     return best;
   }
   overlay.addEventListener('pointerdown', (evt)=>{
+    if(colorPickTarget){ pickColorAt(evt.clientX, evt.clientY); return; }
     if(evt.shiftKey && pendingPositions.length){ removePendingNear(evt.clientX, evt.clientY); return; }
     if(placementArmed){ placePlayerAt(evt.clientX, evt.clientY); return; }
     if(!calibMode) return;
@@ -622,6 +661,12 @@
 
   window.addEventListener('keydown', (evt)=>{
     if(evt.key !== 'Escape') return;
+    if(colorPickTarget){
+      colorPickTarget = null;
+      updateOverlayInteractivity();
+      updatePlacementEnabled();
+      setStatus('Farbauswahl abgebrochen.');
+    }
     if(placementArmed){
       placementArmed = null;
       updateOverlayInteractivity();
@@ -681,6 +726,109 @@
     if(rh && rh.score>0.3) return {x:rh.x, y:rh.y};
     return null;
   }
+
+  // ---------- optional jersey-color team classification (only used to pre-fill the AI-Vorschlag's
+  // team guess when colors are configured - never the only source of truth, always correctable) ----------
+  function hexToRgb(hex){
+    const m = hex.replace('#','');
+    return [parseInt(m.substr(0,2),16), parseInt(m.substr(2,2),16), parseInt(m.substr(4,2),16)];
+  }
+  function rgbToHex(r,g,b){
+    return '#' + [r,g,b].map(v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+  }
+  function rgbToHsv(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+    let h=0;
+    if(d!==0){
+      if(max===r) h = 60*(((g-b)/d)%6);
+      else if(max===g) h = 60*((b-r)/d+2);
+      else h = 60*((r-g)/d+4);
+    }
+    if(h<0) h+=360;
+    return {h, s: max===0?0:d/max, v:max};
+  }
+  function colorDistance(rgbA, rgbB){
+    const a = rgbToHsv(rgbA[0],rgbA[1],rgbA[2]), b = rgbToHsv(rgbB[0],rgbB[1],rgbB[2]);
+    let dh = Math.abs(a.h-b.h); if(dh>180) dh = 360-dh;
+    return (dh/180)*0.6 + Math.abs(a.s-b.s)*0.25 + Math.abs(a.v-b.v)*0.15;
+  }
+  const TEAM_MATCH_THRESHOLD = 0.35;
+  function classifyTeam(avgRgb){
+    if(!avgRgb) return 'unknown';
+    const dOff = colorDistance(avgRgb, hexToRgb(offenseColorEl.value));
+    const dDef = colorDistance(avgRgb, hexToRgb(defenseColorEl.value));
+    if(Math.min(dOff,dDef) > TEAM_MATCH_THRESHOLD) return 'unknown';
+    return dOff <= dDef ? 'offense' : 'defense';
+  }
+  // Skin-tone detection via YCbCr chrominance: melanin mainly changes luminance (Y), not the
+  // Cb/Cr color-difference channels, so this range catches light/medium/dark skin about equally
+  // well instead of being tuned to one tone. Used to exclude bare shoulders/arms (basketball
+  // jerseys are sleeveless) from the jersey-color sample, regardless of the player's skin color.
+  function isSkinPixel(r,g,b){
+    const y = 0.299*r + 0.587*g + 0.114*b;
+    const cb = 128 - 0.168736*r - 0.331264*g + 0.5*b;
+    const cr = 128 + 0.5*r - 0.418688*g - 0.081312*b;
+    return y>40 && cb>=75 && cb<=135 && cr>=130 && cr<=180;
+  }
+  function averageColorInBox(ctx, x0,y0,x1,y1){
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    const minX = Math.max(0, Math.floor(Math.min(x0,x1))), maxX = Math.min(w-1, Math.ceil(Math.max(x0,x1)));
+    const minY = Math.max(0, Math.floor(Math.min(y0,y1))), maxY = Math.min(h-1, Math.ceil(Math.max(y0,y1)));
+    const bw = maxX-minX, bh = maxY-minY;
+    if(bw<=0 || bh<=0) return null;
+    const data = ctx.getImageData(minX,minY,bw,bh).data;
+    let r=0,g=0,b=0,n=0, total=0;
+    for(let i=0;i<data.length;i+=4){
+      total++;
+      const pr=data[i], pg=data[i+1], pb=data[i+2];
+      if(isSkinPixel(pr,pg,pb)) continue;
+      r+=pr; g+=pg; b+=pb; n++;
+    }
+    if(!total || n < total*0.15) return null;
+    return [r/n, g/n, b/n];
+  }
+  function torsoAverageColor(fullCtx, keypoints){
+    const pts = ['left_shoulder','right_shoulder','left_hip','right_hip']
+      .map(name=>kp(keypoints,name)).filter(p=>p && p.score>0.3);
+    if(pts.length < 2) return null;
+    const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
+    const cx = (Math.min(...xs)+Math.max(...xs))/2, cy = (Math.min(...ys)+Math.max(...ys))/2;
+    const w = Math.max(Math.max(...xs)-Math.min(...xs), 24) * 0.7;
+    const h = Math.max(Math.max(...ys)-Math.min(...ys), 24) * 0.7;
+    return averageColorInBox(fullCtx, cx-w/2, cy-h/2, cx+w/2, cy+h/2);
+  }
+  function pickColorAt(clientX, clientY){
+    const target = colorPickTarget;
+    colorPickTarget = null;
+    updateOverlayInteractivity();
+    updatePlacementEnabled();
+    const rect = overlay.getBoundingClientRect();
+    const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
+    const tmp = document.createElement('canvas');
+    tmp.width = video.videoWidth; tmp.height = video.videoHeight;
+    const tctx = tmp.getContext('2d', {willReadFrequently: true});
+    tctx.drawImage(video, 0, 0);
+    const r = 7;
+    const avg = averageColorInBox(tctx, nx-r, ny-r, nx+r, ny+r);
+    if(!avg){
+      setStatus('Konnte an dieser Stelle keine Farbe bestimmen (z.B. nur Haut erkannt) — bitte nochmal auf den Stoff des Trikots klicken.', 'err');
+      return;
+    }
+    const hex = rgbToHex(avg[0], avg[1], avg[2]);
+    (target === 'offense' ? offenseColorEl : defenseColorEl).value = hex;
+    setStatus(`${target === 'offense' ? 'Offense' : 'Defense'}-Farbe aus Video übernommen (${hex}).`, 'ok');
+  }
+  function armColorPick(target){
+    if(!video.src || !video.videoWidth){ alert('Bitte zuerst ein Video laden.'); return; }
+    colorPickTarget = target;
+    updateOverlayInteractivity();
+    updatePlacementEnabled();
+    setStatus(`Klicke im Video auf das ${target === 'offense' ? 'Offense' : 'Defense'}-Trikot… (Abbrechen mit Esc)`);
+  }
+  pickOffenseBtn.addEventListener('click', ()=> armColorPick('offense'));
+  pickDefenseBtn.addEventListener('click', ()=> armColorPick('defense'));
+
   async function loadModelIfNeeded(){
     if(poseDetector || modelLoading) return;
     modelLoading = true;
@@ -707,22 +855,31 @@
     setStatus('KI analysiert aktuellen Moment…');
     try{
       const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
+      // Sample jersey colors from this exact frame, if offense/defense colors were configured,
+      // so the suggestion can pre-fill a team guess instead of always leaving it unresolved.
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+      const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
+      fullCtx.drawImage(video, 0, 0);
       // Anything projected well outside the court is almost certainly not a player - a
       // spectator, bench personnel, or a stray false-positive - not worth suggesting.
       const COURT_MARGIN_M = 3;
-      let added = 0;
+      let added = 0, guessed = 0;
       poses.forEach(pose=>{
         const foot = getFootPoint(pose.keypoints);
         if(!foot) return;
         const [cx,cy] = applyHomography(homography, foot.x, foot.y);
         if(cx < -COURT_MARGIN_M || cx > 15+COURT_MARGIN_M || cy < -COURT_MARGIN_M || cy > 14+COURT_MARGIN_M) return;
         if(pendingPositions.some(p => Math.hypot(p.x-cx,p.y-cy) < 0.8)) return; // already have a point there
-        pendingPositions.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team:'unknown'});
+        const team = classifyTeam(torsoAverageColor(fullCtx, pose.keypoints));
+        if(team !== 'unknown') guessed++;
+        pendingPositions.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team});
         added++;
       });
       renderCalibOverlay();
       updatePlacementStatus();
-      setStatus(`KI-Vorschlag: ${added} Position(en) hinzugefügt. Bitte prüfen: Ausreißer mit Shift+Klick entfernen, fehlende Spieler manuell ergänzen, Team wird nach "Frame abschließen" per Klick zugeordnet.`, 'ok');
+      const guessHint = guessed ? ` Team bei ${guessed} davon anhand der Trikotfarbe vorgeschlagen (bitte gegenprüfen).` : '';
+      setStatus(`KI-Vorschlag: ${added} Position(en) hinzugefügt.${guessHint} Ausreißer mit Shift+Klick entfernen, fehlende Spieler manuell ergänzen.`, 'ok');
     }catch(e){
       console.error(e);
       setStatus('Fehler bei der KI-Erkennung.', 'err');
@@ -757,7 +914,7 @@
   }
 
   function updatePlacementEnabled(){
-    const ready = !!homography && !calibMode && !!video.src;
+    const ready = !!homography && !calibMode && !!video.src && !colorPickTarget;
     placeOffenseBtn.disabled = !ready;
     placeDefenseBtn.disabled = !ready;
     aiSuggestBtn.disabled = !ready || modelLoading;
@@ -1183,13 +1340,21 @@
 
     if(closest && tracks[closest.trackId]){
       const track = tracks[closest.trackId];
-      const label = prompt('Bezeichnung für diesen Spieler (z.B. Rückennummer):', track.label);
-      if(label != null) track.label = label.trim() || track.label;
       const teamInput = prompt("Team: 'o' = Offense, 'd' = Defense", track.team === 'offense' ? 'o' : track.team === 'defense' ? 'd' : '');
       if(teamInput != null){
         const v = teamInput.trim().toLowerCase();
         if(v === 'o') track.team = 'offense';
         else if(v === 'd') track.team = 'defense';
+      }
+      const roster = track.team === 'offense' || track.team === 'defense' ? rosterFor(track.team) : [];
+      const rosterHint = roster.length ? ` (Kader: ${roster.map(r=>`${r.number} ${r.name}`).join(', ')})` : '';
+      const numInput = prompt(`Rückennummer${rosterHint}:`, track.label);
+      if(numInput != null){
+        const num = numInput.trim();
+        if(num){
+          const match = roster.find(r => r.number === num);
+          track.label = match ? `${num} ${match.name}` : num;
+        }
       }
       renderMainDiagram();
     }
