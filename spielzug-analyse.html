@@ -111,6 +111,12 @@
       <div class="row">
         <button id="aiSuggestBtn" class="ghost" disabled>KI-Vorschlag für aktuellen Moment</button>
       </div>
+      <div class="row" style="align-items:center;">
+        <label class="opt">Intervall <input type="number" id="autoInterval" value="1.5" min="0.3" step="0.1" style="width:60px;"> s</label>
+        <button id="autoCaptureBtn" class="ghost" disabled>Ganzen Spielzug automatisch erfassen (KI)</button>
+        <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
+      </div>
+      <p class="hint">Erfasst ab der aktuellen Videoposition bis zum Ende automatisch per KI-Vorschlag, im gewählten Zeitabstand. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten — bei Fragmentierung hilft "Tracks zusammenführen" im Diagramm.</p>
       <div class="row">
         <button id="placeOffenseBtn" disabled>+ Offense-Spieler setzen</button>
         <button id="placeDefenseBtn" class="ghost" disabled>+ Defense-Spieler setzen</button>
@@ -174,6 +180,10 @@
       </div>
       <p class="hint">Bei Pass/Block danach zwei Spieler im Diagramm anklicken (erst Ausgangs-, dann Zielspieler), bei den anderen einen.</p>
       <div id="actionList"></div>
+      <div class="row" style="align-items:center;">
+        <button id="mergeTracksBtn" class="ghost">Tracks zusammenführen…</button>
+      </div>
+      <p class="hint">Falls ein Spieler durch einen Erkennungsaussetzer eine neue Nummer bekommen hat: Button klicken, dann nacheinander den bestehenden Punkt und den fälschlich neuen Punkt anklicken (auch in unterschiedlichen Frames über die Galerie erreichbar) — beide werden zu einem Spieler zusammengeführt.</p>
       <div class="row">
         <button id="exportFrameBtn" class="accent">Diagramm als PNG</button>
         <button id="exportAllBtn" class="ghost">Alle Frames als Storyboard exportieren</button>
@@ -227,6 +237,10 @@
   const addActionBtn = document.getElementById('addActionBtn');
   const clearActionsBtn = document.getElementById('clearActionsBtn');
   const actionListEl = document.getElementById('actionList');
+  const mergeTracksBtn = document.getElementById('mergeTracksBtn');
+  const autoIntervalEl = document.getElementById('autoInterval');
+  const autoCaptureBtn = document.getElementById('autoCaptureBtn');
+  const autoStopBtn = document.getElementById('autoStopBtn');
   const playNameEl = document.getElementById('playName');
   function sanitizeFilename(s){
     return (s||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'spielzug';
@@ -306,6 +320,7 @@
     return parseRoster((team === 'offense' ? offenseRosterEl : defenseRosterEl).value);
   }
   let actionPick = null; // {type, need, picked:[trackId,...]} while marking an action
+  let mergePick = null; // [trackId] while picking the two tracks to merge into one player
   let pointerDown = null; // {x,y,trackId|null,moved} - tracks a court-canvas mousedown for drag-vs-click detection
 
   const PALETTE = ["#C43E0E","#2563eb","#16a34a","#9333ea","#ca8a04","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5"];
@@ -336,7 +351,7 @@
     video.src = currentObjectUrl;
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
     homography = null; anchored = new Set(); handlePos = {};
-    ballPlacementArmed = false; placementArmed = null; pendingPositions = []; actionPick = null; pointerDown = null;
+    ballPlacementArmed = false; placementArmed = null; pendingPositions = []; actionPick = null; mergePick = null; pointerDown = null;
     playNameEl.value = '';
     updateOverlayInteractivity();
     renderGallery(); renderMainDiagram(); updatePlacementEnabled(); updatePlacementStatus();
@@ -684,6 +699,10 @@
       actionPick = null;
       setStatus('Aktions-Markierung abgebrochen.');
     }
+    if(mergePick){
+      mergePick = null;
+      setStatus('Zusammenführen abgebrochen.');
+    }
   });
 
   // ---------- manual player placement: click directly on the video, converted through the
@@ -849,6 +868,36 @@
     modelLoading = false;
     updatePlacementEnabled();
   }
+  // Core of "KI-Vorschlag", factored out so both the manual button and the auto-capture loop
+  // (below) share the exact same detection+classification logic.
+  async function runAiSuggestion(){
+    if(!homography || !poseDetector) return {added:0, guessed:0};
+    const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
+    // Sample jersey colors from this exact frame, if offense/defense colors were configured,
+    // so the suggestion can pre-fill a team guess instead of always leaving it unresolved.
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+    const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
+    fullCtx.drawImage(video, 0, 0);
+    // Anything projected well outside the court is almost certainly not a player - a
+    // spectator, bench personnel, or a stray false-positive - not worth suggesting.
+    const COURT_MARGIN_M = 3;
+    let added = 0, guessed = 0;
+    poses.forEach(pose=>{
+      const foot = getFootPoint(pose.keypoints);
+      if(!foot) return;
+      const [cx,cy] = applyHomography(homography, foot.x, foot.y);
+      if(cx < -COURT_MARGIN_M || cx > 15+COURT_MARGIN_M || cy < -COURT_MARGIN_M || cy > 14+COURT_MARGIN_M) return;
+      if(pendingPositions.some(p => Math.hypot(p.x-cx,p.y-cy) < 0.8)) return; // already have a point there
+      const team = classifyTeam(torsoAverageColor(fullCtx, pose.keypoints));
+      if(team !== 'unknown') guessed++;
+      pendingPositions.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team});
+      added++;
+    });
+    renderCalibOverlay();
+    updatePlacementStatus();
+    return {added, guessed};
+  }
   aiSuggestBtn.addEventListener('click', async ()=>{
     if(!homography) return;
     await loadModelIfNeeded();
@@ -856,30 +905,7 @@
     aiSuggestBtn.disabled = true;
     setStatus('KI analysiert aktuellen Moment…');
     try{
-      const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
-      // Sample jersey colors from this exact frame, if offense/defense colors were configured,
-      // so the suggestion can pre-fill a team guess instead of always leaving it unresolved.
-      const fullCanvas = document.createElement('canvas');
-      fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
-      const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
-      fullCtx.drawImage(video, 0, 0);
-      // Anything projected well outside the court is almost certainly not a player - a
-      // spectator, bench personnel, or a stray false-positive - not worth suggesting.
-      const COURT_MARGIN_M = 3;
-      let added = 0, guessed = 0;
-      poses.forEach(pose=>{
-        const foot = getFootPoint(pose.keypoints);
-        if(!foot) return;
-        const [cx,cy] = applyHomography(homography, foot.x, foot.y);
-        if(cx < -COURT_MARGIN_M || cx > 15+COURT_MARGIN_M || cy < -COURT_MARGIN_M || cy > 14+COURT_MARGIN_M) return;
-        if(pendingPositions.some(p => Math.hypot(p.x-cx,p.y-cy) < 0.8)) return; // already have a point there
-        const team = classifyTeam(torsoAverageColor(fullCtx, pose.keypoints));
-        if(team !== 'unknown') guessed++;
-        pendingPositions.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team});
-        added++;
-      });
-      renderCalibOverlay();
-      updatePlacementStatus();
+      const {added, guessed} = await runAiSuggestion();
       const guessHint = guessed ? ` Team bei ${guessed} davon anhand der Trikotfarbe vorgeschlagen (bitte gegenprüfen).` : '';
       setStatus(`KI-Vorschlag: ${added} Position(en) hinzugefügt.${guessHint} Ausreißer mit Shift+Klick entfernen, fehlende Spieler manuell ergänzen.`, 'ok');
     }catch(e){
@@ -916,10 +942,13 @@
   }
 
   function updatePlacementEnabled(){
-    const ready = !!homography && !calibMode && !!video.src && !colorPickTarget;
+    const ready = !!homography && !calibMode && !!video.src && !colorPickTarget && !autoCaptureRunning;
     placeOffenseBtn.disabled = !ready;
     placeDefenseBtn.disabled = !ready;
     aiSuggestBtn.disabled = !ready || modelLoading;
+    autoCaptureBtn.disabled = !ready || modelLoading;
+    finishFrameBtn.disabled = !ready || !pendingPositions.length;
+    discardFrameBtn.disabled = !ready || !pendingPositions.length;
   }
 
   function effectiveTeam(trackId){
@@ -964,6 +993,30 @@
     return result;
   }
 
+  // ---------- merge two tracks that are really the same player, split apart because a detection
+  // gap (occlusion, a missed frame) made the nearest-position matching above start a new track
+  // instead of continuing the old one. Keeps the first-clicked track's identity (color/label/name)
+  // and folds every frame's occurrence of the second one into it. ----------
+  function mergeTracks(keepId, mergeId){
+    if(keepId === mergeId) return;
+    frames.forEach(f=>{
+      const hasKeep = f.players.some(p=>p.trackId===keepId);
+      f.players = f.players
+        .filter(p => !(p.trackId===mergeId && hasKeep)) // both in the same frame - drop the duplicate
+        .map(p => p.trackId===mergeId ? {...p, trackId:keepId} : p);
+      (f.actions||[]).forEach(act=>{
+        if(act.a===mergeId) act.a = keepId;
+        if(act.b===mergeId) act.b = keepId;
+      });
+    });
+    delete tracks[mergeId];
+  }
+  mergeTracksBtn.addEventListener('click', ()=>{
+    if(!frames.length){ alert('Noch keine Frames vorhanden.'); return; }
+    mergePick = [];
+    setStatus('Tracks zusammenführen: zuerst den bestehenden (richtigen) Spieler-Punkt anklicken…');
+  });
+
   // ---------- finish/discard the frame currently being placed ----------
   function makeThumbnail(fullCanvas, positions){
     const tw = 200, th = Math.round(200 * fullCanvas.height / fullCanvas.width);
@@ -978,8 +1031,8 @@
     });
     return c.toDataURL('image/png');
   }
-  finishFrameBtn.addEventListener('click', ()=>{
-    if(!pendingPositions.length) return;
+  function finishCurrentFrame(){
+    if(!pendingPositions.length) return 0;
     const fullCanvas = document.createElement('canvas');
     fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
     fullCanvas.getContext('2d').drawImage(video, 0, 0);
@@ -993,13 +1046,66 @@
     pendingPositions = []; placementArmed = null;
     updateOverlayInteractivity(); renderCalibOverlay();
     renderGallery(); renderMainDiagram(); updatePlacementStatus();
-    setStatus(`Frame erfasst (${count} Spieler gesetzt).`, 'ok');
+    return count;
+  }
+  finishFrameBtn.addEventListener('click', ()=>{
+    const count = finishCurrentFrame();
+    if(count) setStatus(`Frame erfasst (${count} Spieler gesetzt).`, 'ok');
   });
   discardFrameBtn.addEventListener('click', ()=>{
     pendingPositions = []; placementArmed = null;
     updateOverlayInteractivity(); renderCalibOverlay(); updatePlacementStatus();
     setStatus('Positionierung verworfen.');
   });
+
+  // ---------- auto-capture the whole play: repeats KI-Vorschlag + Frame-abschließen at a fixed
+  // interval from the current position to the end. A larger interval means fewer frames, but each
+  // one is a genuine tracking hop rather than a near-duplicate of the last - and since nearest-
+  // position matching has no re-identification, fewer hops mean fewer chances for a missed
+  // detection to fragment a player into a new track (see "Tracks zusammenführen" for cleanup
+  // when it still happens). ----------
+  let autoCaptureRunning = false;
+  function seekAndWaitApp(t){
+    return new Promise(resolve=>{
+      const onSeeked = ()=>{ video.removeEventListener('seeked', onSeeked); resolve(); };
+      video.addEventListener('seeked', onSeeked);
+      video.currentTime = t;
+    });
+  }
+  autoCaptureBtn.addEventListener('click', async ()=>{
+    if(!homography){ alert('Bitte zuerst kalibrieren.'); return; }
+    await loadModelIfNeeded();
+    if(!poseDetector) return;
+    const interval = Math.max(0.3, parseFloat(autoIntervalEl.value) || 1.5);
+    const duration = video.duration || 0;
+    autoCaptureRunning = true;
+    autoCaptureBtn.style.display = 'none';
+    autoStopBtn.style.display = '';
+    updatePlacementEnabled();
+    let t = video.currentTime;
+    let totalAdded = 0;
+    while(autoCaptureRunning && t <= duration + 0.001){
+      await seekAndWaitApp(Math.min(t, duration));
+      await new Promise(r=>setTimeout(r, 30)); // let the seeked frame actually paint before sampling it
+      setStatus(`Automatische Erfassung: ${formatTime(t)} / ${formatTime(duration)}…`);
+      try{
+        await runAiSuggestion();
+        const count = finishCurrentFrame();
+        if(!count) break; // nothing detected at all - stop rather than spin on empty frames
+        totalAdded++;
+      }catch(e){
+        console.error(e);
+        break;
+      }
+      t += interval;
+    }
+    autoCaptureRunning = false;
+    autoCaptureBtn.style.display = '';
+    autoStopBtn.style.display = 'none';
+    updatePlacementEnabled();
+    setStatus(`Automatische Erfassung abgeschlossen (${frames.length} Frames insgesamt). Ergebnis prüfen — bei fragmentierten Spielern "Tracks zusammenführen" nutzen.`, 'ok');
+  });
+  autoStopBtn.addEventListener('click', ()=>{ autoCaptureRunning = false; });
 
   function formatTime(t){
     const rounded = Math.round(t*10)/10;
@@ -1330,6 +1436,25 @@
     if(evt.shiftKey && closest){
       frame.players = frame.players.filter(p => p.trackId !== closest.trackId);
       setStatus('Spieler aus diesem Frame entfernt.', 'ok');
+      renderMainDiagram();
+      return;
+    }
+
+    if(mergePick){
+      if(!closest || !tracks[closest.trackId]) return;
+      if(mergePick.includes(closest.trackId)){
+        setStatus('Bitte zwei unterschiedliche Spieler-Punkte anklicken.', 'err');
+        return;
+      }
+      mergePick.push(closest.trackId);
+      if(mergePick.length < 2){
+        setStatus('Tracks zusammenführen: jetzt den fälschlich getrennten zweiten Punkt anklicken (ggf. anderen Frame über die Galerie auswählen)…');
+        return;
+      }
+      mergeTracks(mergePick[0], mergePick[1]);
+      mergePick = null;
+      setStatus('Tracks zusammengeführt.', 'ok');
+      renderGallery();
       renderMainDiagram();
       return;
     }
