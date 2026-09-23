@@ -130,6 +130,12 @@
       </div>
       <p class="hint">Für einen weiteren Frame (z.B. Endposition eines Laufwegs) im Video weiterscrubben und erneut Positionen setzen — Spieler werden anhand der Nähe zur vorherigen Position automatisch demselben Punkt zugeordnet (Farbe/Nummer bleibt erhalten), Abbrechen der Positionierung mit Esc.</p>
       <div id="gallery"></div>
+      <div class="row" style="margin-top:10px;border-top:1px solid var(--line);padding-top:10px;">
+        <button id="saveProjectBtn" class="ghost">Projekt speichern (JSON)</button>
+        <button id="loadProjectBtn" class="ghost">Projekt laden (JSON)</button>
+        <input type="file" id="projectFileInput" accept="application/json" style="display:none;">
+      </div>
+      <p class="hint">Sichert Frames, Spieler, Namen, Kader und Trikotfarben dieses Spielzugs in einer Datei (nicht das Video selbst) — damit lässt sich die Analyse später fortsetzen oder als Playbook-Eintrag archivieren, ohne bei einem Absturz oder versehentlich geschlossenen Tab alles zu verlieren.</p>
     </div>
 
     <div id="status">Video laden, um zu beginnen.</div>
@@ -238,6 +244,9 @@
   const clearActionsBtn = document.getElementById('clearActionsBtn');
   const actionListEl = document.getElementById('actionList');
   const mergeTracksBtn = document.getElementById('mergeTracksBtn');
+  const saveProjectBtn = document.getElementById('saveProjectBtn');
+  const loadProjectBtn = document.getElementById('loadProjectBtn');
+  const projectFileInput = document.getElementById('projectFileInput');
   const autoIntervalEl = document.getElementById('autoInterval');
   const autoCaptureBtn = document.getElementById('autoCaptureBtn');
   const autoStopBtn = document.getElementById('autoStopBtn');
@@ -361,6 +370,10 @@
   fileInput.addEventListener('change', ()=>{
     const file = fileInput.files[0];
     if(!file) return;
+    if(frames.length && !confirm(`Es gibt noch ${frames.length} erfasste(n) Frame(s) für den aktuellen Spielzug, die beim Laden eines neuen Videos verloren gehen. Vorher über "Projekt speichern (JSON)" sichern! Trotzdem neues Video laden und aktuelle Frames verwerfen?`)){
+      fileInput.value = '';
+      return;
+    }
     if(currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
     currentObjectUrl = URL.createObjectURL(file);
     video.src = currentObjectUrl;
@@ -1053,6 +1066,74 @@
     setStatus('Tracks zusammenführen: zuerst den bestehenden (richtigen) Spieler-Punkt anklicken…');
   });
 
+  // ---------- project save/load: exports frames/tracks/roster/colors as JSON so an analysis can be
+  // backed up or resumed later. The video itself is never embedded (far too large for a JSON file) -
+  // re-loading a matching video is only needed to keep capturing NEW frames. Already-captured frames
+  // are fully self-contained (player/ball positions are stored in real court meters, not video
+  // pixels) and render/export just fine with no video loaded at all. ----------
+  const PROJECT_VERSION = 1;
+  function serializeProject(){
+    return {
+      version: PROJECT_VERSION,
+      playName: playNameEl.value,
+      offenseColor: offenseColorEl.value, offenseColorSet,
+      defenseColor: defenseColorEl.value, defenseColorSet,
+      offenseRoster: offenseRosterEl.value, defenseRoster: defenseRosterEl.value,
+      nextTrackId, tracks, frames,
+    };
+  }
+  function applyProject(data){
+    playNameEl.value = data.playName || '';
+    offenseColorEl.value = data.offenseColor || '#ffffff';
+    defenseColorEl.value = data.defenseColor || '#1d4ed8';
+    offenseColorSet = !!data.offenseColorSet;
+    defenseColorSet = !!data.defenseColorSet;
+    offenseRosterEl.value = data.offenseRoster || '';
+    defenseRosterEl.value = data.defenseRoster || '';
+    tracks = data.tracks && typeof data.tracks === 'object' ? data.tracks : {};
+    nextTrackId = data.nextTrackId || 1;
+    frames = Array.isArray(data.frames) ? data.frames : [];
+    selectedFrameIndex = frames.length ? frames.length - 1 : -1;
+    pendingPositions = [];
+    cancelAllPickModes();
+    updateOverlayInteractivity();
+    renderGallery(); renderMainDiagram(); updatePlacementStatus(); updatePlacementEnabled();
+  }
+  function downloadJSON(obj, filename){
+    const blob = new Blob([JSON.stringify(obj)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+  saveProjectBtn.addEventListener('click', ()=>{
+    if(!frames.length){ alert('Noch keine Frames vorhanden.'); return; }
+    downloadJSON(serializeProject(), `${sanitizeFilename(playNameEl.value)}-projekt.json`);
+    setStatus('Projekt als JSON-Datei gespeichert.', 'ok');
+  });
+  loadProjectBtn.addEventListener('click', ()=>{
+    if(frames.length && !confirm(`Es gibt noch ${frames.length} erfasste(n) Frame(s), die beim Laden eines Projekts überschrieben werden. Vorher sichern? Trotzdem fortfahren?`)) return;
+    projectFileInput.value = '';
+    projectFileInput.click();
+  });
+  projectFileInput.addEventListener('change', ()=>{
+    const file = projectFileInput.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const data = JSON.parse(reader.result);
+        if(!data || typeof data !== 'object' || !Array.isArray(data.frames)) throw new Error('invalid project file');
+        applyProject(data);
+        setStatus(`Projekt geladen (${data.frames.length} Frame(s)). Zum Erfassen weiterer Frames ein passendes Video laden und kalibrieren.`, 'ok');
+      }catch(e){
+        console.error(e);
+        setStatus('Diese Datei konnte nicht als Projekt gelesen werden.', 'err');
+      }
+    };
+    reader.readAsText(file);
+  });
+
   // ---------- finish/discard the frame currently being placed ----------
   function makeThumbnail(fullCanvas, positions){
     const tw = 200, th = Math.round(200 * fullCanvas.height / fullCanvas.width);
@@ -1067,17 +1148,27 @@
     });
     return c.toDataURL('image/png');
   }
+  // Frames are always kept sorted by video timestamp, not by capture order - scrubbing back to
+  // fill in an earlier moment after already capturing later ones (e.g. adding a play's starting
+  // position as an afterthought) must not scramble the movement trails, track-matching, or the
+  // exported storyboard's left-to-right order.
+  function findChronoInsertIndex(time){
+    let i = 0;
+    while(i < frames.length && frames[i].time <= time) i++;
+    return i;
+  }
   function finishCurrentFrame(){
     if(!pendingPositions.length) return 0;
     const fullCanvas = document.createElement('canvas');
     fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
     fullCanvas.getContext('2d').drawImage(video, 0, 0);
-    const prevFrame = frames[frames.length-1] || null;
+    const insertIndex = findChronoInsertIndex(video.currentTime);
+    const prevFrame = insertIndex > 0 ? frames[insertIndex-1] : null;
     const elapsed = prevFrame ? Math.max(0, video.currentTime - prevFrame.time) : 0;
     const matched = matchTracks(prevFrame ? prevFrame.players : [], pendingPositions, elapsed);
     const thumb = makeThumbnail(fullCanvas, pendingPositions);
-    frames.push({id: uid(), time: video.currentTime, thumb, players: matched, ball: null, actions: []});
-    selectedFrameIndex = frames.length - 1;
+    frames.splice(insertIndex, 0, {id: uid(), time: video.currentTime, thumb, players: matched, ball: null, actions: []});
+    selectedFrameIndex = insertIndex;
     const count = pendingPositions.length;
     pendingPositions = []; placementArmed = null;
     updateOverlayInteractivity(); renderCalibOverlay();
@@ -1174,6 +1265,8 @@
     });
   }
   clearFramesBtn.addEventListener('click', ()=>{
+    if(!frames.length) return;
+    if(!confirm(`Wirklich alle ${frames.length} Frame(s) dieses Spielzugs unwiderruflich löschen?`)) return;
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
     renderGallery(); renderMainDiagram();
   });
