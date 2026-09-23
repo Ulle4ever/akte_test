@@ -138,9 +138,9 @@
           <button id="autoCaptureBtn" class="ghost" disabled>Ganzen Spielzug automatisch erfassen (KI)</button>
           <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
         </div>
-        <p class="hint">Erfasst ab der aktuellen Videoposition bis zum Ende automatisch per KI-Vorschlag, im gewählten Zeitabstand. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten — bei Fragmentierung hilft "Tracks zusammenführen" im Diagramm.</p>
+        <p class="hint">Erfasst ab der aktuellen Videoposition bis zum Ende automatisch per KI-Vorschlag, im gewählten Zeitabstand. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten — bei Fragmentierung hilft "Tracks zusammenführen" im Diagramm. Bei schwierigen Kamerawinkeln (weit, schräg, Spieler klein im Bild) erkennt die KI oft zu wenige/falsche Spieler für eine brauchbare automatische Erfassung — in dem Fall lieber Frame für Frame manuell setzen (Klick rastet automatisch auf erkannte Spieler ein, siehe unten).</p>
       </details>
-      <p class="callout">Wichtig: Immer exakt auf die Stelle klicken, an der die <strong>Füße den Boden berühren</strong> — nicht auf Trikot, Kopf oder Körpermitte. Der Klickpunkt wird als Bodenposition auf dem Feld interpretiert; ein falscher Punkt kann die reale Position um mehrere Meter verfälschen, besonders bei seitlichen/schrägen Kamerawinkeln. Die "KI-Vorschlag"-Funktion macht das automatisch richtig (sie erkennt die Fußgelenke) — beim manuellen Setzen musst du selbst darauf achten.</p>
+      <p class="callout">Beim Klicken auf einen Spieler wird die Position automatisch auf dessen von der KI erkannte <strong>Fußposition</strong> eingerastet, sofern in der Nähe erkannt (kurzer Hinweis "an erkannten Spieler angepasst" erscheint dann) — du musst also nicht pixelgenau die Füße treffen. Wird niemand erkannt, zählt der geklickte Punkt exakt so, wie geklickt; dann selbst möglichst genau auf die Fußposition zielen, nicht auf Trikot oder Kopf, da sonst besonders bei schrägen Kamerawinkeln die reale Position um mehrere Meter danebenliegen kann.</p>
       <div class="row">
         <button id="placeOffenseBtn" disabled>+ Offense-Spieler setzen</button>
         <button id="placeDefenseBtn" class="ghost" disabled>+ Defense-Spieler setzen</button>
@@ -365,7 +365,8 @@
   let ballPlacementArmed = false;
   let placementArmed = null; // 'offense' | 'defense' | null - clicking the video adds a player of this team
   let pendingPositions = []; // {x,y,nx,ny,team} being placed for the frame not yet finished
-  let poseDetector = null, modelLoading = false; // lazily loaded only when "KI-Vorschlag" is first used
+  let poseDetector = null, modelLoading = false; // lazily loaded when "KI-Vorschlag" or manual snap-to-pose is first used
+  let cachedPoseTime = null, cachedPoses = null; // last estimatePoses() result, reused while the video stays on the same moment
   let colorPickTarget = null; // 'offense' | 'defense' | null - next video click sets that team's jersey color
   let offenseColorSet = false, defenseColorSet = false; // true once the user actually configures a
   // color (not just the unconfigured <input type=color> default) - classifyTeam() must never guess
@@ -851,13 +852,37 @@
   function pendingColor(team){
     return team === 'offense' ? '#C43E0E' : team === 'defense' ? '#2563eb' : '#94a3b8';
   }
-  function placePlayerAt(clientX, clientY){
+  // Snap radius in real court meters, not screen pixels - a fixed pixel radius would be far too
+  // generous close to the camera and far too strict at the far end of an oblique broadcast shot,
+  // exactly the kind of perspective distortion this tool already has to account for elsewhere.
+  // Chosen roughly as "anywhere on a standing player's body", not just their exact feet - this is
+  // what actually fixes the earlier finding that clicking a player's head instead of their feet can
+  // shift the computed position by several meters: as long as the click lands within about a body's
+  // width of a detected player, it snaps to their precise (AI-detected) ground-contact point instead
+  // of wherever was literally clicked.
+  const PLACEMENT_SNAP_RADIUS_M = 1.2;
+  async function placePlayerAt(clientX, clientY){
+    const team = placementArmed; // capture now - an async detection gap follows, during which the
+    // user could switch teams or cancel; the point must still belong to whichever team was armed
+    // at the moment of the actual click, not whatever happens to be armed once detection resolves.
     const rect = overlay.getBoundingClientRect();
     const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
-    const [cx, cy] = applyHomography(homography, nx, ny);
-    pendingPositions.push({x:cx, y:cy, nx, ny, team: placementArmed});
+    const [rawCx, rawCy] = applyHomography(homography, nx, ny);
+    let finalNx = nx, finalNy = ny, finalCx = rawCx, finalCy = rawCy, snapped = false;
+    const poses = await getPosesForCurrentMoment();
+    let bestD = PLACEMENT_SNAP_RADIUS_M;
+    poses.forEach(pose=>{
+      const foot = getFootPoint(pose.keypoints);
+      if(!foot) return;
+      const [fcx, fcy] = applyHomography(homography, foot.x, foot.y);
+      const d = Math.hypot(fcx-rawCx, fcy-rawCy);
+      if(d < bestD){ bestD = d; finalNx = foot.x; finalNy = foot.y; finalCx = fcx; finalCy = fcy; snapped = true; }
+    });
+    if(!team) return; // placement was cancelled (Esc) while detection was running
+    pendingPositions.push({x:finalCx, y:finalCy, nx:finalNx, ny:finalNy, team});
     renderCalibOverlay();
     updatePlacementStatus();
+    if(snapped) setStatus('Position an erkannten Spieler angepasst (Fußposition).', 'ok');
   }
   function removePendingNear(clientX, clientY){
     const rect = overlay.getBoundingClientRect();
@@ -1028,6 +1053,27 @@
     modelLoading = false;
     updatePlacementEnabled();
   }
+  // Reused by manual-placement snapping (below) so every click on the same paused moment doesn't
+  // re-run detection from scratch - cached per exact video.currentTime, invalidated the moment the
+  // video is scrubbed anywhere else. Never throws: a model load failure or detection error just
+  // means no poses to snap to, so manual placement keeps working exactly as it always has.
+  async function getPosesForCurrentMoment(){
+    if(cachedPoseTime === video.currentTime && cachedPoses) return cachedPoses;
+    if(!poseDetector){
+      if(modelLoading) return [];
+      try{ await loadModelIfNeeded(); }catch(e){ return []; }
+    }
+    if(!poseDetector) return [];
+    try{
+      const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
+      cachedPoseTime = video.currentTime;
+      cachedPoses = poses;
+      return poses;
+    }catch(e){
+      console.error(e);
+      return [];
+    }
+  }
   // A calibration built from points confined to a small part of the court (see calibCoverageFrac)
   // has to extrapolate further for anything else, so its projected positions for genuine players can
   // land further from the true court boundary than a normal calibration's would - the "is this even
@@ -1113,12 +1159,14 @@
     placementArmed = 'offense';
     updateOverlayInteractivity();
     updatePlacementStatus();
+    loadModelIfNeeded(); // warm up in the background so the first click can snap immediately, not after a model-load delay
   });
   placeDefenseBtn.addEventListener('click', ()=>{
     cancelAllPickModes();
     placementArmed = 'defense';
     updateOverlayInteractivity();
     updatePlacementStatus();
+    loadModelIfNeeded();
   });
   function updatePlacementStatus(){
     const off = pendingPositions.filter(p=>p.team==='offense').length;
