@@ -132,9 +132,10 @@
 
     <div class="card">
       <h2><span class="step-badge">3</span> Frames erfassen</h2>
-      <p class="muted">Für den <strong>ersten Frame</strong> am besten Team wählen und jeden Spieler direkt im Video anklicken — das gibt dem System einen zuverlässigen Ausgangspunkt, von dem aus es jeden Spieler wiedererkennen kann. Für <strong>jeden weiteren Frame</strong> im Video weiterscrubben und "Position automatisch bestimmen" klicken: bereits platzierte Spieler werden automatisch an ihrer neuen Position wiedergefunden (visuelle Verfolgung, kein erneutes Raten), neu ins Bild kommende Spieler werden zusätzlich per KI gesucht. Ergebnis danach kurz prüfen — unsicher wiedergefundene Spieler sind gelb markiert.</p>
+      <p class="muted">Für den <strong>ersten Frame</strong> genau die Spieler anklicken, die du im Diagramm sehen willst — <strong>oft reichen die 5 Offense-Spieler</strong>, Defense ist komplett optional. Das legt fest, wer danach verfolgt wird. Für <strong>jeden weiteren Frame</strong> im Video weiterscrubben und "Position automatisch bestimmen" klicken: genau diese Spieler werden an ihrer neuen Position wiedergefunden (reine Bildverfolgung, kein Raten) — es werden dabei nie von selbst neue Spieler hinzugefügt, damit die Anzahl und Nummerierung über den ganzen Spielzug stabil bleibt. Kommt wirklich jemand neu dazu (Wechsel), dafür "Nach neuen Spielern suchen" nutzen. Unsicher wiedergefundene Spieler sind gelb markiert — kurz prüfen.</p>
       <div class="row">
         <button id="aiSuggestBtn" class="ghost" disabled>Position automatisch bestimmen</button>
+        <button id="findNewPlayersBtn" class="ghost" disabled>Nach neuen Spielern suchen</button>
       </div>
       <details class="subtoggle">
         <summary>Erweitert: Ganzen Spielzug automatisch erfassen</summary>
@@ -143,7 +144,7 @@
           <button id="autoCaptureBtn" class="ghost" disabled>Ganzen Spielzug automatisch erfassen</button>
           <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
         </div>
-        <p class="hint">Wiederholt "Position automatisch bestimmen" + "Frame abschließen" automatisch vom aktuellen Zeitpunkt bis zum Ende, im gewählten Zeitabstand. Existiert bereits ein erster, manuell gesetzter Frame (empfohlen — zuverlässiger als der erste Schritt rein per KI), wird ab dort verfolgt statt geraten; ohne einen bestehenden Frame startet die KI-Erkennung bei null und baut die Verfolgung ab dem ersten gefundenen Frame selbst auf. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten. Bricht die Verfolgung trotzdem mal ab (z.B. nach längerer Verdeckung), hilft "Tracks zusammenführen" im Diagramm.</p>
+        <p class="hint">Setzt voraus, dass der erste Frame bereits manuell erfasst wurde (siehe oben) — verfolgt von dort ab nur noch genau diese Spieler automatisch bis zum Ende, im gewählten Zeitabstand, ohne je von selbst neue hinzuzufügen. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten. Bricht die Verfolgung trotzdem mal ab (z.B. nach längerer Verdeckung), bleibt der betroffene Spieler in dem Frame einfach aus — danach per "Position automatisch bestimmen" oder manuell wieder aufnehmen.</p>
       </details>
       <p class="callout">Beim Klicken auf einen Spieler wird die Position automatisch auf dessen von der KI erkannte <strong>Fußposition</strong> eingerastet, sofern in der Nähe erkannt (kurzer Hinweis "an erkannten Spieler angepasst" erscheint dann) — du musst also nicht pixelgenau die Füße treffen. Wird niemand erkannt, zählt der geklickte Punkt exakt so, wie geklickt; dann selbst möglichst genau auf die Fußposition zielen, nicht auf Trikot oder Kopf, da sonst besonders bei schrägen Kamerawinkeln die reale Position um mehrere Meter danebenliegen kann.</p>
       <div class="row">
@@ -257,6 +258,7 @@
   const offenseRosterEl = document.getElementById('offenseRoster');
   const defenseRosterEl = document.getElementById('defenseRoster');
   const aiSuggestBtn = document.getElementById('aiSuggestBtn');
+  const findNewPlayersBtn = document.getElementById('findNewPlayersBtn');
   const placeOffenseBtn = document.getElementById('placeOffenseBtn');
   const placeDefenseBtn = document.getElementById('placeDefenseBtn');
   const finishFrameBtn = document.getElementById('finishFrameBtn');
@@ -1367,8 +1369,8 @@
   const PLAYER_HEIGHT_M = 1.85;
   const PLAYER_HEIGHT_MIN_FRAC = 0.35;
   const PLAYER_HEIGHT_MAX_FRAC = 2.2;
-  // Pure detection step, shared by the legacy single-shot suggestion below and by autoAdvanceFrame's
-  // "find players who aren't already tracked yet" step - returns raw candidates without touching
+  // Pure detection step, used by runAiSuggestion below (the first frame's initial suggestion, and the
+  // explicit "Nach neuen Spielern suchen" action) - returns raw candidates without touching
   // pendingPositions itself, so callers can filter/merge them differently.
   async function detectPoseCandidates(aggregate){
     if(!homography || !personDetector) return [];
@@ -1432,70 +1434,83 @@
     updatePlacementStatus();
     return {added, guessed};
   }
-  // Core of the main "Position automatisch bestimmen" workflow: re-locates every player already seen
-  // in the most recently captured frame via the visual tracker above (matchTemplateForward), then
-  // runs pose detection only to catch players who aren't tracked yet (new to the frame, or a track
-  // that was lost) - deduped against what tracking already found. Works even if the pose model never
-  // loaded (tracking alone still runs), and even if no previous frame exists yet (falls back to pose
-  // detection only, same as the legacy single-shot suggestion).
-  async function autoAdvanceFrame(aggregate){
-    if(!homography) return {trackedOk:0, trackedLow:0, newCount:0};
+  // Core of the main "Position automatisch bestimmen" workflow - and now the ONLY thing it does.
+  // Re-locates every player already seen in the most recently captured frame via the visual tracker
+  // above (matchTemplateForward) - nothing else. It used to also run pose detection to pick up new
+  // people every single time, but real-world use showed that silently adds spectators/bench and
+  // fragments players into ever-growing numbers of tracks every time detection briefly missed someone
+  // - exactly what you don't want for "mark the 5 offense players once, then have them followed
+  // through the play". Finding someone NEW (a substitution, a player who was off-screen) is now a
+  // separate, deliberate action (see "Nach neuen Spielern suchen" / runAiSuggestion below) that the
+  // user triggers on purpose, not something that happens as a side effect of every tracking step.
+  // Needs no AI model at all - pure canvas pixel matching - so it's fast and works even if the
+  // person-detector never loaded.
+  async function trackKnownPlayers(){
+    if(!homography) return {trackedOk:0, trackedLow:0, hadPrevFrame:false};
     const idx = findChronoInsertIndex(video.currentTime);
     const prevFrame = idx>0 ? frames[idx-1] : null;
-    const tracked = [];
-    if(prevFrame){
-      const fullCanvas = document.createElement('canvas');
-      fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
-      fullCanvas.getContext('2d').drawImage(video, 0, 0);
-      const feat = toTrackFeatures(fullCanvas);
-      const elapsed = Math.max(0, video.currentTime - prevFrame.time);
-      prevFrame.players.forEach(p=>{
-        const track = tracks[p.trackId];
-        if(!track || !track.template || !track.lastNative) return;
-        const m = matchTemplateForward(feat, track, elapsed);
-        if(m) tracked.push({...m, team: track.team, trackId: p.trackId});
-      });
-    }
-    const poseCandidates = personDetector ? await detectPoseCandidates(aggregate) : [];
-    let trackedOk = 0, trackedLow = 0, newCount = 0;
-    tracked.forEach(t=>{
-      if(pendingPositions.some(p => Math.hypot(p.x-t.x,p.y-t.y) < 0.8)) return;
-      const lowConfidence = t.confidence < TRACK_CONFIDENCE_OK;
-      pendingPositions.push({x:t.x, y:t.y, nx:t.nx, ny:t.ny, team:t.team, trackId:t.trackId, tracked:true, lowConfidence});
+    if(!prevFrame) return {trackedOk:0, trackedLow:0, hadPrevFrame:false};
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+    fullCanvas.getContext('2d').drawImage(video, 0, 0);
+    const feat = toTrackFeatures(fullCanvas);
+    const elapsed = Math.max(0, video.currentTime - prevFrame.time);
+    let trackedOk = 0, trackedLow = 0;
+    prevFrame.players.forEach(p=>{
+      const track = tracks[p.trackId];
+      if(!track || !track.template || !track.lastNative) return;
+      const m = matchTemplateForward(feat, track, elapsed);
+      if(!m) return; // track lost this frame - don't guess, and never spawn a replacement track for it
+      if(pendingPositions.some(pp => Math.hypot(pp.x-m.x,pp.y-m.y) < 0.8)) return;
+      const lowConfidence = m.confidence < TRACK_CONFIDENCE_OK;
+      pendingPositions.push({x:m.x, y:m.y, nx:m.nx, ny:m.ny, team:track.team, trackId:p.trackId, tracked:true, lowConfidence});
       if(lowConfidence) trackedLow++; else trackedOk++;
-    });
-    poseCandidates.forEach(c=>{
-      const dup = tracked.some(t => Math.hypot(t.x-c.x,t.y-c.y) < AI_DEDUP_DIST_M)
-               || pendingPositions.some(p => Math.hypot(p.x-c.x,p.y-c.y) < 0.8);
-      if(dup) return;
-      pendingPositions.push({x:c.x, y:c.y, nx:c.nx, ny:c.ny, team:c.team});
-      newCount++;
     });
     renderCalibOverlay();
     updatePlacementStatus();
-    return {trackedOk, trackedLow, newCount};
+    return {trackedOk, trackedLow, hadPrevFrame:true};
   }
   aiSuggestBtn.addEventListener('click', async ()=>{
     if(!homography) return;
-    await loadModelIfNeeded(); // best-effort - tracking already-known players can still work even if this fails
     aiSuggestBtn.disabled = true;
-    setStatus('Automatische Positionsbestimmung läuft (verfolgt bereits bekannte Spieler weiter, sucht nach neuen)…');
+    setStatus('Verfolgt bereits platzierte Spieler automatisch weiter…');
     try{
-      const {trackedOk, trackedLow, newCount} = await autoAdvanceFrame(true);
-      const parts = [];
-      if(trackedOk || trackedLow){
+      const {trackedOk, trackedLow, hadPrevFrame} = await trackKnownPlayers();
+      if(!hadPrevFrame){
+        setStatus('Noch kein vorheriger Frame zum Weiterverfolgen — bitte die gewünschten Spieler (z.B. nur die 5 Offense) erst manuell setzen und "Frame abschließen" klicken.', 'err');
+      } else if(trackedOk || trackedLow){
         const lowHint = trackedLow ? ` (davon ${trackedLow} unsicher, gelb markiert, bitte prüfen)` : '';
-        parts.push(`${trackedOk+trackedLow} bereits bekannte Spieler automatisch weiterverfolgt${lowHint}`);
-      }
-      if(newCount) parts.push(`${newCount} neue Position(en) erkannt`);
-      if(parts.length){
-        setStatus(`${parts.join(', ')}. Ausreißer mit Shift+Klick entfernen, fehlende Spieler manuell ergänzen.`, 'ok');
+        setStatus(`${trackedOk+trackedLow} Spieler automatisch weiterverfolgt${lowHint}. Fehlt jemand oder kommt neu dazu? Manuell ergänzen oder "Nach neuen Spielern suchen" nutzen.`, 'ok');
       } else {
-        setStatus('Keine Position gefunden — bitte Spieler manuell setzen (Klick rastet automatisch auf erkannte Füße ein).', 'err');
+        setStatus('Keine der bekannten Spielerpositionen wiedergefunden — bitte manuell setzen.', 'err');
       }
     }catch(e){
       console.error(e);
-      setStatus('Fehler bei der automatischen Positionsbestimmung.', 'err');
+      setStatus('Fehler beim automatischen Weiterverfolgen.', 'err');
+    }
+    updatePlacementEnabled();
+  });
+  // Separate, deliberate action for the one case automatic tracking above intentionally never handles
+  // on its own: a player who wasn't tracked before (a substitution, someone stepping into frame).
+  // Reuses the same coco-ssd-based detection as the very first frame's suggestion, filtered down to
+  // genuinely new people (deduped against whatever's already tracked/pending).
+  findNewPlayersBtn.addEventListener('click', async ()=>{
+    if(!homography) return;
+    await loadModelIfNeeded();
+    if(!personDetector){ setStatus('Spieler-Erkennung nicht verfügbar (Internetverbindung prüfen) — bitte manuell setzen.', 'err'); return; }
+    findNewPlayersBtn.disabled = true;
+    setStatus('Suche nach neuen Spielern…');
+    try{
+      const {added, guessed} = await runAiSuggestion(true);
+      if(added){
+        const guessHint = guessed ? ` Team bei ${guessed} davon anhand der Trikotfarbe vorgeschlagen (bitte gegenprüfen).` : '';
+        setStatus(`${added} neue Position(en) gefunden.${guessHint} Ausreißer mit Shift+Klick entfernen.`, 'ok');
+      } else {
+        setStatus('Keine zusätzlichen Spieler gefunden.');
+      }
+    }catch(e){
+      console.error(e);
+      setStatus('Fehler bei der Suche nach neuen Spielern.', 'err');
     }
     updatePlacementEnabled();
   });
@@ -1536,8 +1551,9 @@
     const ready = !!homography && !calibMode && !!video.src && !colorPickTarget && !autoCaptureRunning;
     placeOffenseBtn.disabled = !ready;
     placeDefenseBtn.disabled = !ready;
-    aiSuggestBtn.disabled = !ready || personDetectorLoading;
-    autoCaptureBtn.disabled = !ready || personDetectorLoading;
+    aiSuggestBtn.disabled = !ready; // pure tracking, no model needed - never blocked on model loading
+    findNewPlayersBtn.disabled = !ready || personDetectorLoading;
+    autoCaptureBtn.disabled = !ready || !frames.length; // nothing to track forward from without a first frame
     // Finishing/discarding already-placed points must stay available even while re-editing the
     // calibration or picking a jersey color mid-placement - otherwise those points get stranded
     // (can't finish, can't discard) until the user backs out of that other mode first.
@@ -1557,7 +1573,7 @@
 
   const MAX_PLAYER_SPEED_MPS = 8;  // generous upper bound (sprint speed) for track-matching
   const MIN_MATCH_DIST = 1.5;      // meters; floor for near-zero elapsed time (pose jitter, stance shift)
-  // A position that already carries a trackId (from the visual tracker in autoAdvanceFrame, which
+  // A position that already carries a trackId (from the visual tracker in trackKnownPlayers, which
   // already knows exactly which player it just re-located) is passed through as-is - nearest-position
   // guessing is only needed for positions that DON'T already know their identity (manual clicks, new
   // pose-detected entrants). Mixing the two means a confidently-tracked player can never accidentally
@@ -1782,7 +1798,7 @@
   }
   autoCaptureBtn.addEventListener('click', async ()=>{
     if(!homography){ alert('Bitte zuerst kalibrieren.'); return; }
-    await loadModelIfNeeded(); // best-effort - tracking already-placed players can still work without it
+    if(!frames.length){ alert('Bitte zuerst einen ersten Frame manuell erfassen (die gewünschten Spieler anklicken, "Frame abschließen") - die automatische Erfassung verfolgt ab dort nur noch genau diese Spieler weiter, ohne von selbst neue hinzuzufügen.'); return; }
     // Any leftover points from an abandoned manual/AI placement belong to whatever moment they were
     // placed at, not to this run's first sampled instant - starting the loop with them still pending
     // would silently fold them into the wrong frame.
@@ -1800,13 +1816,14 @@
       await new Promise(r=>setTimeout(r, 30)); // let the seeked frame actually paint before sampling it
       setStatus(`Automatische Erfassung: ${formatTime(t)} / ${formatTime(duration)}…`);
       try{
-        // aggregate=true: sample a couple of nearby instants too (same as the manual button), not just
-        // this one exact moment - costs a bit more time per step, but precision matters more here than
-        // speed, especially since there's no live human double-checking each step as it happens.
-        await autoAdvanceFrame(true);
+        // Pure tracking only - deliberately never searches for new players mid-loop (see
+        // trackKnownPlayers' own comment): that was exactly what caused track counts to balloon and
+        // get renumbered on every real play tested. The known players simply go missing from a frame
+        // if their track is lost, rather than being replaced by a fresh, wrongly-identified one.
+        await trackKnownPlayers();
         const count = finishCurrentFrame();
-        // Nothing detected at this one instant - skip it and keep going instead of abandoning the
-        // rest of the play; a single missed moment (occlusion, camera glare) shouldn't end the scan.
+        // Nothing tracked at this one instant (e.g. everyone briefly occluded) - skip it and keep
+        // going instead of abandoning the rest of the play.
         if(count) totalAdded++; else totalSkipped++;
       }catch(e){
         console.error(e);
