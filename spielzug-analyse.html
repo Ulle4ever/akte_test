@@ -234,6 +234,7 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
 <script>
 (function(){
@@ -371,8 +372,17 @@
   let ballPlacementArmed = false;
   let placementArmed = null; // 'offense' | 'defense' | null - clicking the video adds a player of this team
   let pendingPositions = []; // {x,y,nx,ny,team} being placed for the frame not yet finished
-  let poseDetector = null, modelLoading = false; // lazily loaded when "KI-Vorschlag" or manual snap-to-pose is first used
-  let cachedPoseTime = null, cachedPoses = null; // last estimatePoses() result, reused while the video stays on the same moment
+  // Two-stage detection: coco-ssd (personDetector) finds WHERE people are - a general-purpose,
+  // officially published TensorFlow.js model that handles small/crowded/far-away people far more
+  // robustly than a single whole-frame pose pass, since it's built for exactly that (multi-scale
+  // object detection), not pose estimation. poseDetector (MoveNet, single-person) then OPTIONALLY
+  // refines each detected box into a precise foot point by cropping+upscaling just that player and
+  // running a per-person pose model on it - small/far-away players effectively get "zoomed in"
+  // individually instead of everyone sharing one shrunk-down whole-frame pass. If the pose refiner
+  // never loads, detection still works from the box alone (bottom-center as the foot point estimate).
+  let personDetector = null, personDetectorLoading = false;
+  let poseDetector = null, modelLoading = false;
+  let cachedFeetTime = null, cachedFeet = null; // last detectPersonFeet() result, reused while the video stays on the same moment
   let colorPickTarget = null; // 'offense' | 'defense' | null - next video click sets that team's jersey color
   let offenseColorSet = false, defenseColorSet = false; // true once the user actually configures a
   // color (not just the unconfigured <input type=color> default) - classifyTeam() must never guess
@@ -898,11 +908,9 @@
     const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
     const [rawCx, rawCy] = applyHomography(homography, nx, ny);
     let finalNx = nx, finalNy = ny, finalCx = rawCx, finalCy = rawCy, snapped = false;
-    const poses = await getPosesForCurrentMoment();
+    const feet = await getFeetForCurrentMoment();
     let bestD = PLACEMENT_SNAP_RADIUS_M;
-    poses.forEach(pose=>{
-      const foot = getFootPoint(pose.keypoints);
-      if(!foot) return;
+    feet.forEach(foot=>{
       const [fcx, fcy] = applyHomography(homography, foot.x, foot.y);
       const d = Math.hypot(fcx-rawCx, fcy-rawCy);
       if(d < bestD){ bestD = d; finalNx = foot.x; finalNy = foot.y; finalCx = fcx; finalCy = fcy; snapped = true; }
@@ -929,9 +937,10 @@
     }
   }
 
-  // ---------- optional KI-Vorschlag: real MoveNet pose detection suggests starting positions,
-  // which still need to be checked/corrected the same way as manually placed ones (drag to fix,
-  // shift+click to remove, click to assign team) - the AI never gets the final say. ----------
+  // ---------- optional automatic detection (coco-ssd person boxes + optional MoveNet per-box
+  // refinement, see loadModelIfNeeded/detectPersonFeet below) suggests starting positions, which
+  // still need to be checked/corrected the same way as manually placed ones (drag to fix, shift+click
+  // to remove, click to assign team) - the AI never gets the final say. ----------
   function kp(keypoints, name){ return keypoints.find(k=>k.name===name); }
   function getFootPoint(keypoints){
     const la = kp(keypoints,'left_ankle'), ra = kp(keypoints,'right_ankle');
@@ -1016,6 +1025,13 @@
     const w = Math.max(Math.max(...xs)-Math.min(...xs), 24) * 0.7;
     const h = Math.max(Math.max(...ys)-Math.min(...ys), 24) * 0.7;
     return averageColorInBox(fullCtx, cx-w/2, cy-h/2, cx+w/2, cy+h/2);
+  }
+  // Jersey-color sample from a coco-ssd box when no refined pose keypoints are available - the
+  // upper-middle portion of a standing person's bounding box is a reasonable torso estimate without
+  // needing actual joint positions.
+  function boxAverageColor(fullCtx, bbox){
+    const [bx,by,bw,bh] = bbox;
+    return averageColorInBox(fullCtx, bx+bw*0.2, by+bh*0.15, bx+bw*0.8, by+bh*0.55);
   }
   function pickColorAt(clientX, clientY){
     const target = colorPickTarget;
@@ -1210,56 +1226,105 @@
   }
 
   async function loadModelIfNeeded(){
-    if(poseDetector || modelLoading) return;
+    const tasks = [];
+    if(!personDetector && !personDetectorLoading) tasks.push(loadPersonDetector());
+    if(!poseDetector && !modelLoading) tasks.push(loadPoseRefiner());
+    if(tasks.length) await Promise.all(tasks);
+  }
+  // Primary detector: coco-ssd finds person bounding boxes. This is the one that must succeed for
+  // any automatic detection to work at all - the pose refiner below is a bonus for precision, not a
+  // requirement.
+  async function loadPersonDetector(){
+    personDetectorLoading = true;
+    updatePlacementEnabled();
+    setStatus('Spieler-Erkennung wird geladen…');
+    try{
+      await tf.setBackend('webgl'); await tf.ready();
+      personDetector = await cocoSsd.load({base:'lite_mobilenet_v2'});
+    }catch(e){
+      console.error(e);
+      setStatus('Spieler-Erkennung konnte nicht geladen werden (Internetverbindung prüfen). Manuelles Setzen funktioniert trotzdem.', 'err');
+    }
+    personDetectorLoading = false;
+    updatePlacementEnabled();
+  }
+  // Optional per-player refinement: MoveNet single-person, run on an upscaled crop of just one
+  // detected box (see detectPersonFeet) rather than the whole frame - gives real ankle keypoints for a
+  // precise foot point where the box-bottom-center estimate would otherwise have to do. If this never
+  // loads (or errors on a given box), detection still works from the box alone.
+  async function loadPoseRefiner(){
     modelLoading = true;
     updatePlacementEnabled();
-    setStatus('KI-Modell wird geladen…');
     try{
       await tf.setBackend('webgl'); await tf.ready();
       poseDetector = await poseDetection.createDetector(
         poseDetection.SupportedModels.MoveNet,
-        {
-          modelType: poseDetection.movenet.modelType.MULTIPOSE_LIGHTNING,
-          // Broadcast footage typically shows players small and distant (the whole point of this
-          // tool is capturing a wide tactical view, not a close-up) - the library's default 256px
-          // internal resize compresses that even further before the model ever sees it. Raising this
-          // (up to the library's recommended max of 512, must be a multiple of 32) trades some speed
-          // for meaningfully better detection of small/far-away figures.
-          multiPoseMaxDimension: 480,
-          // Default is tuned conservatively to avoid noisy false positives; since every suggestion
-          // still requires manual review (shift+click removes outliers) and we additionally filter
-          // by per-keypoint ankle/hip confidence in getFootPoint() below, it's worth accepting more
-          // borderline-confidence poses here rather than silently dropping real players.
-          minPoseScore: 0.15,
-        }
+        { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }
       );
     }catch(e){
-      console.error(e);
-      setStatus('KI-Modell konnte nicht geladen werden (Internetverbindung prüfen). Manuelles Setzen funktioniert trotzdem.', 'err');
+      console.error(e); // non-fatal - box-bottom-center fallback still works without this
     }
     modelLoading = false;
     updatePlacementEnabled();
   }
+  // Runs coco-ssd on the current video moment, then for each detected person tries to refine their
+  // foot point via a per-box MoveNet pass on an upscaled crop (much higher effective resolution for a
+  // small/far-away player than any whole-frame pass could give them). Falls back to the box's own
+  // bottom-center when refinement isn't available or doesn't find confident ankle keypoints.
+  const PERSON_MIN_SCORE = 0.3; // permissive - every suggestion still requires manual review
+  const POSE_REFINE_INPUT_PX = 256; // upscale target for the per-box refinement crop
+  async function detectPersonFeet(){
+    if(!personDetector) return [];
+    let predictions;
+    try{ predictions = await personDetector.detect(video); }
+    catch(e){ console.error(e); return []; }
+    const boxes = predictions.filter(p => p.class === 'person' && p.score >= PERSON_MIN_SCORE);
+    const results = [];
+    for(const p of boxes){
+      const [bx,by,bw,bh] = p.bbox;
+      let footX = bx + bw/2, footY = by + bh, refined = false, score = p.score;
+      if(poseDetector){
+        try{
+          const padX = bw*0.2, padYTop = bh*0.1;
+          const cropX = Math.max(0, bx - padX), cropY = Math.max(0, by - padYTop);
+          const cropW = Math.min(video.videoWidth - cropX, bw + padX*2);
+          const cropH = Math.min(video.videoHeight - cropY, bh + padYTop);
+          if(cropW > 8 && cropH > 8){
+            const scale = Math.min(4, POSE_REFINE_INPUT_PX / Math.max(cropW, cropH));
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = Math.max(1, Math.round(cropW*scale));
+            cropCanvas.height = Math.max(1, Math.round(cropH*scale));
+            cropCanvas.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropCanvas.width, cropCanvas.height);
+            const poses = await poseDetector.estimatePoses(cropCanvas, {flipHorizontal:false});
+            const foot = poses[0] ? getFootPoint(poses[0].keypoints) : null;
+            if(foot){
+              footX = cropX + foot.x/scale;
+              footY = cropY + foot.y/scale;
+              refined = true;
+              score = poses[0].score || score;
+            }
+          }
+        }catch(e){ console.error(e); } // refinement is optional - box-bottom-center still used
+      }
+      results.push({x:footX, y:footY, score, refined, bbox:p.bbox});
+    }
+    return results;
+  }
   // Reused by manual-placement snapping (below) so every click on the same paused moment doesn't
   // re-run detection from scratch - cached per exact video.currentTime, invalidated the moment the
   // video is scrubbed anywhere else. Never throws: a model load failure or detection error just
-  // means no poses to snap to, so manual placement keeps working exactly as it always has.
-  async function getPosesForCurrentMoment(){
-    if(cachedPoseTime === video.currentTime && cachedPoses) return cachedPoses;
-    if(!poseDetector){
-      if(modelLoading) return [];
+  // means no foot points to snap to, so manual placement keeps working exactly as it always has.
+  async function getFeetForCurrentMoment(){
+    if(cachedFeetTime === video.currentTime && cachedFeet) return cachedFeet;
+    if(!personDetector){
+      if(personDetectorLoading) return [];
       try{ await loadModelIfNeeded(); }catch(e){ return []; }
     }
-    if(!poseDetector) return [];
-    try{
-      const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
-      cachedPoseTime = video.currentTime;
-      cachedPoses = poses;
-      return poses;
-    }catch(e){
-      console.error(e);
-      return [];
-    }
+    if(!personDetector) return [];
+    const feet = await detectPersonFeet();
+    cachedFeetTime = video.currentTime;
+    cachedFeet = feet;
+    return feet;
   }
   // A calibration built from points confined to a small part of the court (see calibCoverageFrac)
   // has to extrapolate further for anything else, so its projected positions for genuine players can
@@ -1284,7 +1349,7 @@
   // "find players who aren't already tracked yet" step - returns raw candidates without touching
   // pendingPositions itself, so callers can filter/merge them differently.
   async function detectPoseCandidates(aggregate){
-    if(!homography || !poseDetector) return [];
+    if(!homography || !personDetector) return [];
     const courtMargin = courtMarginForCalibration();
     const originalTime = video.currentTime;
     const duration = video.duration || 0;
@@ -1293,27 +1358,26 @@
     for(const offset of offsets){
       const t = Math.max(0, Math.min(duration, originalTime + offset));
       if(t !== video.currentTime) await seekAndWaitApp(t);
-      const poses = await poseDetector.estimatePoses(video, {flipHorizontal:false});
+      const feet = await detectPersonFeet();
       // Sample jersey colors from this exact sampled frame, if offense/defense colors were
       // configured, so the suggestion can pre-fill a team guess instead of always leaving it open.
       const fullCanvas = document.createElement('canvas');
       fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
       const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
       fullCtx.drawImage(video, 0, 0);
-      poses.forEach(pose=>{
-        const foot = getFootPoint(pose.keypoints);
-        if(!foot) return;
+      feet.forEach(foot=>{
         const [cx,cy] = applyHomography(homography, foot.x, foot.y);
         // Anything projected well outside the court is almost certainly not a player - a
         // spectator, bench personnel, or a stray false-positive - not worth suggesting.
         if(cx < -courtMargin || cx > 15+courtMargin || cy < -courtMargin || cy > 14+courtMargin) return;
-        const score = pose.score || 0;
+        const score = foot.score || 0;
+        const team = classifyTeam(boxAverageColor(fullCtx, foot.bbox));
         const dupIdx = candidates.findIndex(c => Math.hypot(c.x-cx,c.y-cy) < AI_DEDUP_DIST_M);
         if(dupIdx >= 0){
-          if(score > candidates[dupIdx].score) candidates[dupIdx] = {x:cx, y:cy, nx:foot.x, ny:foot.y, team: classifyTeam(torsoAverageColor(fullCtx, pose.keypoints)), score};
+          if(score > candidates[dupIdx].score) candidates[dupIdx] = {x:cx, y:cy, nx:foot.x, ny:foot.y, team, score};
           return;
         }
-        candidates.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team: classifyTeam(torsoAverageColor(fullCtx, pose.keypoints)), score});
+        candidates.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team, score});
       });
     }
     if(video.currentTime !== originalTime) await seekAndWaitApp(originalTime);
@@ -1358,7 +1422,7 @@
         if(m) tracked.push({...m, team: track.team, trackId: p.trackId});
       });
     }
-    const poseCandidates = poseDetector ? await detectPoseCandidates(aggregate) : [];
+    const poseCandidates = personDetector ? await detectPoseCandidates(aggregate) : [];
     let trackedOk = 0, trackedLow = 0, newCount = 0;
     tracked.forEach(t=>{
       if(pendingPositions.some(p => Math.hypot(p.x-t.x,p.y-t.y) < 0.8)) return;
@@ -1438,8 +1502,8 @@
     const ready = !!homography && !calibMode && !!video.src && !colorPickTarget && !autoCaptureRunning;
     placeOffenseBtn.disabled = !ready;
     placeDefenseBtn.disabled = !ready;
-    aiSuggestBtn.disabled = !ready || modelLoading;
-    autoCaptureBtn.disabled = !ready || modelLoading;
+    aiSuggestBtn.disabled = !ready || personDetectorLoading;
+    autoCaptureBtn.disabled = !ready || personDetectorLoading;
     // Finishing/discarding already-placed points must stay available even while re-editing the
     // calibration or picking a jersey color mid-placement - otherwise those points get stranded
     // (can't finish, can't discard) until the user backs out of that other mode first.
