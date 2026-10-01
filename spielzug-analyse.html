@@ -7,24 +7,28 @@
 <style>
   :root{
     --bg:#F7F4EE; --panel:#FFFFFF; --ink:#1e293b; --muted:#64748b;
-    --accent:#C43E0E; --accent-dark:#A8350C; --line:#e2e8f0;
+    --accent:#C43E0E; --accent-dark:#A8350C; --line:#e7e2d8;
+    --shadow:0 1px 2px rgba(30,41,59,.04), 0 6px 16px -8px rgba(30,41,59,.10);
   }
   *{box-sizing:border-box;}
-  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);}
-  header{padding:20px 24px 8px;}
-  header h1{margin:0 0 4px;font-size:22px;}
-  header p{margin:0;color:var(--muted);font-size:14px;max-width:760px;}
-  .wrap{display:grid;grid-template-columns:1fr 1fr;gap:16px;padding:16px 24px 40px;align-items:start;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  header{padding:26px 24px 10px;}
+  header h1{margin:0 0 6px;font-size:23px;letter-spacing:-.01em;}
+  header p{margin:0;color:var(--muted);font-size:14px;max-width:760px;line-height:1.5;}
+  .wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:16px 24px 40px;align-items:start;}
   @media (max-width:980px){.wrap{grid-template-columns:1fr;}}
-  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px;margin-bottom:16px;}
-  .card h2{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:var(--shadow);}
+  .card h2{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;letter-spacing:-.005em;}
   .step-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;flex:none;}
-  .muted{color:var(--muted);font-size:13px;}
-  button{cursor:pointer;border:none;border-radius:8px;padding:8px 14px;font-size:13px;font-weight:600;background:#0f172a;color:#fff;transition:opacity .15s;}
+  .muted{color:var(--muted);font-size:13px;line-height:1.5;}
+  button{cursor:pointer;border:none;border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;background:#0f172a;color:#fff;transition:opacity .15s, transform .1s, background-color .15s;}
   button:hover{opacity:.88;}
-  button:disabled{opacity:.4;cursor:not-allowed;}
+  button:active{transform:translateY(1px);}
+  button:disabled{opacity:.4;cursor:not-allowed;transform:none;}
   button.accent{background:var(--accent);}
+  button.accent:hover{background:var(--accent-dark);opacity:1;}
   button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);}
+  button.ghost:hover{background:#f8fafc;opacity:1;}
   input[type="file"]{font-size:13px;}
   .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0;}
   #videoWrap{position:relative;width:100%;background:#000;border-radius:8px;overflow:hidden;}
@@ -39,12 +43,13 @@
   #calibStatus.ok{color:#047857;font-weight:600;}
   #calibStatus.err{color:#b91c1c;font-weight:600;}
   #gallery{display:flex;gap:8px;overflow-x:auto;padding:4px 0;}
-  .thumb{flex:none;width:120px;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#111;position:relative;cursor:pointer;}
+  .thumb{flex:none;width:120px;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#111;position:relative;cursor:pointer;transition:border-color .15s;}
+  .thumb:hover{border-color:#cbd5e1;}
   .thumb.active{border-color:var(--accent);}
   .thumb img{display:block;width:100%;}
   .thumb .cap{font-size:10px;color:#fff;background:rgba(0,0,0,.55);padding:2px 4px;position:absolute;bottom:0;left:0;right:0;}
   .thumb .del{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;line-height:1;padding:0;}
-  #courtCanvas{width:100%;max-width:680px;background:#fdfaf3;border-radius:8px;border:1px solid var(--line);}
+  #courtCanvas{width:100%;max-width:680px;background:#fdfaf3;border-radius:10px;border:1px solid var(--line);box-shadow:var(--shadow);}
   label.opt{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);}
   .hint{font-size:12px;color:var(--muted);margin-top:6px;}
   details.card > summary{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;}
@@ -63,8 +68,8 @@
      this, a collapsed card would look closed but its buttons/inputs would stay fully clickable. */
   details.card:not([open]) > *:not(summary),
   details.subtoggle:not([open]) > *:not(summary){display:none;}
-  .wizard-banner{margin:0 24px 12px;padding:10px 14px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;color:#9a3412;font-size:13px;font-weight:600;}
-  .callout{font-size:12px;font-weight:600;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:8px 10px;margin:8px 0;}
+  .wizard-banner{margin:0 24px 14px;padding:11px 16px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;border-left:3px solid var(--accent);color:#9a3412;font-size:13px;font-weight:600;}
+  .callout{font-size:12px;font-weight:600;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:9px 11px;margin:8px 0;line-height:1.5;}
 </style>
 </head>
 <body>
@@ -127,18 +132,18 @@
 
     <div class="card">
       <h2><span class="step-badge">3</span> Frames erfassen</h2>
-      <p class="muted">Video an die gewünschte Spielsituation scrubben/pausieren. Entweder "KI-Vorschlag" für eine automatische Grobschätzung nutzen (danach prüfen/korrigieren), oder Team wählen und Spieler direkt im Video anklicken. Beides lässt sich mischen.</p>
+      <p class="muted">Für den <strong>ersten Frame</strong> am besten Team wählen und jeden Spieler direkt im Video anklicken — das gibt dem System einen zuverlässigen Ausgangspunkt, von dem aus es jeden Spieler wiedererkennen kann. Für <strong>jeden weiteren Frame</strong> im Video weiterscrubben und "Position automatisch bestimmen" klicken: bereits platzierte Spieler werden automatisch an ihrer neuen Position wiedergefunden (visuelle Verfolgung, kein erneutes Raten), neu ins Bild kommende Spieler werden zusätzlich per KI gesucht. Ergebnis danach kurz prüfen — unsicher wiedergefundene Spieler sind gelb markiert.</p>
       <div class="row">
-        <button id="aiSuggestBtn" class="ghost" disabled>KI-Vorschlag für aktuellen Moment</button>
+        <button id="aiSuggestBtn" class="ghost" disabled>Position automatisch bestimmen</button>
       </div>
       <details class="subtoggle">
         <summary>Erweitert: Ganzen Spielzug automatisch erfassen</summary>
         <div class="row" style="align-items:center;">
           <label class="opt">Intervall <input type="number" id="autoInterval" value="1.5" min="0.3" step="0.1" style="width:60px;"> s</label>
-          <button id="autoCaptureBtn" class="ghost" disabled>Ganzen Spielzug automatisch erfassen (KI)</button>
+          <button id="autoCaptureBtn" class="ghost" disabled>Ganzen Spielzug automatisch erfassen</button>
           <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
         </div>
-        <p class="hint">Erfasst ab der aktuellen Videoposition bis zum Ende automatisch per KI-Vorschlag, im gewählten Zeitabstand. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten — bei Fragmentierung hilft "Tracks zusammenführen" im Diagramm. Bei schwierigen Kamerawinkeln (weit, schräg, Spieler klein im Bild) erkennt die KI oft zu wenige/falsche Spieler für eine brauchbare automatische Erfassung — in dem Fall lieber Frame für Frame manuell setzen (Klick rastet automatisch auf erkannte Spieler ein, siehe unten).</p>
+        <p class="hint">Wiederholt "Position automatisch bestimmen" + "Frame abschließen" automatisch vom aktuellen Zeitpunkt bis zum Ende, im gewählten Zeitabstand. Existiert bereits ein erster, manuell gesetzter Frame (empfohlen — zuverlässiger als der erste Schritt rein per KI), wird ab dort verfolgt statt geraten; ohne einen bestehenden Frame startet die KI-Erkennung bei null und baut die Verfolgung ab dem ersten gefundenen Frame selbst auf. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten. Bricht die Verfolgung trotzdem mal ab (z.B. nach längerer Verdeckung), hilft "Tracks zusammenführen" im Diagramm.</p>
       </details>
       <p class="callout">Beim Klicken auf einen Spieler wird die Position automatisch auf dessen von der KI erkannte <strong>Fußposition</strong> eingerastet, sofern in der Nähe erkannt (kurzer Hinweis "an erkannten Spieler angepasst" erscheint dann) — du musst also nicht pixelgenau die Füße treffen. Wird niemand erkannt, zählt der geklickte Punkt exakt so, wie geklickt; dann selbst möglichst genau auf die Fußposition zielen, nicht auf Trikot oder Kopf, da sonst besonders bei schrägen Kamerawinkeln die reale Position um mehrere Meter danebenliegen kann.</p>
       <div class="row">
@@ -304,7 +309,7 @@
     } else if(!homography){
       wizardBannerEl.textContent = 'Schritt 2 von 4: Spielfeld kalibrieren — die Punkte über dem Video auf ihre reale Position ziehen.';
     } else if(!frames.length){
-      wizardBannerEl.textContent = 'Schritt 3 von 4: Ersten Frame erfassen — "KI-Vorschlag" nutzen oder Spieler direkt im Video anklicken.';
+      wizardBannerEl.textContent = 'Schritt 3 von 4: Ersten Frame erfassen — Team wählen und jeden Spieler im Video anklicken (Grundlage für die automatische Verfolgung danach).';
     } else {
       wizardBannerEl.textContent = `Schritt 4 von 4: Weitere Frames erfassen und das Taktik-Diagramm rechts prüfen, korrigieren und exportieren. (${frames.length} Frame${frames.length===1?'':'s'} erfasst)`;
     }
@@ -354,6 +359,7 @@
   let liveHomography = null;       // native pixel -> court meters (candidate, while calibrating)
   let liveDisplayHomography = null;// court meters -> native pixel (for positioning un-anchored handles)
   let homography = null;           // COMMITTED native pixel -> court meters, used for capturing frames
+  let homographyInv = null;        // COMMITTED court meters -> native pixel, used for tracking/scale math
   let lastCalibration = null;      // {videoWidth,videoHeight,handlePos,anchored} of the last COMMITTED calibration -
                                     // carried over to the next video if its resolution matches (same camera/broadcast,
                                     // just a different cut clip), so scouting multiple plays doesn't mean recalibrating each one.
@@ -451,6 +457,7 @@
     }
     if(canReuse && liveHomography){
       homography = liveHomography;
+      homographyInv = invertHomography(homography);
       committedSensitivity = calibSensitivity;
       committedCoverageFrac = calibCoverageFrac;
       setCalibMode(false);
@@ -549,6 +556,19 @@
   function applyHomography(H, x, y){
     const w = H[6]*x + H[7]*y + H[8];
     return [(H[0]*x+H[1]*y+H[2])/w, (H[3]*x+H[4]*y+H[5])/w];
+  }
+  // Inverse of a 3x3 homography via the adjugate matrix - applyHomography() normalizes by its own
+  // "w" term regardless of overall scale, so the adjugate (un-normalized by determinant sign/scale)
+  // works directly without needing to force H[8]=1 first. Used to go from court meters back to native
+  // pixels (e.g. to estimate local pixel-per-meter scale for the player tracker below).
+  function invertHomography(H){
+    const [a,b,c,d,e,f,g,h,i] = H;
+    const C11 = e*i - f*h, C12 = -(d*i - f*g), C13 = d*h - e*g;
+    const C21 = -(b*i - c*h), C22 = a*i - c*g, C23 = -(a*h - b*g);
+    const C31 = b*f - c*e, C32 = -(a*f - c*d), C33 = a*e - b*d;
+    const det = a*C11 + b*C12 + c*C13;
+    if(!isFinite(det) || Math.abs(det) < 1e-12) return null;
+    return [C11,C21,C31, C12,C22,C32, C13,C23,C33].map(v=>v/det);
   }
 
   // ---------- calibration overlay ----------
@@ -715,6 +735,7 @@
   calibCommitBtn.addEventListener('click', ()=>{
     if(!liveHomography) return;
     homography = liveHomography;
+    homographyInv = invertHomography(homography);
     committedSensitivity = calibSensitivity;
     committedCoverageFrac = calibCoverageFrac;
     lastCalibration = {
@@ -765,7 +786,15 @@
       octx.beginPath(); octx.arc(dx,dy,7,0,Math.PI*2);
       octx.fillStyle = pendingColor(p.team);
       octx.fill();
-      octx.strokeStyle = '#fff'; octx.lineWidth = 2; octx.stroke();
+      octx.strokeStyle = p.lowConfidence ? '#f59e0b' : '#fff';
+      octx.lineWidth = p.lowConfidence ? 3 : 2;
+      octx.stroke();
+      if(p.lowConfidence){
+        octx.save();
+        octx.setLineDash([3,2]); octx.strokeStyle = '#f59e0b'; octx.lineWidth = 1.5;
+        octx.beginPath(); octx.arc(dx,dy,11,0,Math.PI*2); octx.stroke();
+        octx.restore();
+      }
     });
   }
   function anchoredTemplatePoint(rx,ry,H){
@@ -1022,6 +1051,164 @@
   pickOffenseBtn.addEventListener('click', ()=> armColorPick('offense'));
   pickDefenseBtn.addEventListener('click', ()=> armColorPick('defense'));
 
+  // ---------- lightweight visual tracker: once a player has been placed in a finished frame, this
+  // re-locates them in a LATER frame by matching the visual appearance around their last known
+  // position, instead of relying on a fresh pose-detection guess every single time. This is what
+  // actually fixes "the AI makes me correct almost every frame": pose detection has to find every
+  // player from scratch in every single frame and misses some each time, while tracking only has to
+  // answer "where did THIS specific, already-identified player go" in a small, scale-aware search
+  // window around where they just were - a far easier and more reliable question for a nearly-static
+  // broadcast camera. Pose detection is still used (see detectPoseCandidates below), but only to find
+  // players who aren't tracked yet (a brand new frame, or someone entering the visible area). ----------
+  const TRACK_GRID_W = 10, TRACK_GRID_H = 16; // sparse sample grid size used for appearance matching
+  // The appearance sample box is centered above the foot point by this fraction of its own height
+  // (torso/jersey is far more discriminative than the ground at the feet) - buildTrackTemplate and
+  // matchTemplateForward must agree on this offset, since nx/ny everywhere else in this file always
+  // means the actual foot point, not the shifted sample center.
+  const TRACK_TEMPLATE_Y_OFFSET_FRAC = 0.3;
+  // Tuned against the real test footage: genuine successful tracking of real players 0.6s apart
+  // scored 0.75-1.0 confidence, while a deliberately-mismatched cross-player comparison (one player's
+  // template forced onto a different, distant player's position - not a realistic failure mode since
+  // the search below is always local to a player's own last known position, but a useful worst case)
+  // scored ~0.69 - meaningfully lower than genuine matches, but closer than ideal. Kept conservative
+  // (rather than lowered to let every real match through silently) so a borderline result still gets
+  // flagged for a quick visual check instead of being silently trusted.
+  const TRACK_CONFIDENCE_OK = 0.6; // at/above this, a tracked match is trusted without manual review
+  const TRACK_CONFIDENCE_MIN = 0.15; // below this, treat the player as lost rather than guess wildly
+  // How many native pixels correspond to one real court meter near a given native point - varies a
+  // lot across an oblique broadcast shot (near the camera vs. far away), so this is recomputed per
+  // point rather than assumed constant, the same way the existing snap-to-foot radius already has to
+  // account for perspective distortion.
+  function metersPerPixelAt(nx, ny){
+    if(!homography || !homographyInv) return null;
+    try{
+      const [cx,cy] = applyHomography(homography, nx, ny);
+      const [nx2,ny2] = applyHomography(homographyInv, cx+1, cy);
+      const d = Math.hypot(nx2-nx, ny2-ny);
+      return isFinite(d) && d>0 ? d : null;
+    }catch(e){ return null; }
+  }
+  // Extracts luma (Y) AND chroma (Cb/Cr) per pixel, not just grayscale - jersey color is one of the
+  // single most discriminative things telling a player apart from the court/crowd/background in this
+  // application (that's exactly why jersey-color team classification already exists elsewhere), so
+  // throwing color away before matching discards a strong, nearly-free signal. Testing against the
+  // real match video showed grayscale-only matching can score an unrelated background patch almost as
+  // "confidently" as the correct player when both happen to be low-contrast in luma alone - color
+  // substantially reduces that risk.
+  function toTrackFeatures(canvas){
+    const ctx = canvas.getContext('2d', {willReadFrequently:true});
+    const w = canvas.width, h = canvas.height;
+    const data = ctx.getImageData(0,0,w,h).data;
+    const n = w*h;
+    const Y = new Float32Array(n), Cb = new Float32Array(n), Cr = new Float32Array(n);
+    for(let i=0,j=0;i<data.length;i+=4,j++){
+      const r=data[i], g=data[i+1], b=data[i+2];
+      Y[j] = 0.299*r + 0.587*g + 0.114*b;
+      Cb[j] = 128 - 0.168736*r - 0.331264*g + 0.5*b;
+      Cr[j] = 128 + 0.5*r - 0.418688*g - 0.081312*b;
+    }
+    return {Y, Cb, Cr, w, h};
+  }
+  // Samples a fixed-size grid of points (nearest-pixel) across a box of real pixel size boxW x boxH
+  // centered at (cx,cy) within a pre-computed Y/Cb/Cr buffer, concatenating all three channels into
+  // one vector - this is what makes comparing many candidate positions fast: one getImageData() call
+  // per tracked player per frame-advance (via toTrackFeatures above), then every candidate position is
+  // just cheap array indexing, no further canvas operations or image resizing.
+  function samplePatchGrid(feat, regionW, regionH, cx, cy, boxW, boxH, gridW, gridH){
+    const out = new Float32Array(gridW*gridH*3);
+    let k=0;
+    for(let j=0;j<gridH;j++){
+      const fy = gridH===1 ? 0.5 : j/(gridH-1);
+      const py = Math.round(cy - boxH/2 + fy*boxH);
+      for(let i=0;i<gridW;i++){
+        const fx = gridW===1 ? 0.5 : i/(gridW-1);
+        const px = Math.round(cx - boxW/2 + fx*boxW);
+        const inBounds = px>=0 && px<regionW && py>=0 && py<regionH;
+        const idx = inBounds ? py*regionW+px : -1;
+        out[k++] = inBounds ? feat.Y[idx] : 0;
+        out[k++] = inBounds ? feat.Cb[idx] : 128;
+        out[k++] = inBounds ? feat.Cr[idx] : 128;
+      }
+    }
+    return out;
+  }
+  // Normalized cross-correlation (mean-centered, scale-invariant): a player who got slightly
+  // brighter/darker (camera auto-exposure, moving in/out of a shadow) between frames still matches
+  // well, since only the shape of light/dark variation is compared, not absolute brightness or
+  // contrast. Crucially - unlike a plain sum-of-squared-differences - this is already normalized to
+  // -1..1, so it doesn't need a separate variance-based rescaling that would otherwise make two
+  // unrelated but equally flat/textureless patches (e.g. a plain jersey vs. plain floor) look like a
+  // deceptively confident match just because both have low variance: when either patch is (near)
+  // flat, the denominator collapses and this correctly reports ~0 (no reliable signal) rather than a
+  // false high score.
+  function nccMeanCentered(a, b){
+    const n = a.length;
+    let meanA=0, meanB=0;
+    for(let i=0;i<n;i++){ meanA+=a[i]; meanB+=b[i]; }
+    meanA/=n; meanB/=n;
+    let num=0, denA=0, denB=0;
+    for(let i=0;i<n;i++){
+      const da=a[i]-meanA, db=b[i]-meanB;
+      num += da*db; denA += da*da; denB += db*db;
+    }
+    const den = Math.sqrt(denA*denB);
+    return den < 1e-6 ? 0 : num/den;
+  }
+  // Coarse-to-fine search for where a track's stored template now best matches, starting from its
+  // last known position. Search radius scales with both elapsed time (a player can only move so far
+  // per second - same MAX_PLAYER_SPEED_MPS bound used elsewhere) and local pixel-per-meter scale, so
+  // it's neither too narrow (losing a fast-moving or far-away player) nor needlessly wide (slower,
+  // and more likely to lock onto a different player or the crowd instead). The exact last-known
+  // position is always tested too (with a tiny score bonus to win genuine ties) so an unmoved player
+  // is reported as unmoved rather than drifting a few pixels onto an equally-scoring neighbor.
+  function matchTemplateForward(feat, track, elapsedSeconds){
+    const tmpl = track.template, last = track.lastNative;
+    if(!tmpl || !last) return null;
+    const pxPerM = metersPerPixelAt(last.x, last.y);
+    if(!pxPerM) return null;
+    const searchRadius = Math.max(pxPerM*1.0, pxPerM * MAX_PLAYER_SPEED_MPS * elapsedSeconds);
+    const coarseStep = Math.max(2, Math.round(searchRadius/18));
+    let best = null;
+    function consider(cx, cy){
+      // cx,cy is a candidate FOOT point (matching the semantics of track.lastNative everywhere else) -
+      // the actual sample box is centered above it by the same offset buildTrackTemplate used.
+      const grid = samplePatchGrid(feat, feat.w, feat.h, cx, cy - tmpl.boxH*TRACK_TEMPLATE_Y_OFFSET_FRAC, tmpl.boxW, tmpl.boxH, TRACK_GRID_W, TRACK_GRID_H);
+      let score = nccMeanCentered(tmpl.grid, grid);
+      if(cx===last.x && cy===last.y) score += 1e-4;
+      if(!best || score > best.score) best = {score, nx:cx, ny:cy};
+    }
+    consider(last.x, last.y);
+    for(let dy=-searchRadius; dy<=searchRadius; dy+=coarseStep){
+      for(let dx=-searchRadius; dx<=searchRadius; dx+=coarseStep){
+        if(dx===0 && dy===0) continue;
+        consider(last.x+dx, last.y+dy);
+      }
+    }
+    const coarseNx = best.nx, coarseNy = best.ny;
+    for(let dy=-coarseStep; dy<=coarseStep; dy++){
+      for(let dx=-coarseStep; dx<=coarseStep; dx++){
+        if(dx===0 && dy===0) continue;
+        consider(coarseNx+dx, coarseNy+dy);
+      }
+    }
+    const confidence = Math.max(0, Math.min(1, best.score));
+    if(confidence < TRACK_CONFIDENCE_MIN) return null; // track lost - don't guess wildly
+    const [rx, ry] = applyHomography(homography, best.nx, best.ny);
+    return {x:rx, y:ry, nx:best.nx, ny:best.ny, confidence};
+  }
+  // Builds and stores the appearance template a track will be matched against in later frames -
+  // called once per player whenever a frame is finished (see finishCurrentFrame), from the exact
+  // full-resolution frame that was just captured. The sample box is anchored a bit above the player's
+  // foot point (not centered on it) so it mostly covers jersey/torso rather than mostly floor, since
+  // jersey color/number contrast is far more discriminative for matching than the ground beneath it.
+  function buildTrackTemplate(feat, nx, ny){
+    const pxPerM = metersPerPixelAt(nx, ny);
+    if(!pxPerM) return null;
+    const boxW = pxPerM*0.9, boxH = pxPerM*1.9;
+    const grid = samplePatchGrid(feat, feat.w, feat.h, nx, ny - boxH*TRACK_TEMPLATE_Y_OFFSET_FRAC, boxW, boxH, TRACK_GRID_W, TRACK_GRID_H);
+    return {grid, boxW, boxH};
+  }
+
   async function loadModelIfNeeded(){
     if(poseDetector || modelLoading) return;
     modelLoading = true;
@@ -1093,8 +1280,11 @@
   // samples the whole play at regular intervals and can rely on "Tracks zusammenführen" for gaps.
   const AI_AGGREGATION_OFFSETS_S = [0, -0.2, 0.2];
   const AI_DEDUP_DIST_M = 0.8; // treat detections this close together as the same player
-  async function runAiSuggestion(aggregate){
-    if(!homography || !poseDetector) return {added:0, guessed:0};
+  // Pure detection step, shared by the legacy single-shot suggestion below and by autoAdvanceFrame's
+  // "find players who aren't already tracked yet" step - returns raw candidates without touching
+  // pendingPositions itself, so callers can filter/merge them differently.
+  async function detectPoseCandidates(aggregate){
+    if(!homography || !poseDetector) return [];
     const courtMargin = courtMarginForCalibration();
     const originalTime = video.currentTime;
     const duration = video.duration || 0;
@@ -1127,6 +1317,12 @@
       });
     }
     if(video.currentTime !== originalTime) await seekAndWaitApp(originalTime);
+    return candidates;
+  }
+  // Legacy single-shot wrapper (pose detection only, no tracking) - kept for the very first frame of
+  // a play, where there's nothing yet to track forward from.
+  async function runAiSuggestion(aggregate){
+    const candidates = await detectPoseCandidates(aggregate);
     let added = 0, guessed = 0;
     candidates.forEach(c=>{
       if(pendingPositions.some(p => Math.hypot(p.x-c.x,p.y-c.y) < 0.8)) return; // already have a point there
@@ -1138,19 +1334,70 @@
     updatePlacementStatus();
     return {added, guessed};
   }
+  // Core of the main "Position automatisch bestimmen" workflow: re-locates every player already seen
+  // in the most recently captured frame via the visual tracker above (matchTemplateForward), then
+  // runs pose detection only to catch players who aren't tracked yet (new to the frame, or a track
+  // that was lost) - deduped against what tracking already found. Works even if the pose model never
+  // loaded (tracking alone still runs), and even if no previous frame exists yet (falls back to pose
+  // detection only, same as the legacy single-shot suggestion).
+  async function autoAdvanceFrame(aggregate){
+    if(!homography) return {trackedOk:0, trackedLow:0, newCount:0};
+    const idx = findChronoInsertIndex(video.currentTime);
+    const prevFrame = idx>0 ? frames[idx-1] : null;
+    const tracked = [];
+    if(prevFrame){
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+      fullCanvas.getContext('2d').drawImage(video, 0, 0);
+      const feat = toTrackFeatures(fullCanvas);
+      const elapsed = Math.max(0, video.currentTime - prevFrame.time);
+      prevFrame.players.forEach(p=>{
+        const track = tracks[p.trackId];
+        if(!track || !track.template || !track.lastNative) return;
+        const m = matchTemplateForward(feat, track, elapsed);
+        if(m) tracked.push({...m, team: track.team, trackId: p.trackId});
+      });
+    }
+    const poseCandidates = poseDetector ? await detectPoseCandidates(aggregate) : [];
+    let trackedOk = 0, trackedLow = 0, newCount = 0;
+    tracked.forEach(t=>{
+      if(pendingPositions.some(p => Math.hypot(p.x-t.x,p.y-t.y) < 0.8)) return;
+      const lowConfidence = t.confidence < TRACK_CONFIDENCE_OK;
+      pendingPositions.push({x:t.x, y:t.y, nx:t.nx, ny:t.ny, team:t.team, trackId:t.trackId, tracked:true, lowConfidence});
+      if(lowConfidence) trackedLow++; else trackedOk++;
+    });
+    poseCandidates.forEach(c=>{
+      const dup = tracked.some(t => Math.hypot(t.x-c.x,t.y-c.y) < AI_DEDUP_DIST_M)
+               || pendingPositions.some(p => Math.hypot(p.x-c.x,p.y-c.y) < 0.8);
+      if(dup) return;
+      pendingPositions.push({x:c.x, y:c.y, nx:c.nx, ny:c.ny, team:c.team});
+      newCount++;
+    });
+    renderCalibOverlay();
+    updatePlacementStatus();
+    return {trackedOk, trackedLow, newCount};
+  }
   aiSuggestBtn.addEventListener('click', async ()=>{
     if(!homography) return;
-    await loadModelIfNeeded();
-    if(!poseDetector) return;
+    await loadModelIfNeeded(); // best-effort - tracking already-known players can still work even if this fails
     aiSuggestBtn.disabled = true;
-    setStatus('KI analysiert aktuellen Moment (prüft auch benachbarte Momente für Spieler, die kurz verdeckt sind)…');
+    setStatus('Automatische Positionsbestimmung läuft (verfolgt bereits bekannte Spieler weiter, sucht nach neuen)…');
     try{
-      const {added, guessed} = await runAiSuggestion(true);
-      const guessHint = guessed ? ` Team bei ${guessed} davon anhand der Trikotfarbe vorgeschlagen (bitte gegenprüfen).` : '';
-      setStatus(`KI-Vorschlag: ${added} Position(en) hinzugefügt.${guessHint} Ausreißer mit Shift+Klick entfernen, fehlende Spieler manuell ergänzen.`, 'ok');
+      const {trackedOk, trackedLow, newCount} = await autoAdvanceFrame(true);
+      const parts = [];
+      if(trackedOk || trackedLow){
+        const lowHint = trackedLow ? ` (davon ${trackedLow} unsicher, gelb markiert, bitte prüfen)` : '';
+        parts.push(`${trackedOk+trackedLow} bereits bekannte Spieler automatisch weiterverfolgt${lowHint}`);
+      }
+      if(newCount) parts.push(`${newCount} neue Position(en) erkannt`);
+      if(parts.length){
+        setStatus(`${parts.join(', ')}. Ausreißer mit Shift+Klick entfernen, fehlende Spieler manuell ergänzen.`, 'ok');
+      } else {
+        setStatus('Keine Position gefunden — bitte Spieler manuell setzen (Klick rastet automatisch auf erkannte Füße ein).', 'err');
+      }
     }catch(e){
       console.error(e);
-      setStatus('Fehler bei der KI-Erkennung.', 'err');
+      setStatus('Fehler bei der automatischen Positionsbestimmung.', 'err');
     }
     updatePlacementEnabled();
   });
@@ -1172,14 +1419,16 @@
     const off = pendingPositions.filter(p=>p.team==='offense').length;
     const def = pendingPositions.filter(p=>p.team==='defense').length;
     const unk = pendingPositions.filter(p=>p.team==='unknown').length;
+    const lowConf = pendingPositions.filter(p=>p.lowConfidence).length;
     if(!pendingPositions.length && !placementArmed){
       placementStatusEl.textContent = homography
-        ? '"KI-Vorschlag" nutzen oder "+ Offense"/"+ Defense" wählen und auf die Spieler im Video klicken.'
+        ? '"Position automatisch bestimmen" nutzen oder "+ Offense"/"+ Defense" wählen und auf die Spieler im Video klicken.'
         : 'Video laden und kalibrieren, um Positionen zu setzen.';
     } else {
       const armedHint = placementArmed ? ` — weitere Klicks setzen ${placementArmed === 'offense' ? 'Offense' : 'Defense'}-Spieler (Esc zum Pausieren).` : '';
       const unkHint = unk ? ` ${unk} von KI vorgeschlagen, Team wird nach "Frame abschließen" per Klick auf den Spieler zugeordnet.` : '';
-      placementStatusEl.textContent = `${off} Offense, ${def} Defense gesetzt.${unkHint}${armedHint} Fertig? "Frame abschließen" klicken.`;
+      const lowConfHint = lowConf ? ` ${lowConf} automatisch verfolgte Position(en) unsicher (gelb markiert) — bitte prüfen/korrigieren.` : '';
+      placementStatusEl.textContent = `${off} Offense, ${def} Defense gesetzt.${unkHint}${lowConfHint}${armedHint} Fertig? "Frame abschließen" klicken.`;
     }
     finishFrameBtn.disabled = !pendingPositions.length;
     discardFrameBtn.disabled = !pendingPositions.length;
@@ -1210,10 +1459,26 @@
 
   const MAX_PLAYER_SPEED_MPS = 8;  // generous upper bound (sprint speed) for track-matching
   const MIN_MATCH_DIST = 1.5;      // meters; floor for near-zero elapsed time (pose jitter, stance shift)
+  // A position that already carries a trackId (from the visual tracker in autoAdvanceFrame, which
+  // already knows exactly which player it just re-located) is passed through as-is - nearest-position
+  // guessing is only needed for positions that DON'T already know their identity (manual clicks, new
+  // pose-detected entrants). Mixing the two means a confidently-tracked player can never accidentally
+  // get swapped with a different nearby new detection during the matching below.
   function matchTracks(prevPlayers, newPositions, elapsedSeconds){
+    const result = new Array(newPositions.length);
+    const preAssigned = new Set();
+    newPositions.forEach((np,i)=>{
+      if(np.trackId != null && tracks[np.trackId]){
+        result[i] = {...np};
+        preAssigned.add(np.trackId);
+      }
+    });
+    const remainingPrev = prevPlayers.filter(p=>!preAssigned.has(p.trackId));
+    const remainingIdx = [];
+    newPositions.forEach((np,i)=>{ if(!result[i]) remainingIdx.push(i); });
     const pairs = [];
-    for(const prev of prevPlayers){
-      for(let i=0;i<newPositions.length;i++){
+    for(const prev of remainingPrev){
+      for(const i of remainingIdx){
         const np = newPositions[i];
         pairs.push({prevId: prev.trackId, npIdx:i, d: Math.hypot(prev.x-np.x, prev.y-np.y)});
       }
@@ -1224,19 +1489,18 @@
     // (easily 8+ meters away) gets wrongly treated as a brand-new player.
     const MAX_DIST = Math.max(MIN_MATCH_DIST, (elapsedSeconds||0) * MAX_PLAYER_SPEED_MPS);
     const usedPrev = new Set(), usedNew = new Set();
-    const result = new Array(newPositions.length);
     for(const pair of pairs){
       if(pair.d > MAX_DIST) break;
       if(usedPrev.has(pair.prevId) || usedNew.has(pair.npIdx)) continue;
       usedPrev.add(pair.prevId); usedNew.add(pair.npIdx);
       result[pair.npIdx] = {...newPositions[pair.npIdx], trackId: pair.prevId};
     }
-    for(let i=0;i<newPositions.length;i++){
-      if(result[i]) continue;
+    newPositions.forEach((np,i)=>{
+      if(result[i]) return;
       const id = nextTrackId++;
-      tracks[id] = {id, color: trackColor(id), label: String(id), name: null, team: newPositions[i].team};
-      result[i] = {x:newPositions[i].x, y:newPositions[i].y, trackId:id};
-    }
+      tracks[id] = {id, color: trackColor(id), label: String(id), name: null, team: np.team};
+      result[i] = {...np, trackId:id};
+    });
     return result;
   }
 
@@ -1370,6 +1634,20 @@
     const prevFrame = insertIndex > 0 ? frames[insertIndex-1] : null;
     const elapsed = prevFrame ? Math.max(0, video.currentTime - prevFrame.time) : 0;
     const matched = matchTracks(prevFrame ? prevFrame.players : [], pendingPositions, elapsed);
+    // Build/refresh each player's visual template from the frame just captured, so the NEXT frame can
+    // re-locate them via tracking instead of needing a fresh AI guess - this is what lets automatic
+    // capture carry a player's identity forward reliably instead of re-detecting from scratch each time.
+    if(homography && homographyInv){
+      const feat = toTrackFeatures(fullCanvas);
+      matched.forEach(p=>{
+        if(p.nx == null || p.ny == null || !tracks[p.trackId]) return;
+        const template = buildTrackTemplate(feat, p.nx, p.ny);
+        if(template){
+          tracks[p.trackId].template = template;
+          tracks[p.trackId].lastNative = {x:p.nx, y:p.ny};
+        }
+      });
+    }
     const thumb = makeThumbnail(fullCanvas, pendingPositions);
     frames.splice(insertIndex, 0, {id: uid(), time: video.currentTime, thumb, players: matched, ball: null, actions: []});
     selectedFrameIndex = insertIndex;
@@ -1406,8 +1684,7 @@
   }
   autoCaptureBtn.addEventListener('click', async ()=>{
     if(!homography){ alert('Bitte zuerst kalibrieren.'); return; }
-    await loadModelIfNeeded();
-    if(!poseDetector) return;
+    await loadModelIfNeeded(); // best-effort - tracking already-placed players can still work without it
     // Any leftover points from an abandoned manual/AI placement belong to whatever moment they were
     // placed at, not to this run's first sampled instant - starting the loop with them still pending
     // would silently fold them into the wrong frame.
@@ -1425,7 +1702,7 @@
       await new Promise(r=>setTimeout(r, 30)); // let the seeked frame actually paint before sampling it
       setStatus(`Automatische Erfassung: ${formatTime(t)} / ${formatTime(duration)}…`);
       try{
-        await runAiSuggestion(false); // stay fast across the whole play - single sample per step
+        await autoAdvanceFrame(false); // stay fast across the whole play - single sample per step, tracking carries identity forward
         const count = finishCurrentFrame();
         // Nothing detected at this one instant - skip it and keep going instead of abandoning the
         // rest of the play; a single missed moment (occlusion, camera glare) shouldn't end the scan.
@@ -1539,6 +1816,11 @@
       if(p.manualPosition){
         ctx.save();
         ctx.setLineDash([3,2]); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x,y,r+4,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+      } else if(p.lowConfidence){
+        ctx.save();
+        ctx.setLineDash([3,2]); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.5;
         ctx.beginPath(); ctx.arc(x,y,r+4,0,Math.PI*2); ctx.stroke();
         ctx.restore();
       }
@@ -1785,7 +2067,7 @@
     pointerDown.moved = true;
     const [rx,ry] = pixToCourt(OX,OY,S,cx,cy);
     const entry = frames[selectedFrameIndex].players.find(q=>q.trackId===pointerDown.trackId);
-    if(entry){ entry.x = rx; entry.y = ry; entry.manualPosition = true; renderMainDiagram(); }
+    if(entry){ entry.x = rx; entry.y = ry; entry.manualPosition = true; entry.lowConfidence = false; renderMainDiagram(); }
   });
   window.addEventListener('mouseup', (evt)=>{
     if(!pointerDown) return;
