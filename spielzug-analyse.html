@@ -646,7 +646,7 @@
     const xs = realPts.map(p=>p[0]), ys = realPts.map(p=>p[1]);
     const fracX = (Math.max(...xs) - Math.min(...xs)) / COURT_WIDTH_M;
     const fracY = (Math.max(...ys) - Math.min(...ys)) / COURT_DEPTH_M;
-    return Math.min(fracX, fracY);
+    return {frac: Math.min(fracX, fracY), fracX, fracY};
   }
   const CALIB_SENSITIVITY_WARN_M = 0.5;
   // Above this, the calibration isn't just imprecise, it's practically unusable - the anchored
@@ -662,9 +662,19 @@
     if(!hasHomography || pointSensitivity == null || !isFinite(pointSensitivity) || pointSensitivity > CALIB_SENSITIVITY_BLOCK_M){
       return { blocking: true, text: ' ⚠️ Diese Punkte lassen sich nicht eindeutig zu einer Feld-Kalibrierung auflösen — sie liegen (fast) exakt auf einer Linie (z.B. alle auf derselben Grundlinie). Wähle mindestens einen zusätzlichen Punkt, der in die Tiefe des Feldes zeigt (z.B. Freiwurflinie, Mittellinie oder Drei-Punkte-Bogen), statt nur entlang einer einzigen Linie.' };
     }
-    const lowCoverage = coverageFrac != null && coverageFrac < COURT_COVERAGE_WARN_FRAC;
+    const lowCoverage = coverageFrac != null && coverageFrac.frac < COURT_COVERAGE_WARN_FRAC;
     if(lowCoverage){
-      return { blocking: false, text: ' ⚠️ Die gesetzten Punkte decken nur einen kleinen Teil des Spielfelds ab (z.B. nur den Freiwurfraum) — für Spieler außerhalb dieses Bereichs kann die berechnete Position um mehrere Meter danebenliegen, im Extremfall weit außerhalb des Feldes. Falls im Video mehr vom Feld sichtbar ist, zusätzliche, weiter auseinanderliegende Referenzpunkte setzen (z.B. Mittellinie, Drei-Punkte-Bogen oder Seitenlinien).' };
+      // Name the specific missing dimension(s) and a concrete handle to fix it with, rather than a
+      // generic "spread your points out more" - real-world testing showed players far from a narrow
+      // calibration's anchors can end up placed many meters away, even completely off the rendered
+      // court, so being specific about what to drag where matters.
+      const needsWidth = coverageFrac.fracX < COURT_COVERAGE_WARN_FRAC;
+      const needsDepth = coverageFrac.fracY < COURT_COVERAGE_WARN_FRAC;
+      let advice;
+      if(needsWidth && needsDepth) advice = 'in der Breite (z.B. die äußeren Punkte an der Seitenlinie oder dem Drei-Punkte-Bogen) UND in der Tiefe (z.B. Mittellinie oder Drei-Punkte-Bogen)';
+      else if(needsWidth) advice = 'in der Breite (z.B. die äußeren Punkte an der Seitenlinie oder dem Drei-Punkte-Bogen)';
+      else advice = 'in der Tiefe (z.B. Mittellinie oder Drei-Punkte-Bogen statt nur Freiwurflinie)';
+      return { blocking: false, text: ` ⚠️ Die gesetzten Punkte decken nur ${Math.round(coverageFrac.fracX*100)}% der Breite und ${Math.round(coverageFrac.fracY*100)}% der Tiefe des Spielfelds ab (z.B. nur den Freiwurfraum) — für Spieler außerhalb dieses Bereichs kann die berechnete Position um mehrere Meter danebenliegen, im Extremfall weit außerhalb des Feldes. Zusätzliche Referenzpunkte setzen, die weiter auseinanderliegen ${advice}.` };
     }
     if(pointSensitivity > CALIB_SENSITIVITY_WARN_M){
       return { blocking: false, text: ` ⚠️ Diese Kalibrierung reagiert empfindlich auf kleine Ungenauigkeiten (~${pointSensitivity.toFixed(1)} m Verschiebung schon bei wenigen Pixeln Abweichung) — die gesetzten Punkte liegen vermutlich zu nah beieinander oder fast auf einer Linie. Für zuverlässigere Positionen weiter auseinanderliegende Punkte wählen.` };
@@ -1340,15 +1350,15 @@
     cachedFeet = feet;
     return feet;
   }
-  // A calibration built from points confined to a small part of the court (see calibCoverageFrac)
-  // has to extrapolate further for anything else, so its projected positions for genuine players can
-  // land further from the true court boundary than a normal calibration's would - the "is this even
-  // remotely near the court" sanity filter below loosens a little accordingly. Deliberately kept
-  // modest (not wide open): the real fix for a poor-coverage calibration is fixing the calibration
-  // itself (already flagged clearly via calibSensitivityMessage), not accepting ever more distant,
-  // increasingly likely-to-be-false-positive candidates as a substitute.
+  // Kept small and constant - real-world testing showed WIDENING this for a poor-coverage calibration
+  // (the original idea being "extrapolated positions may legitimately land further out") backfires in
+  // practice: it mainly lets in far more spectators/bench, not more real players, since a true player
+  // near the court boundary already gets caught by the height-plausibility check below on their own
+  // merits. The real fix for a poor-coverage calibration is fixing the calibration itself (already
+  // flagged clearly via calibSensitivityMessage), never a looser detection filter.
+  const COURT_MARGIN_M = 2;
   function courtMarginForCalibration(){
-    return (committedCoverageFrac != null && committedCoverageFrac < 0.5) ? 5 : 3;
+    return COURT_MARGIN_M;
   }
   // Core of "KI-Vorschlag", factored out so both the manual button and the auto-capture loop
   // (below) share the exact same detection+classification logic. With aggregate=true, samples a few
@@ -1810,6 +1820,15 @@
     autoStopBtn.style.display = '';
     updatePlacementEnabled();
     let t = video.currentTime;
+    // If the video is still sitting at (essentially) the exact moment of an already-captured frame -
+    // the common case right after manually finishing frame 1 and immediately starting auto-capture -
+    // starting the loop here would re-capture that same frame as a near-duplicate. Skip ahead one
+    // interval instead.
+    {
+      const idx0 = findChronoInsertIndex(t);
+      const prevFrame0 = idx0>0 ? frames[idx0-1] : null;
+      if(prevFrame0 && Math.abs(prevFrame0.time - t) < 0.05) t += interval;
+    }
     let totalAdded = 0, totalSkipped = 0;
     while(autoCaptureRunning && t <= duration + 0.001){
       await seekAndWaitApp(Math.min(t, duration));
