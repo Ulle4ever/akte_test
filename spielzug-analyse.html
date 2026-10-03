@@ -119,6 +119,28 @@
       </div>
     </details>
 
+    <details class="card" id="roboflowCard">
+      <summary><span class="step-badge" style="background:var(--muted);">★</span> Externe KI-Erkennung (Roboflow, optional)</summary>
+      <p class="muted">Zusätzlich zur eingebauten Erkennung kann ein eigenes <a href="https://roboflow.com" target="_blank" rel="noopener">Roboflow</a>-Modell verwendet werden (z.B. ein speziell auf Basketballspieler trainiertes Modell statt der allgemeinen Personenerkennung) — das kann die Erkennung deutlich verbessern. Dafür wird ein eigener, kostenloser Roboflow-Account samt API-Key benötigt. Ohne diese Angaben funktioniert alles weiterhin wie bisher.</p>
+      <div class="row" style="align-items:flex-start;">
+        <label class="opt" style="flex-direction:column;align-items:stretch;flex:1;min-width:220px;">Modell-Endpunkt
+          <input type="text" id="roboflowEndpoint" placeholder="https://detect.roboflow.com/dein-modell/1" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
+        </label>
+        <label class="opt" style="flex-direction:column;align-items:stretch;flex:1;min-width:180px;">API-Key
+          <input type="password" id="roboflowApiKey" placeholder="dein Roboflow API-Key" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
+        </label>
+      </div>
+      <label class="opt" style="flex-direction:column;align-items:stretch;margin-top:8px;">Klassennamen, die als Spieler zählen (optional, kommagetrennt — leer lassen, um alle Erkennungen zu übernehmen)
+        <input type="text" id="roboflowClassNames" placeholder="z.B. player" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
+      </label>
+      <div class="row" style="align-items:center;margin-top:8px;">
+        <label class="opt"><input type="checkbox" id="roboflowEnabled"> Aktivieren</label>
+        <button id="roboflowTestBtn" class="ghost">Verbindung testen</button>
+      </div>
+      <div id="roboflowStatus" class="hint"></div>
+      <p class="hint">Wichtig: Bei aktivierter Erkennung wird der aktuelle Videoframe als Bild an Roboflow übertragen (verlässt also deinen Browser). API-Key und Einstellungen werden nur lokal in diesem Browser gespeichert (localStorage), nie in dieser Datei.</p>
+    </details>
+
     <details class="card" id="calibCard" open>
       <summary><span class="step-badge">2</span> Spielfeld kalibrieren <span id="calibSummaryHint" class="muted" style="font-weight:400;"></span></summary>
       <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen. Wichtig: Die Punkte dürfen nicht alle auf derselben Linie liegen (z.B. nicht nur entlang der Grundlinie) &mdash; nimm mindestens einen Punkt, der weiter in die Tiefe des Feldes zeigt (z.B. Freiwurflinie oder Mittellinie), sonst lässt sich die Kalibrierung nicht eindeutig berechnen. Genauso wichtig: die Punkte sollten möglichst über den <strong>gesamten Bereich verteilt sein, in dem später Spieler stehen</strong> &mdash; nur den Freiwurfraum zu kalibrieren reicht nicht, auch wenn er am leichtesten zu erkennen ist. Je enger die Punkte beieinanderliegen, desto ungenauer wird die Position für alles, was weiter weg davon angeklickt wird.</p>
@@ -257,6 +279,12 @@
   const pickDefenseBtn = document.getElementById('pickDefenseBtn');
   const offenseRosterEl = document.getElementById('offenseRoster');
   const defenseRosterEl = document.getElementById('defenseRoster');
+  const roboflowEndpointEl = document.getElementById('roboflowEndpoint');
+  const roboflowApiKeyEl = document.getElementById('roboflowApiKey');
+  const roboflowClassNamesEl = document.getElementById('roboflowClassNames');
+  const roboflowEnabledEl = document.getElementById('roboflowEnabled');
+  const roboflowTestBtn = document.getElementById('roboflowTestBtn');
+  const roboflowStatusEl = document.getElementById('roboflowStatus');
   const aiSuggestBtn = document.getElementById('aiSuggestBtn');
   const findNewPlayersBtn = document.getElementById('findNewPlayersBtn');
   const placeOffenseBtn = document.getElementById('placeOffenseBtn');
@@ -385,6 +413,75 @@
   let personDetector = null, personDetectorLoading = false;
   let poseDetector = null, modelLoading = false;
   let cachedFeetTime = null, cachedFeet = null; // last detectPersonFeet() result, reused while the video stays on the same moment
+  // Optional external detector (Roboflow hosted inference) - a community-trained model aimed at this
+  // exact use case (basketball players specifically, not generic COCO "person") can outperform coco-ssd,
+  // but it means video frames leave the browser to a third-party server, and needs the user's own
+  // account/API key - never something to ship hardcoded in this file. Stored only in this browser's
+  // localStorage, read once at startup; off by default, coco-ssd remains the tested, always-available
+  // path. A fetch failure or misconfiguration here just yields zero detections (graceful fallback),
+  // never breaks manual placement or the rest of the app.
+  const ROBOFLOW_STORAGE_KEY = 'spielzugAnalyse.roboflow.v1';
+  function loadRoboflowConfig(){
+    try{
+      const raw = localStorage.getItem(ROBOFLOW_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function saveRoboflowConfig(cfg){
+    try{ localStorage.setItem(ROBOFLOW_STORAGE_KEY, JSON.stringify(cfg)); }catch(e){ console.error(e); }
+  }
+  let roboflowConfig = loadRoboflowConfig(); // {endpoint, apiKey, classNames:[...], enabled} | null
+  function roboflowReady(){
+    return !!(roboflowConfig && roboflowConfig.enabled && roboflowConfig.endpoint && roboflowConfig.apiKey);
+  }
+  function detectionAvailable(){
+    return !!personDetector || roboflowReady();
+  }
+  // Restore any previously saved config into the settings form, and persist on every change - no
+  // separate "Speichern" button, since there's nothing to lose by saving immediately (it only takes
+  // effect once "Aktivieren" is also checked).
+  if(roboflowConfig){
+    roboflowEndpointEl.value = roboflowConfig.endpoint || '';
+    roboflowApiKeyEl.value = roboflowConfig.apiKey || '';
+    roboflowClassNamesEl.value = (roboflowConfig.classNames || []).join(', ');
+    roboflowEnabledEl.checked = !!roboflowConfig.enabled;
+  }
+  function readRoboflowForm(){
+    return {
+      endpoint: roboflowEndpointEl.value.trim(),
+      apiKey: roboflowApiKeyEl.value.trim(),
+      classNames: roboflowClassNamesEl.value.split(',').map(s=>s.trim()).filter(Boolean),
+      enabled: roboflowEnabledEl.checked,
+    };
+  }
+  function persistRoboflowForm(){
+    roboflowConfig = readRoboflowForm();
+    saveRoboflowConfig(roboflowConfig);
+    updatePlacementEnabled();
+  }
+  [roboflowEndpointEl, roboflowApiKeyEl, roboflowClassNamesEl].forEach(el => el.addEventListener('change', persistRoboflowForm));
+  roboflowEnabledEl.addEventListener('change', persistRoboflowForm);
+  roboflowTestBtn.addEventListener('click', async ()=>{
+    persistRoboflowForm();
+    if(!roboflowConfig.endpoint || !roboflowConfig.apiKey){
+      roboflowStatusEl.textContent = 'Bitte Modell-Endpunkt und API-Key eintragen.';
+      return;
+    }
+    if(!video.src || !video.videoWidth){
+      roboflowStatusEl.textContent = 'Bitte zuerst ein Video laden, damit ein echter Frame zum Testen da ist.';
+      return;
+    }
+    roboflowTestBtn.disabled = true;
+    roboflowStatusEl.textContent = 'Teste Verbindung…';
+    try{
+      const boxes = await detectViaRoboflow();
+      roboflowStatusEl.textContent = `Verbindung erfolgreich — ${boxes.length} Erkennung(en) im aktuellen Frame.`;
+    }catch(e){
+      console.error(e);
+      roboflowStatusEl.textContent = 'Verbindung fehlgeschlagen — Endpunkt/API-Key prüfen.';
+    }
+    roboflowTestBtn.disabled = false;
+  });
   let colorPickTarget = null; // 'offense' | 'defense' | null - next video click sets that team's jersey color
   let offenseColorSet = false, defenseColorSet = false; // true once the user actually configures a
   // color (not just the unconfigured <input type=color> default) - classifyTeam() must never guess
@@ -1282,23 +1379,67 @@
     modelLoading = false;
     updatePlacementEnabled();
   }
-  // Runs coco-ssd on the current video moment, then for each detected person tries to refine their
-  // foot point via a per-box MoveNet pass on an upscaled crop (much higher effective resolution for a
-  // small/far-away player than any whole-frame pass could give them). Falls back to the box's own
-  // bottom-center when refinement isn't available or doesn't find confident ankle keypoints.
+  // Sends the current video frame to the user's configured Roboflow hosted-inference endpoint and
+  // returns boxes in the same shape coco-ssd's own predictions use ({bbox:[x,y,w,h], score}), so
+  // detectRawBoxes() below can treat either source identically. A basketball-specific trained model
+  // here can have much better recall/precision than coco-ssd's generic "person" class, especially
+  // from a broadcast angle with small/far/occluded players - but it means this frame leaves the
+  // browser to a third-party server, which is why it's opt-in and never the only path (see
+  // roboflowReady()/detectionAvailable()). Any failure (network, bad key, malformed response) just
+  // yields zero boxes - callers already treat "nothing detected" as a normal, non-fatal outcome.
+  async function detectViaRoboflow(){
+    const cfg = roboflowConfig;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    const url = cfg.endpoint + (cfg.endpoint.includes('?') ? '&' : '?') + 'api_key=' + encodeURIComponent(cfg.apiKey);
+    let data;
+    try{
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        body: base64,
+      });
+      if(!resp.ok) throw new Error('HTTP ' + resp.status);
+      data = await resp.json();
+    }catch(e){
+      console.error('Roboflow-Anfrage fehlgeschlagen', e);
+      return [];
+    }
+    const preds = Array.isArray(data && data.predictions) ? data.predictions : [];
+    const wanted = (cfg.classNames && cfg.classNames.length) ? cfg.classNames : null;
+    return preds
+      .filter(p => !wanted || wanted.includes(p.class))
+      .map(p => ({ bbox: [p.x - p.width/2, p.y - p.height/2, p.width, p.height], score: p.confidence }));
+  }
+  // Picks whichever detection source is configured: the user's own Roboflow model when set up and
+  // enabled, otherwise the always-available built-in coco-ssd. Both return the same {bbox,score}[]
+  // shape so detectPersonFeet below doesn't need to know or care which one ran.
   const PERSON_MIN_SCORE = 0.3; // permissive - every suggestion still requires manual review
   const PERSON_MAX_BOXES = 30; // generous - a full-court shot can have 10 players plus refs/bench
-  const POSE_REFINE_INPUT_PX = 256; // upscale target for the per-box refinement crop
-  async function detectPersonFeet(){
+  async function detectRawBoxes(){
+    if(roboflowReady()) return await detectViaRoboflow();
     if(!personDetector) return [];
     let predictions;
     // coco-ssd's own default minScore (0.5) is higher than PERSON_MIN_SCORE (0.3) - passing it
     // explicitly here is what actually makes PERSON_MIN_SCORE take effect; without this, the library
     // silently discards anything between 0.3 and 0.5 before this code ever sees it, no matter what
     // PERSON_MIN_SCORE is set to.
-    try{ predictions = await personDetector.detect(video, PERSON_MAX_BOXES, PERSON_MIN_SCORE); }
+    let preds;
+    try{ preds = await personDetector.detect(video, PERSON_MAX_BOXES, PERSON_MIN_SCORE); }
     catch(e){ console.error(e); return []; }
-    const boxes = predictions.filter(p => p.class === 'person');
+    return preds.filter(p => p.class === 'person').map(p => ({bbox:p.bbox, score:p.score}));
+  }
+  // Runs the configured detector on the current video moment, then for each detected person tries to
+  // refine their foot point via a per-box MoveNet pass on an upscaled crop (much higher effective
+  // resolution for a small/far-away player than any whole-frame pass could give them). Falls back to
+  // the box's own bottom-center when refinement isn't available or doesn't find confident ankle
+  // keypoints.
+  const POSE_REFINE_INPUT_PX = 256; // upscale target for the per-box refinement crop
+  async function detectPersonFeet(){
+    if(!detectionAvailable()) return [];
+    const boxes = await detectRawBoxes();
     const results = [];
     for(const p of boxes){
       const [bx,by,bw,bh] = p.bbox;
@@ -1340,11 +1481,11 @@
   // means no foot points to snap to, so manual placement keeps working exactly as it always has.
   async function getFeetForCurrentMoment(){
     if(cachedFeetTime === video.currentTime && cachedFeet) return cachedFeet;
-    if(!personDetector){
+    if(!detectionAvailable()){
       if(personDetectorLoading) return [];
       try{ await loadModelIfNeeded(); }catch(e){ return []; }
     }
-    if(!personDetector) return [];
+    if(!detectionAvailable()) return [];
     const feet = await detectPersonFeet();
     cachedFeetTime = video.currentTime;
     cachedFeet = feet;
@@ -1383,7 +1524,7 @@
   // explicit "Nach neuen Spielern suchen" action) - returns raw candidates without touching
   // pendingPositions itself, so callers can filter/merge them differently.
   async function detectPoseCandidates(aggregate){
-    if(!homography || !personDetector) return [];
+    if(!homography || !detectionAvailable()) return [];
     const courtMargin = courtMarginForCalibration();
     const originalTime = video.currentTime;
     const duration = video.duration || 0;
@@ -1507,7 +1648,7 @@
   findNewPlayersBtn.addEventListener('click', async ()=>{
     if(!homography) return;
     await loadModelIfNeeded();
-    if(!personDetector){ setStatus('Spieler-Erkennung nicht verfügbar (Internetverbindung prüfen) — bitte manuell setzen.', 'err'); return; }
+    if(!detectionAvailable()){ setStatus('Spieler-Erkennung nicht verfügbar (Internetverbindung prüfen) — bitte manuell setzen.', 'err'); return; }
     findNewPlayersBtn.disabled = true;
     setStatus('Suche nach neuen Spielern…');
     try{
@@ -1562,7 +1703,7 @@
     placeOffenseBtn.disabled = !ready;
     placeDefenseBtn.disabled = !ready;
     aiSuggestBtn.disabled = !ready; // pure tracking, no model needed - never blocked on model loading
-    findNewPlayersBtn.disabled = !ready || personDetectorLoading;
+    findNewPlayersBtn.disabled = !ready || (personDetectorLoading && !roboflowReady());
     autoCaptureBtn.disabled = !ready || !frames.length; // nothing to track forward from without a first frame
     // Finishing/discarding already-placed points must stay available even while re-editing the
     // calibration or picking a jersey color mid-placement - otherwise those points get stranded
