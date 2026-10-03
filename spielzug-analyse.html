@@ -1592,51 +1592,89 @@
   }
   // Core of the main "Position automatisch bestimmen" workflow - and now the ONLY thing it does.
   // Re-locates every player already seen in the most recently captured frame via the visual tracker
-  // above (matchTemplateForward) - nothing else. It used to also run pose detection to pick up new
-  // people every single time, but real-world use showed that silently adds spectators/bench and
-  // fragments players into ever-growing numbers of tracks every time detection briefly missed someone
-  // - exactly what you don't want for "mark the 5 offense players once, then have them followed
-  // through the play". Finding someone NEW (a substitution, a player who was off-screen) is now a
-  // separate, deliberate action (see "Nach neuen Spielern suchen" / runAiSuggestion below) that the
-  // user triggers on purpose, not something that happens as a side effect of every tracking step.
-  // Needs no AI model at all - pure canvas pixel matching - so it's fast and works even if the
-  // person-detector never loaded.
+  // above (matchTemplateForward) first - nothing else runs unless that fails for someone. It used to
+  // also run pose detection to pick up new people every single time, but real-world use showed that
+  // silently adds spectators/bench and fragments players into ever-growing numbers of tracks every
+  // time detection briefly missed someone - exactly what you don't want for "mark the 5 offense
+  // players once, then have them followed through the play". Finding someone NEW (a substitution, a
+  // player who was off-screen) is still a separate, deliberate action (see "Nach neuen Spielern
+  // suchen" below) that the user triggers on purpose.
+  //
+  // What IS new here: when pure template matching loses an EXISTING track (occlusion, motion blur,
+  // camera cut), this now makes one attempt to recover that exact trackId - never a new one - via
+  // whichever AI detector is configured (Roboflow if set up, else coco-ssd), restricted to a small
+  // search radius around that player's last known position. A detected box far outside that radius,
+  // or the wrong scale for a standing player there, is ignored - this is recovery of someone already
+  // being tracked, not a general re-scan. Without this, a user who enabled Roboflow would see it do
+  // nothing during the everyday workflow, since template matching alone handles the common case fine.
+  async function recoverLostTrack(last, elapsedSeconds, boxes){
+    const pxPerM = metersPerPixelAt(last.x, last.y);
+    if(!pxPerM) return null;
+    const searchRadius = Math.max(pxPerM*1.0, pxPerM * MAX_PLAYER_SPEED_MPS * elapsedSeconds);
+    const expectedPx = pxPerM * PLAYER_HEIGHT_M;
+    let best = null;
+    for(let i=0;i<boxes.length;i++){
+      const [bx,by,bw,bh] = boxes[i].bbox;
+      const footX = bx+bw/2, footY = by+bh;
+      const dist = Math.hypot(footX-last.x, footY-last.y);
+      if(dist > searchRadius) continue;
+      if(bh < expectedPx*PLAYER_HEIGHT_MIN_FRAC || bh > expectedPx*PLAYER_HEIGHT_MAX_FRAC) continue;
+      if(!best || dist < best.dist) best = {dist, footX, footY, boxIdx:i};
+    }
+    if(best) boxes.splice(best.boxIdx, 1); // don't let a second lost track grab the same box
+    return best;
+  }
   async function trackKnownPlayers(){
-    if(!homography) return {trackedOk:0, trackedLow:0, hadPrevFrame:false};
+    if(!homography) return {trackedOk:0, trackedLow:0, recovered:0, hadPrevFrame:false};
     const idx = findChronoInsertIndex(video.currentTime);
     const prevFrame = idx>0 ? frames[idx-1] : null;
-    if(!prevFrame) return {trackedOk:0, trackedLow:0, hadPrevFrame:false};
+    if(!prevFrame) return {trackedOk:0, trackedLow:0, recovered:0, hadPrevFrame:false};
     const fullCanvas = document.createElement('canvas');
     fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
     fullCanvas.getContext('2d').drawImage(video, 0, 0);
     const feat = toTrackFeatures(fullCanvas);
     const elapsed = Math.max(0, video.currentTime - prevFrame.time);
-    let trackedOk = 0, trackedLow = 0;
+    let trackedOk = 0, trackedLow = 0, recovered = 0;
+    const lost = []; // {p, track} - filled in the loop below, resolved afterwards
     prevFrame.players.forEach(p=>{
       const track = tracks[p.trackId];
       if(!track || !track.template || !track.lastNative) return;
       const m = matchTemplateForward(feat, track, elapsed);
-      if(!m) return; // track lost this frame - don't guess, and never spawn a replacement track for it
+      if(!m){ lost.push({p, track}); return; }
       if(pendingPositions.some(pp => Math.hypot(pp.x-m.x,pp.y-m.y) < 0.8)) return;
       const lowConfidence = m.confidence < TRACK_CONFIDENCE_OK;
       pendingPositions.push({x:m.x, y:m.y, nx:m.nx, ny:m.ny, team:track.team, trackId:p.trackId, tracked:true, lowConfidence});
       if(lowConfidence) trackedLow++; else trackedOk++;
     });
+    if(lost.length && detectionAvailable()){
+      let boxes;
+      try{ boxes = await detectRawBoxes(); }catch(e){ console.error(e); boxes = []; }
+      for(const {p, track} of lost){
+        if(pendingPositions.some(pp => pp.trackId === p.trackId)) continue;
+        const found = await recoverLostTrack(track.lastNative, elapsed, boxes);
+        if(!found) continue;
+        const [rx, ry] = applyHomography(homography, found.footX, found.footY);
+        if(pendingPositions.some(pp => Math.hypot(pp.x-rx,pp.y-ry) < 0.8)) continue;
+        pendingPositions.push({x:rx, y:ry, nx:found.footX, ny:found.footY, team:track.team, trackId:p.trackId, tracked:true, lowConfidence:true, recovered:true});
+        recovered++;
+      }
+    }
     renderCalibOverlay();
     updatePlacementStatus();
-    return {trackedOk, trackedLow, hadPrevFrame:true};
+    return {trackedOk, trackedLow, recovered, hadPrevFrame:true};
   }
   aiSuggestBtn.addEventListener('click', async ()=>{
     if(!homography) return;
     aiSuggestBtn.disabled = true;
     setStatus('Verfolgt bereits platzierte Spieler automatisch weiter…');
     try{
-      const {trackedOk, trackedLow, hadPrevFrame} = await trackKnownPlayers();
+      const {trackedOk, trackedLow, recovered, hadPrevFrame} = await trackKnownPlayers();
       if(!hadPrevFrame){
         setStatus('Noch kein vorheriger Frame zum Weiterverfolgen — bitte die gewünschten Spieler (z.B. nur die 5 Offense) erst manuell setzen und "Frame abschließen" klicken.', 'err');
-      } else if(trackedOk || trackedLow){
+      } else if(trackedOk || trackedLow || recovered){
         const lowHint = trackedLow ? ` (davon ${trackedLow} unsicher, gelb markiert, bitte prüfen)` : '';
-        setStatus(`${trackedOk+trackedLow} Spieler automatisch weiterverfolgt${lowHint}. Fehlt jemand oder kommt neu dazu? Manuell ergänzen oder "Nach neuen Spielern suchen" nutzen.`, 'ok');
+        const recoveredHint = recovered ? ` ${recovered} davon per KI-Erkennung wiedergefunden, nachdem die reine Bildverfolgung sie verloren hatte (gelb markiert, bitte prüfen).` : '';
+        setStatus(`${trackedOk+trackedLow+recovered} Spieler automatisch weiterverfolgt${lowHint}.${recoveredHint} Fehlt jemand oder kommt neu dazu? Manuell ergänzen oder "Nach neuen Spielern suchen" nutzen.`, 'ok');
       } else {
         setStatus('Keine der bekannten Spielerpositionen wiedergefunden — bitte manuell setzen.', 'err');
       }
