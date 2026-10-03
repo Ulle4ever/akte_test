@@ -138,6 +138,7 @@
         <button id="roboflowTestBtn" class="ghost">Verbindung testen</button>
       </div>
       <div id="roboflowStatus" class="hint"></div>
+      <div id="roboflowCallLog" class="hint">Noch kein Aufruf in dieser Sitzung.</div>
       <p class="hint">Wichtig: Bei aktivierter Erkennung wird der aktuelle Videoframe als Bild an Roboflow übertragen (verlässt also deinen Browser). API-Key und Einstellungen werden nur lokal in diesem Browser gespeichert (localStorage), nie in dieser Datei.</p>
     </details>
 
@@ -285,6 +286,7 @@
   const roboflowEnabledEl = document.getElementById('roboflowEnabled');
   const roboflowTestBtn = document.getElementById('roboflowTestBtn');
   const roboflowStatusEl = document.getElementById('roboflowStatus');
+  const roboflowCallLogEl = document.getElementById('roboflowCallLog');
   const aiSuggestBtn = document.getElementById('aiSuggestBtn');
   const findNewPlayersBtn = document.getElementById('findNewPlayersBtn');
   const placeOffenseBtn = document.getElementById('placeOffenseBtn');
@@ -1387,6 +1389,16 @@
   // browser to a third-party server, which is why it's opt-in and never the only path (see
   // roboflowReady()/detectionAvailable()). Any failure (network, bad key, malformed response) just
   // yields zero boxes - callers already treat "nothing detected" as a normal, non-fatal outcome.
+  // Visible call counter/log - the earlier version of this feature was invisible in normal use (it
+  // only ran at a few specific moments, like recovering a track the pixel tracker lost), so a user
+  // enabling it had no way to tell whether it was actually being called at all, or being called but
+  // failing silently (wrong CORS setup, bad key, network block), versus genuinely just not finding
+  // anything. This makes every call and its outcome visible in the settings card in real time.
+  let roboflowCallCount = 0;
+  function logRoboflowCall(outcome){
+    roboflowCallCount++;
+    if(roboflowCallLogEl) roboflowCallLogEl.textContent = `Roboflow-Aufrufe in dieser Sitzung: ${roboflowCallCount}. Letztes Ergebnis: ${outcome}`;
+  }
   async function detectViaRoboflow(){
     const cfg = roboflowConfig;
     const canvas = document.createElement('canvas');
@@ -1410,13 +1422,16 @@
       data = await resp.json();
     }catch(e){
       console.error('Roboflow-Anfrage fehlgeschlagen', e);
+      logRoboflowCall('Fehler — ' + (e && e.message ? e.message : e));
       return [];
     }
     const preds = Array.isArray(data && data.predictions) ? data.predictions : [];
     const wanted = (cfg.classNames && cfg.classNames.length) ? cfg.classNames : null;
-    return preds
+    const result = preds
       .filter(p => !wanted || wanted.includes(p.class))
       .map(p => ({ bbox: [p.x - p.width/2, p.y - p.height/2, p.width, p.height], score: p.confidence }));
+    logRoboflowCall(`${preds.length} Rohtreffer, ${result.length} nach Klassenfilter`);
+    return result;
   }
   // Picks whichever detection source is configured: the user's own Roboflow model when set up and
   // enabled, otherwise the always-available built-in coco-ssd. Both return the same {bbox,score}[]
