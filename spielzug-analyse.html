@@ -1393,12 +1393,17 @@
     canvas.width = video.videoWidth; canvas.height = video.videoHeight;
     canvas.getContext('2d').drawImage(video, 0, 0);
     const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
-    const url = cfg.endpoint + (cfg.endpoint.includes('?') ? '&' : '?') + 'api_key=' + encodeURIComponent(cfg.apiKey);
     let data;
     try{
-      const resp = await fetch(url, {
+      // Current Roboflow hosted-inference servers (inference v1.5.0+) expect the key as a Bearer
+      // token rather than a ?api_key= query param - the query-param form is older/deprecated and
+      // some endpoints no longer accept it, so this is the one actually confirmed to work.
+      const resp = await fetch(cfg.endpoint, {
         method: 'POST',
-        headers: {'Content-Type': 'application/x-www-form-urlencoded'},
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': 'Bearer ' + cfg.apiKey,
+        },
         body: base64,
       });
       if(!resp.ok) throw new Error('HTTP ' + resp.status);
