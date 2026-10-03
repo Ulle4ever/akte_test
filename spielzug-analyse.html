@@ -133,6 +133,9 @@
       <label class="opt" style="flex-direction:column;align-items:stretch;margin-top:8px;">Klassennamen, die als Spieler zählen (optional, kommagetrennt — leer lassen, um alle Erkennungen zu übernehmen)
         <input type="text" id="roboflowClassNames" placeholder="z.B. player" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
       </label>
+      <label class="opt" style="flex-direction:column;align-items:stretch;margin-top:8px;max-width:260px;">Mindest-Konfidenz (%) — Roboflow lässt standardmäßig nur ab 50% durch; liefert "Verbindung testen" 0 Treffer, hier erstmal niedriger ansetzen (z.B. 10)
+        <input type="number" id="roboflowConfidence" value="10" min="0" max="100" step="1" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
+      </label>
       <div class="row" style="align-items:center;margin-top:8px;">
         <label class="opt"><input type="checkbox" id="roboflowEnabled"> Aktivieren</label>
         <button id="roboflowTestBtn" class="ghost">Verbindung testen</button>
@@ -283,6 +286,7 @@
   const roboflowEndpointEl = document.getElementById('roboflowEndpoint');
   const roboflowApiKeyEl = document.getElementById('roboflowApiKey');
   const roboflowClassNamesEl = document.getElementById('roboflowClassNames');
+  const roboflowConfidenceEl = document.getElementById('roboflowConfidence');
   const roboflowEnabledEl = document.getElementById('roboflowEnabled');
   const roboflowTestBtn = document.getElementById('roboflowTestBtn');
   const roboflowStatusEl = document.getElementById('roboflowStatus');
@@ -446,13 +450,16 @@
     roboflowEndpointEl.value = roboflowConfig.endpoint || '';
     roboflowApiKeyEl.value = roboflowConfig.apiKey || '';
     roboflowClassNamesEl.value = (roboflowConfig.classNames || []).join(', ');
+    roboflowConfidenceEl.value = roboflowConfig.confidence != null ? roboflowConfig.confidence : 10;
     roboflowEnabledEl.checked = !!roboflowConfig.enabled;
   }
   function readRoboflowForm(){
+    const confidence = Math.max(0, Math.min(100, parseInt(roboflowConfidenceEl.value, 10) || 0));
     return {
       endpoint: roboflowEndpointEl.value.trim(),
       apiKey: roboflowApiKeyEl.value.trim(),
       classNames: roboflowClassNamesEl.value.split(',').map(s=>s.trim()).filter(Boolean),
+      confidence,
       enabled: roboflowEnabledEl.checked,
     };
   }
@@ -461,7 +468,7 @@
     saveRoboflowConfig(roboflowConfig);
     updatePlacementEnabled();
   }
-  [roboflowEndpointEl, roboflowApiKeyEl, roboflowClassNamesEl].forEach(el => el.addEventListener('change', persistRoboflowForm));
+  [roboflowEndpointEl, roboflowApiKeyEl, roboflowClassNamesEl, roboflowConfidenceEl].forEach(el => el.addEventListener('change', persistRoboflowForm));
   roboflowEnabledEl.addEventListener('change', persistRoboflowForm);
   roboflowTestBtn.addEventListener('click', async ()=>{
     persistRoboflowForm();
@@ -1407,10 +1414,19 @@
     const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
     let data;
     try{
+      // Roboflow's own default minimum confidence is 50% - far too strict for a model evaluated on
+      // footage very different from what it was trained on (different camera, players, lighting than
+      // whatever the model's own training images used), where even a real player may only score
+      // 10-30%. Since these results only ever feed into something the user reviews (a suggestion, a
+      // "search new players" pass, or recovering a SPECIFIC already-known track within a tight
+      // position/scale check) rather than being auto-committed, erring low here is safe - cfg.confidence
+      // is user-adjustable (see "Mindest-Konfidenz" in the settings card) for exactly this reason.
+      const confidence = cfg.confidence != null ? cfg.confidence : 10;
+      const url = cfg.endpoint + (cfg.endpoint.includes('?') ? '&' : '?') + 'confidence=' + encodeURIComponent(confidence);
       // Current Roboflow hosted-inference servers (inference v1.5.0+) expect the key as a Bearer
       // token rather than a ?api_key= query param - the query-param form is older/deprecated and
       // some endpoints no longer accept it, so this is the one actually confirmed to work.
-      const resp = await fetch(cfg.endpoint, {
+      const resp = await fetch(url, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
