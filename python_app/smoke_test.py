@@ -18,13 +18,13 @@ points = [
     {"name": "ft_l", "px": 205, "py": 290},
     {"name": "ft_r", "px": 285, "py": 290},
 ]
-H, status = app.on_commit_calibration(points)
+H, status, _vis = app.on_commit_calibration(points)
 print("  status:", status)
 assert H is not None, "calibration failed"
 
 print("2. Process video (this takes a while - yolo11m over the whole 13s clip)")
 t0 = time.time()
-processed, status = app.on_process_video(VIDEO, H, "yolo11m.pt", 0.25)
+processed, status, _vis = app.on_process_video(VIDEO, H, "yolo11m.pt", 0.25)
 print(f"  status: {status} ({time.time()-t0:.1f}s)")
 assert processed is not None
 

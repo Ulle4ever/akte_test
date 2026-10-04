@@ -24,6 +24,16 @@ HANDLE_LABELS = {
     "halfcircle_l": "Mittelkreis links", "halfcircle_r": "Mittelkreis rechts",
     "backboard_l": "Brett links", "backboard_r": "Brett rechts",
 }
+# Order the calibration dropdown auto-advances through - the first 4 are the ones used throughout
+# testing (reliably visible in a typical half-court broadcast framing); anything after is offered
+# for extra width/depth coverage once the status message asks for it.
+RECOMMENDED_ORDER = [
+    "lane_base_l", "lane_base_r", "ft_l", "ft_r",
+    "three_corner_l", "three_corner_r", "half_l", "half_r",
+    "baseline_l", "baseline_r", "three_base_l", "three_base_r",
+    "ftcircle_l", "ftcircle_r", "halfcircle_l", "halfcircle_r",
+    "backboard_l", "backboard_r",
+]
 MODEL_CHOICES = ["yolo11n.pt", "yolo11s.pt", "yolo11m.pt", "yolo11l.pt"]
 MARKER_COLORS = [(196, 62, 14), (37, 99, 235), (22, 163, 74), (147, 51, 234), (202, 138, 4)]
 
@@ -47,8 +57,18 @@ def get_video_duration(video_path):
     return n / fps if fps else 0.0
 
 
+def next_handle(points):
+    done = {p["name"] for p in (points or [])}
+    for name in RECOMMENDED_ORDER:
+        if name not in done:
+            return name
+    return RECOMMENDED_ORDER[0]
+
+
 # ---------- calibration drawing ----------
 def draw_calib_points(img, points):
+    if img is None:
+        return None
     out = img.copy()
     for i, p in enumerate(points):
         x, y = int(p["px"]), int(p["py"])
@@ -67,45 +87,45 @@ def calib_status_text(points):
 
 def on_add_point(video_path, t, handle_name, points, evt: gr.SelectData):
     if not video_path:
-        return points, None, "Bitte zuerst ein Video hochladen."
+        return points, None, "Bitte zuerst ein Video hochladen.", gr.update()
     x, y = evt.index[0], evt.index[1]
     points = list(points or [])
     points = [p for p in points if p["name"] != handle_name]  # replace if same handle re-clicked
     points.append({"name": handle_name, "px": x, "py": y})
     frame = extract_frame(video_path, t)
     img = draw_calib_points(frame, points)
-    return points, img, calib_status_text(points)
+    return points, img, calib_status_text(points), gr.update(value=next_handle(points))
 
 
 def on_reset_points(video_path, t):
     frame = extract_frame(video_path, t)
-    return [], frame, "Punkte zurückgesetzt."
+    return [], frame, "Punkte zurückgesetzt.", gr.update(value=RECOMMENDED_ORDER[0])
 
 
 def on_commit_calibration(points):
     if len(points) < 4:
-        return None, "Mindestens 4 Punkte nötig."
+        return None, "Mindestens 4 Punkte nötig.", gr.update(visible=False)
     native = [(p["px"], p["py"]) for p in points]
     real = [court.HANDLES[p["name"]] for p in points]
     try:
         H = court.compute_homography(native, real)
     except Exception as e:
-        return None, f"Kalibrierung fehlgeschlagen: {e}"
+        return None, f"Kalibrierung fehlgeschlagen: {e}", gr.update(visible=False)
     sens = court.assess_calibration_sensitivity(native, real)
     cov = court.assess_court_span_coverage(real)
     blocking, msg = court.calib_sensitivity_message(sens, cov)
     if blocking:
-        return None, f"⚠️ {msg}"
-    status = f"✅ Kalibriert ({len(points)} Punkte)."
+        return None, f"⚠️ {msg}", gr.update(visible=False)
+    status = f"✅ Kalibriert ({len(points)} Punkte). Weiter mit Schritt 3 unten."
     if msg:
         status += f" ⚠️ {msg}"
-    return H.tolist(), status
+    return H.tolist(), status, gr.update(visible=True)
 
 
 # ---------- processing ----------
 def on_process_video(video_path, homography, model_name, conf, progress=gr.Progress()):
     if not video_path or not homography:
-        return None, "Bitte zuerst Video laden und Kalibrierung abschließen."
+        return None, "Bitte zuerst Video laden und Kalibrierung abschließen.", gr.update(visible=False)
     H = np.array(homography)
 
     def cb(frac, tf):
@@ -125,12 +145,13 @@ def on_process_video(video_path, homography, model_name, conf, progress=gr.Progr
     ]
     status = (f"Fertig: {len(frames)} Frames verarbeitet, {len(all_ids)} verschiedene Spur-IDs "
               f"gefunden (davon {len(plausible_ids)} vermutlich auf dem Feld), max. {max_per_frame} "
-              f"Personen in einem einzelnen Frame. Alle erkannten Personen sind in Schritt 4 "
-              f"anklickbar, auch blass dargestellte (unsichere Feld-Position - meist Zuschauer/Bank, "
-              f"aber bei knapper Kalibrierung notfalls trotzdem anklickbar).")
-    if max_per_frame == 0:
+              f"Personen in einem einzelnen Frame. Weiter mit Schritt 4 unten - alle erkannten "
+              f"Personen sind anklickbar, auch blass dargestellte (unsichere Feld-Position, meist "
+              f"Zuschauer/Bank, aber bei knapper Kalibrierung notfalls trotzdem anklickbar).")
+    visible = max_per_frame > 0
+    if not visible:
         status += " ⚠️ Es wurde niemand erkannt - Modell wechseln, Mindest-Konfidenz senken, oder Video/Kalibrierung prüfen."
-    return {"fps": fps, "w": w, "h": h, "frames": serializable}, status
+    return {"fps": fps, "w": w, "h": h, "frames": serializable}, status, gr.update(visible=visible)
 
 
 def _frame_at_time(processed, t):
@@ -140,6 +161,8 @@ def _frame_at_time(processed, t):
 
 
 def draw_tracks_on_frame(frame_img, frame_data, selected_ids, merges):
+    if frame_img is None:
+        return None
     out = frame_img.copy()
 
     def resolve(tid):
@@ -154,8 +177,8 @@ def draw_tracks_on_frame(frame_img, frame_data, selected_ids, merges):
         x, y = int(p["nx"]), int(p["ny"])
         is_sel = tid in selected_ids
         # "plausible" (on-court position + expected size there, per the current calibration) is
-        # just a visual hint via a paler/dashed-looking marker - NEVER hides a detection, since a
-        # merely imprecise calibration must never make a real player impossible to click (see
+        # just a visual hint via a paler marker - NEVER hides a detection, since a merely imprecise
+        # calibration must never make a real player impossible to click (see
         # pipeline.run_detection_and_tracking's docstring for why this used to be a hard filter).
         plausible = p.get("plausible", True)
         if is_sel:
@@ -176,7 +199,7 @@ def draw_tracks_on_frame(frame_img, frame_data, selected_ids, merges):
 
 def on_select_time_change(video_path, processed, t, selected_ids, merges):
     if not processed:
-        return None, "Zuerst Video verarbeiten."
+        return None, ""
     frame = extract_frame(video_path, t)
     fdata = _frame_at_time(processed, t)
     img = draw_tracks_on_frame(frame, fdata, selected_ids or [], merges or {})
@@ -248,7 +271,7 @@ def resolve_tid(tid, merges):
 
 def on_render_diagram(processed, selected_ids, merges, t, overlay_all):
     if not processed or not selected_ids:
-        return None, "Zuerst Video verarbeiten und mindestens einen Spieler auswählen."
+        return None, "Zuerst Video verarbeiten und mindestens einen Spieler auswählen (Schritt 4)."
     merges = merges or {}
     labels = labels_for(selected_ids)
     if overlay_all:
@@ -281,11 +304,11 @@ def on_render_diagram(processed, selected_ids, merges, t, overlay_all):
 with gr.Blocks(title="Spielzug-Analyse") as demo:
     gr.Markdown(
         "# Spielzug-Analyse (neu aufgebaut)\n"
-        "Erkennung/Verfolgung läuft jetzt über **YOLO11 + ByteTrack** (professioneller "
-        "Multi-Objekt-Tracker) statt der alten Eigenbau-Lösung. **Realistische Erwartung:** "
-        "deutlich sauberer und einfacher zu bedienen, aber bei kleinen/schnellen/teils verdeckten "
-        "Spielern können Spur-Nummern gelegentlich wechseln (siehe README) - dafür gibt es unten "
-        "ein schnelles \"Spuren zusammenführen\"-Werkzeug."
+        "Erkennung/Verfolgung läuft über **YOLO11 + ByteTrack** (professioneller Multi-Objekt-"
+        "Tracker). **Realistische Erwartung:** deutlich sauberer und einfacher zu bedienen, aber "
+        "bei kleinen/schnellen/teils verdeckten Spielern können Spur-Nummern gelegentlich wechseln "
+        "(siehe README) - dafür gibt es unten ein schnelles \"Spuren zusammenführen\"-Werkzeug.\n\n"
+        "Die Schritte unten erscheinen nacheinander, sobald der vorherige abgeschlossen ist."
     )
 
     video_path_state = gr.State(None)
@@ -299,26 +322,31 @@ with gr.Blocks(title="Spielzug-Analyse") as demo:
         gr.Markdown("## 1. Video laden")
         video_input = gr.Video(label="Video hochladen")
         duration_box = gr.Textbox(label="Videolänge (s)", interactive=False)
+        shared_time = gr.Slider(
+            0, 60, value=0, step=0.1,
+            label="Aktueller Zeitpunkt im Video (gilt für Kalibrierung, Spieler-Auswahl und Einzelbild-Diagramm)")
 
-    with gr.Group():
+    step2 = gr.Group(visible=False)
+    with step2:
         gr.Markdown(
             "## 2. Spielfeld kalibrieren\n"
-            "Zeit wählen, dann Feld-Punkt aus der Liste wählen und auf die passende Stelle im Bild "
-            "klicken. Mindestens 4 Punkte, am besten über das ganze sichtbare Feld verteilt "
-            "(nicht nur den Freiwurfraum) - sonst werden Positionen weit weg von den Punkten ungenau."
+            "Die vorgeschlagenen Feld-Punkte der Reihe nach anklicken (die Liste springt nach "
+            "jedem Klick automatisch zum nächsten) - oder über die Liste einen anderen, besser "
+            "sichtbaren Punkt wählen. Mindestens 4 Punkte, am besten über das ganze sichtbare "
+            "Feld verteilt (nicht nur den Freiwurfraum)."
         )
-        calib_time = gr.Slider(0, 60, value=0, step=0.1, label="Zeitpunkt im Video (s)")
         calib_handle = gr.Dropdown(choices=[(label, key) for key, label in HANDLE_LABELS.items()],
-                                    value="lane_base_l",
-                                    label="Welcher Feld-Punkt wird als nächstes geklickt?")
+                                    value=RECOMMENDED_ORDER[0],
+                                    label="Nächster Feld-Punkt zum Anklicken")
         calib_image = gr.Image(label="Klick auf den gewählten Feld-Punkt", interactive=False)
         with gr.Row():
             calib_reset_btn = gr.Button("Punkte zurücksetzen")
             calib_commit_btn = gr.Button("Kalibrierung übernehmen", variant="primary")
         calib_status = gr.Textbox(label="Status", interactive=False)
 
-    with gr.Group():
-        gr.Markdown("## 3. Video verarbeiten\nLäuft im Hintergrund über das ganze Video (dauert je nach Länge/Modell 1-5 Minuten).")
+    step3 = gr.Group(visible=False)
+    with step3:
+        gr.Markdown("## 3. Video verarbeiten\nLäuft automatisch über das ganze Video (dauert je nach Länge/Modell 1-5 Minuten).")
         with gr.Row():
             model_dropdown = gr.Dropdown(MODEL_CHOICES, value="yolo11m.pt", allow_custom_value=True,
                                           label="Modellgröße (größer = genauer, aber langsamer) - oder Pfad zu einem eigenen trainierten Modell eintragen")
@@ -326,17 +354,16 @@ with gr.Blocks(title="Spielzug-Analyse") as demo:
         process_btn = gr.Button("Video verarbeiten", variant="primary")
         process_status = gr.Textbox(label="Status", interactive=False)
 
-    with gr.Group():
+    step4plus = gr.Group(visible=False)
+    with step4plus:
         gr.Markdown(
             "## 4. Die 5 Offense-Spieler auswählen\n"
-            "Zeitpunkt wählen, dann bis zu 5 erkannte Spieler anklicken (graue Punkte = erkannt, "
-            "aber nicht ausgewählt). Nochmal anklicken entfernt die Auswahl."
+            "Oben den Zeitpunkt wählen, dann bis zu 5 erkannte Spieler anklicken (graue/blasse "
+            "Punkte = erkannt, aber nicht ausgewählt). Nochmal anklicken entfernt die Auswahl."
         )
-        select_time = gr.Slider(0, 60, value=0, step=0.1, label="Zeitpunkt im Video (s)")
         select_image = gr.Image(label="Spieler anklicken", interactive=False)
         select_status = gr.Textbox(label="Status", interactive=False)
 
-    with gr.Group():
         gr.Markdown(
             "## 5. Spuren zusammenführen (falls eine Nummer gewechselt hat)\n"
             "Wurde ein Spieler fälschlich mit einer neuen Nummer weitergeführt: hier die neue "
@@ -348,11 +375,8 @@ with gr.Blocks(title="Spielzug-Analyse") as demo:
             merge_btn = gr.Button("Zusammenführen")
         merge_status = gr.Textbox(label="Status", interactive=False)
 
-    with gr.Group():
         gr.Markdown("## 6. Taktikdiagramm")
-        with gr.Row():
-            diagram_time = gr.Slider(0, 60, value=0, step=0.1, label="Zeitpunkt (für Einzelbild)")
-            overlay_all_checkbox = gr.Checkbox(label="Gesamten Spielzug überlagern", value=False)
+        overlay_all_checkbox = gr.Checkbox(label="Gesamten Spielzug überlagern (statt nur aktueller Zeitpunkt)", value=False)
         render_btn = gr.Button("Diagramm aktualisieren", variant="primary")
         diagram_output = gr.Image(label="Taktikdiagramm", interactive=False)
         diagram_status = gr.Textbox(label="Status", interactive=False)
@@ -360,47 +384,50 @@ with gr.Blocks(title="Spielzug-Analyse") as demo:
     # ---- wiring ----
     def on_upload(video):
         if not video:
-            return None, 0, gr.update(maximum=60), gr.update(maximum=60), gr.update(maximum=60), None
+            return None, 0, gr.update(maximum=60), None, gr.update(visible=False)
         dur = get_video_duration(video)
         frame = extract_frame(video, 0)
-        return (video, round(dur, 1), gr.update(maximum=dur, value=0),
-                gr.update(maximum=dur, value=0), gr.update(maximum=dur, value=0), frame)
+        return video, round(dur, 1), gr.update(maximum=dur, value=0), frame, gr.update(visible=True)
 
     video_input.change(
         on_upload, inputs=[video_input],
-        outputs=[video_path_state, duration_box, calib_time, select_time, diagram_time, calib_image],
+        outputs=[video_path_state, duration_box, shared_time, calib_image, step2],
     )
 
-    calib_time.change(
+    shared_time.change(
         lambda vp, t, pts: draw_calib_points(extract_frame(vp, t), pts) if vp else None,
-        inputs=[video_path_state, calib_time, calib_points_state], outputs=[calib_image],
+        inputs=[video_path_state, shared_time, calib_points_state], outputs=[calib_image],
+    )
+    shared_time.change(
+        on_select_time_change,
+        inputs=[video_path_state, processed_state, shared_time, selected_ids_state, merges_state],
+        outputs=[select_image, select_status],
     )
     calib_image.select(
-        on_add_point, inputs=[video_path_state, calib_time, calib_handle, calib_points_state],
-        outputs=[calib_points_state, calib_image, calib_status],
+        on_add_point, inputs=[video_path_state, shared_time, calib_handle, calib_points_state],
+        outputs=[calib_points_state, calib_image, calib_status, calib_handle],
     )
     calib_reset_btn.click(
-        on_reset_points, inputs=[video_path_state, calib_time],
-        outputs=[calib_points_state, calib_image, calib_status],
+        on_reset_points, inputs=[video_path_state, shared_time],
+        outputs=[calib_points_state, calib_image, calib_status, calib_handle],
     )
     calib_commit_btn.click(
         on_commit_calibration, inputs=[calib_points_state],
-        outputs=[homography_state, calib_status],
+        outputs=[homography_state, calib_status, step3],
     )
 
     process_btn.click(
         on_process_video, inputs=[video_path_state, homography_state, model_dropdown, conf_slider],
-        outputs=[processed_state, process_status],
-    )
-
-    select_time.change(
+        outputs=[processed_state, process_status, step4plus],
+    ).then(
         on_select_time_change,
-        inputs=[video_path_state, processed_state, select_time, selected_ids_state, merges_state],
+        inputs=[video_path_state, processed_state, shared_time, selected_ids_state, merges_state],
         outputs=[select_image, select_status],
     )
+
     select_image.select(
         on_pick_offense,
-        inputs=[video_path_state, processed_state, select_time, selected_ids_state, merges_state],
+        inputs=[video_path_state, processed_state, shared_time, selected_ids_state, merges_state],
         outputs=[selected_ids_state, select_image, select_status],
     )
 
@@ -411,9 +438,9 @@ with gr.Blocks(title="Spielzug-Analyse") as demo:
 
     render_btn.click(
         on_render_diagram,
-        inputs=[processed_state, selected_ids_state, merges_state, diagram_time, overlay_all_checkbox],
+        inputs=[processed_state, selected_ids_state, merges_state, shared_time, overlay_all_checkbox],
         outputs=[diagram_output, diagram_status],
     )
 
 if __name__ == "__main__":
-    demo.launch(server_name="0.0.0.0", server_port=7860)
+    demo.launch(server_name="0.0.0.0", server_port=7860, inbrowser=True)

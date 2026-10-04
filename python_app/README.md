@@ -7,13 +7,22 @@ Industriestandard für genau diesen Anwendungsfall).
 
 ## Installation
 
+**Windows:** Doppelklick auf `start.bat`. Installiert beim ersten Mal automatisch alles Nötige
+und startet die App - öffnet den Browser automatisch.
+
+**Mac:** Doppelklick auf `start.command` (bei der ersten Ausführung ggf. Rechtsklick → "Öffnen",
+falls macOS wegen "unbekanntem Entwickler" warnt).
+
+**Von Hand (alle Systeme):**
 ```bash
 cd python_app
 pip install -r requirements.txt
 python app.py
 ```
 
-Öffnet eine Weboberfläche unter `http://localhost:7860`.
+Die App öffnet automatisch eine Browser-Seite unter `http://localhost:7860` (falls nicht:
+manuell aufrufen). Das Terminal-/Konsolenfenster muss dabei offen bleiben, solange die App
+läuft - zum Beenden `Strg+C` (Mac: `Cmd+C`).
 
 ## Wichtig: realistische Erwartung
 
@@ -53,13 +62,32 @@ jederzeit nachgerüstet werden kann, ohne sonst etwas zu ändern:
 
 ## Arbeitsablauf
 
+Die Schritte erscheinen nacheinander, sobald der vorherige abgeschlossen ist (kein Scrollen durch
+sechs Abschnitte gleichzeitig). Ein gemeinsamer Zeit-Regler oben gilt für Kalibrierung,
+Spieler-Auswahl und Einzelbild-Diagramm - nicht mehr drei getrennte Regler wie in der ersten
+Version.
+
 1. **Video laden** - beliebiges Format, das OpenCV lesen kann (mp4, webm, mov, ...).
-2. **Kalibrieren** - Zeitpunkt wählen, Feld-Punkt aus der Liste wählen, auf die passende Stelle
-   im Bild klicken. Mindestens 4 Punkte, **über möglichst das ganze sichtbare Feld verteilt**
-   (nicht nur den Freiwurfraum) - sonst werden Positionen weit weg von den Punkten ungenau
-   (genau wie in der alten Version wird das als Warnung angezeigt).
+2. **Kalibrieren** - die vorgeschlagenen Feld-Punkte der Reihe nach anklicken (die Liste springt
+   nach jedem Klick automatisch zum nächsten, die ersten 4 sind meist aus den meisten
+   Kamerawinkeln sichtbar). **Über möglichst das ganze sichtbare Feld verteilt** klicken (nicht
+   nur den Freiwurfraum) - sonst werden Positionen weit weg von den Punkten ungenau (wird als
+   Warnung angezeigt).
 3. **Verarbeiten** - läuft automatisch über das ganze Video (dauert je nach Länge/Modellgröße
    ca. 1-5 Minuten). Größeres Modell = genauer, aber langsamer.
-4. **Offense-Spieler auswählen** - bis zu 5 erkannte Spieler anklicken.
+4. **Offense-Spieler auswählen** - bis zu 5 erkannte Spieler anklicken. Jede erkannte Person ist
+   klickbar, auch blass dargestellte (unsichere Feld-Position laut Kalibrierung, meist
+   Zuschauer/Bank - aber nie komplett ausgeblendet, s.u.).
 5. **Spuren zusammenführen** - falls eine Spur-Nummer während der Verfolgung gewechselt hat.
-6. **Diagramm** - Einzelbild oder ganzer Spielzug überlagert, als PNG exportierbar.
+6. **Diagramm** - Einzelbild (aktueller Zeitpunkt) oder ganzer Spielzug überlagert, als PNG
+   exportierbar.
+
+## Wichtige Design-Entscheidung: nie "nichts zum Auswählen"
+
+Eine frühere Version hat Erkennungen, die laut Kalibrierung nicht plausibel auf dem Feld lagen,
+komplett verworfen - bei nur leicht ungenauer Kalibrierung konnte das **alle** echten Spieler
+treffen, sodass Schritt 4 nichts zum Anklicken zeigte und das Diagramm leer/falsch war. Jetzt
+wird jede erkannte Person immer angezeigt und bleibt klickbar; die Feld-Plausibilität ist nur
+noch ein visueller Hinweis (blasser Punkt), kein Ausschlusskriterium. Eine ungenaue Kalibrierung
+kostet dadurch höchstens Positions-Genauigkeit (sichtbar und durch Neukalibrieren behebbar),
+nie einen kompletten Stillstand.
