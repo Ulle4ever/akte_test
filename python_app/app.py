@@ -114,13 +114,22 @@ def on_process_video(video_path, homography, model_name, conf, progress=gr.Progr
     fps, w, h, frames = pipeline.run_detection_and_tracking(
         video_path, H, model_path=model_name, conf=conf, progress_cb=cb)
     all_ids = sorted({tid for tf in frames for tid in tf.players})
+    plausible_ids = sorted({tid for tf in frames for tid, p in tf.players.items() if p["plausible"]})
+    max_per_frame = max((len(tf.players) for tf in frames), default=0)
     serializable = [
         {"time": tf.time, "frame_idx": tf.frame_idx,
-         "players": {str(tid): {"nx": p["nx"], "ny": p["ny"], "x": p["x"], "y": p["y"], "conf": p["conf"]}
+         "players": {str(tid): {"nx": p["nx"], "ny": p["ny"], "x": p["x"], "y": p["y"],
+                                 "conf": p["conf"], "plausible": p["plausible"]}
                      for tid, p in tf.players.items()}}
         for tf in frames
     ]
-    status = f"Fertig: {len(frames)} Frames verarbeitet, {len(all_ids)} verschiedene Spur-IDs gefunden (vor manueller Zusammenführung)."
+    status = (f"Fertig: {len(frames)} Frames verarbeitet, {len(all_ids)} verschiedene Spur-IDs "
+              f"gefunden (davon {len(plausible_ids)} vermutlich auf dem Feld), max. {max_per_frame} "
+              f"Personen in einem einzelnen Frame. Alle erkannten Personen sind in Schritt 4 "
+              f"anklickbar, auch blass dargestellte (unsichere Feld-Position - meist Zuschauer/Bank, "
+              f"aber bei knapper Kalibrierung notfalls trotzdem anklickbar).")
+    if max_per_frame == 0:
+        status += " ⚠️ Es wurde niemand erkannt - Modell wechseln, Mindest-Konfidenz senken, oder Video/Kalibrierung prüfen."
     return {"fps": fps, "w": w, "h": h, "frames": serializable}, status
 
 
@@ -144,9 +153,20 @@ def draw_tracks_on_frame(frame_img, frame_data, selected_ids, merges):
         tid = resolve(int(tid_str))
         x, y = int(p["nx"]), int(p["ny"])
         is_sel = tid in selected_ids
-        color = MARKER_COLORS[selected_ids.index(tid) % len(MARKER_COLORS)] if is_sel else (100, 116, 139)
-        cv2.circle(out, (x, y), 10 if is_sel else 7, color, -1)
-        cv2.circle(out, (x, y), 10 if is_sel else 7, (255, 255, 255), 2)
+        # "plausible" (on-court position + expected size there, per the current calibration) is
+        # just a visual hint via a paler/dashed-looking marker - NEVER hides a detection, since a
+        # merely imprecise calibration must never make a real player impossible to click (see
+        # pipeline.run_detection_and_tracking's docstring for why this used to be a hard filter).
+        plausible = p.get("plausible", True)
+        if is_sel:
+            color = MARKER_COLORS[selected_ids.index(tid) % len(MARKER_COLORS)]
+        elif plausible:
+            color = (100, 116, 139)
+        else:
+            color = (180, 190, 200)
+        radius = 10 if is_sel else 7
+        cv2.circle(out, (x, y), radius, color, -1 if (is_sel or plausible) else 2)
+        cv2.circle(out, (x, y), radius, (255, 255, 255), 2)
         cv2.putText(out, str(tid), (x + 12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55,
                     (255, 255, 255), 3, cv2.LINE_AA)
         cv2.putText(out, str(tid), (x + 12, y), cv2.FONT_HERSHEY_SIMPLEX, 0.55,

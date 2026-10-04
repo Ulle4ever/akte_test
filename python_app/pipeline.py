@@ -58,11 +58,24 @@ def _on_court_plausible(H, Hinv, fx, fy, box_h, margin_m):
     return True
 
 
+MIN_BOX_H_PX = 18  # absolute, calibration-independent floor - filters only truly tiny background
+# noise, never a real nearby person, so this alone can never zero out a frame the way the
+# homography-based check below can.
+
+
 def run_detection_and_tracking(video_path, homography, model_path="yolo11m.pt", conf=0.25,
-                                margin_m=2.0, tracker="bytetrack.yaml", progress_cb=None):
-    """Runs YOLO+tracking across the whole video, keeping only detections that plausibly belong
-    to a standing player somewhere on (or just off) the court, per the committed homography.
-    Returns (fps, width, height, list[TrackedFrame]) with x,y (court meters) already filled in.
+                                margin_m=5.0, tracker="bytetrack.yaml", progress_cb=None):
+    """Runs YOLO+tracking across the whole video. Returns (fps, width, height, list[TrackedFrame])
+    with x,y (court meters) and a "plausible" flag already filled in for every detected person.
+
+    IMPORTANT: "plausible" (on-court bounds + expected height at that position, per the committed
+    homography) is informational only, never a hard filter - an earlier version silently dropped
+    everyone it judged implausible, which meant a merely imprecise calibration (narrow coverage,
+    slightly-off click) could make EVERY real player vanish with no visible cause: step 4 would show
+    nothing to click, and the diagram would be empty or built from whatever stray detection survived.
+    Keeping every detection and letting the user pick the real players in step 4 regardless of this
+    flag is far more robust - a bad calibration then only costs court-position accuracy (visibly
+    fixable by recalibrating), never "nothing to select at all".
     """
     Hinv = court.invert_homography(homography)
     model = YOLO(model_path)
@@ -89,10 +102,12 @@ def run_detection_and_tracking(video_path, homography, model_path="yolo11m.pt", 
             for tid, box, c in zip(ids, xyxy, confs):
                 fx, fy = foot_point_from_box(box)
                 box_h = box[3] - box[1]
-                if not _on_court_plausible(homography, Hinv, fx, fy, box_h, margin_m):
+                if box_h < MIN_BOX_H_PX:
                     continue
                 cx, cy = court.apply_homography(homography, fx, fy)
-                tf.players[tid] = {"nx": fx, "ny": fy, "x": cx, "y": cy, "conf": c, "bbox": box}
+                plausible = _on_court_plausible(homography, Hinv, fx, fy, box_h, margin_m)
+                tf.players[tid] = {"nx": fx, "ny": fy, "x": cx, "y": cy, "conf": c, "bbox": box,
+                                    "plausible": plausible}
         frames.append(tf)
         if progress_cb:
             progress_cb(min(1.0, (idx + 1) / total_frames), tf)
