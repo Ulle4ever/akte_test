@@ -1655,6 +1655,16 @@
     if(best) boxes.splice(best.boxIdx, 1); // don't let a second lost track grab the same box
     return best;
   }
+  // How long a track stays eligible for automatic re-matching after it was last actually seen in a
+  // committed frame, even if it was missing from one or more frames in between. Directly modeled on
+  // a side-by-side experiment (YOLO+ByteTrack, several configurations, on this exact video): tuning
+  // the TRACKER's own tolerance for how long to keep searching for a track before giving up turned
+  // out to cut identity churn by roughly 3x on its own - far more than any change to the detector
+  // (model size, resolution, cropping) achieved. The equivalent lever here is this buffer: previously
+  // trackKnownPlayers only ever attempted players who were in the SINGLE immediately preceding
+  // captured frame, so missing a player for even one frame meant they were permanently abandoned by
+  // automatic tracking (never attempted again) until a user noticed and fixed it manually.
+  const TRACK_BUFFER_SECONDS = 8;
   async function trackKnownPlayers(){
     if(!homography) return {trackedOk:0, trackedLow:0, recovered:0, hadPrevFrame:false};
     const idx = findChronoInsertIndex(video.currentTime);
@@ -1664,29 +1674,35 @@
     fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
     fullCanvas.getContext('2d').drawImage(video, 0, 0);
     const feat = toTrackFeatures(fullCanvas);
-    const elapsed = Math.max(0, video.currentTime - prevFrame.time);
     let trackedOk = 0, trackedLow = 0, recovered = 0;
-    const lost = []; // {p, track} - filled in the loop below, resolved afterwards
-    prevFrame.players.forEach(p=>{
-      const track = tracks[p.trackId];
-      if(!track || !track.template || !track.lastNative) return;
+    const lost = []; // {trackId, track} - filled in the loop below, resolved afterwards
+    Object.keys(tracks).forEach(key=>{
+      const trackId = Number(key);
+      const track = tracks[trackId];
+      if(!track || !track.template || !track.lastNative || track.lastSeenTime == null) return;
+      if(pendingPositions.some(pp => pp.trackId === trackId)) return;
+      const elapsed = Math.max(0, video.currentTime - track.lastSeenTime);
+      // Seen only in the future, or given up on too long ago - "Nach neuen Spielern suchen" (or a
+      // manual click) is the right tool past this point, not an ever-widening blind search.
+      if(track.lastSeenTime > video.currentTime || elapsed > TRACK_BUFFER_SECONDS) return;
       const m = matchTemplateForward(feat, track, elapsed);
-      if(!m){ lost.push({p, track}); return; }
+      if(!m){ lost.push({trackId, track}); return; }
       if(pendingPositions.some(pp => Math.hypot(pp.x-m.x,pp.y-m.y) < 0.8)) return;
       const lowConfidence = m.confidence < TRACK_CONFIDENCE_OK;
-      pendingPositions.push({x:m.x, y:m.y, nx:m.nx, ny:m.ny, team:track.team, trackId:p.trackId, tracked:true, lowConfidence});
+      pendingPositions.push({x:m.x, y:m.y, nx:m.nx, ny:m.ny, team:track.team, trackId, tracked:true, lowConfidence});
       if(lowConfidence) trackedLow++; else trackedOk++;
     });
     if(lost.length && detectionAvailable()){
       let boxes;
       try{ boxes = await detectRawBoxes(); }catch(e){ console.error(e); boxes = []; }
-      for(const {p, track} of lost){
-        if(pendingPositions.some(pp => pp.trackId === p.trackId)) continue;
+      for(const {trackId, track} of lost){
+        if(pendingPositions.some(pp => pp.trackId === trackId)) continue;
+        const elapsed = Math.max(0, video.currentTime - track.lastSeenTime);
         const found = await recoverLostTrack(track.lastNative, elapsed, boxes);
         if(!found) continue;
         const [rx, ry] = applyHomography(homography, found.footX, found.footY);
         if(pendingPositions.some(pp => Math.hypot(pp.x-rx,pp.y-ry) < 0.8)) continue;
-        pendingPositions.push({x:rx, y:ry, nx:found.footX, ny:found.footY, team:track.team, trackId:p.trackId, tracked:true, lowConfidence:true, recovered:true});
+        pendingPositions.push({x:rx, y:ry, nx:found.footX, ny:found.footY, team:track.team, trackId, tracked:true, lowConfidence:true, recovered:true});
         recovered++;
       }
     }
@@ -1984,6 +2000,7 @@
         if(template){
           tracks[p.trackId].template = template;
           tracks[p.trackId].lastNative = {x:p.nx, y:p.ny};
+          tracks[p.trackId].lastSeenTime = video.currentTime;
         }
       });
     }
