@@ -1,0 +1,2786 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Spielzug-Analyse – Video zu Taktik-Diagramm</title>
+<style>
+  :root{
+    --bg:#F7F4EE; --panel:#FFFFFF; --ink:#1e293b; --muted:#64748b;
+    --accent:#C43E0E; --accent-dark:#A8350C; --line:#e7e2d8;
+    --shadow:0 1px 2px rgba(30,41,59,.04), 0 6px 16px -8px rgba(30,41,59,.10);
+  }
+  *{box-sizing:border-box;}
+  body{margin:0;font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,sans-serif;background:var(--bg);color:var(--ink);-webkit-font-smoothing:antialiased;}
+  header{padding:26px 24px 10px;}
+  header h1{margin:0 0 6px;font-size:23px;letter-spacing:-.01em;}
+  header p{margin:0;color:var(--muted);font-size:14px;max-width:760px;line-height:1.5;}
+  .wrap{display:grid;grid-template-columns:1fr 1fr;gap:18px;padding:16px 24px 40px;align-items:start;}
+  @media (max-width:980px){.wrap{grid-template-columns:1fr;}}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:18px;margin-bottom:18px;box-shadow:var(--shadow);}
+  .card h2{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;letter-spacing:-.005em;}
+  .step-badge{display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:var(--accent);color:#fff;font-size:12px;font-weight:700;flex:none;}
+  .muted{color:var(--muted);font-size:13px;line-height:1.5;}
+  button{cursor:pointer;border:none;border-radius:8px;padding:9px 15px;font-size:13px;font-weight:600;background:#0f172a;color:#fff;transition:opacity .15s, transform .1s, background-color .15s;}
+  button:hover{opacity:.88;}
+  button:active{transform:translateY(1px);}
+  button:disabled{opacity:.4;cursor:not-allowed;transform:none;}
+  button.accent{background:var(--accent);}
+  button.accent:hover{background:var(--accent-dark);opacity:1;}
+  button.ghost{background:transparent;color:var(--ink);border:1px solid var(--line);}
+  button.ghost:hover{background:#f8fafc;opacity:1;}
+  input[type="file"]{font-size:13px;}
+  .row{display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin:8px 0;}
+  #videoWrap{position:relative;width:100%;background:#000;border-radius:8px;overflow:hidden;}
+  #video{display:block;width:100%;max-height:360px;}
+  #overlay{position:absolute;inset:0;width:100%;height:100%;pointer-events:none;}
+  #overlay.active{cursor:grab;pointer-events:auto;}
+  #overlay.active.dragging{cursor:grabbing;}
+  #overlay.picking{cursor:crosshair;pointer-events:auto;}
+  #status{font-size:12px;padding:8px 10px;border-radius:8px;background:#f1f5f9;color:var(--muted);}
+  #status.ok{background:#ecfdf5;color:#047857;}
+  #status.err{background:#fef2f2;color:#b91c1c;}
+  #calibStatus.ok{color:#047857;font-weight:600;}
+  #calibStatus.err{color:#b91c1c;font-weight:600;}
+  #gallery{display:flex;gap:8px;overflow-x:auto;padding:4px 0;}
+  .thumb{flex:none;width:120px;border:2px solid transparent;border-radius:8px;overflow:hidden;background:#111;position:relative;cursor:pointer;transition:border-color .15s;}
+  .thumb:hover{border-color:#cbd5e1;}
+  .thumb.active{border-color:var(--accent);}
+  .thumb img{display:block;width:100%;}
+  .thumb .cap{font-size:10px;color:#fff;background:rgba(0,0,0,.55);padding:2px 4px;position:absolute;bottom:0;left:0;right:0;}
+  .thumb .del{position:absolute;top:2px;right:2px;background:rgba(0,0,0,.6);color:#fff;border:none;border-radius:50%;width:18px;height:18px;font-size:11px;line-height:1;padding:0;}
+  #courtCanvas{width:100%;max-width:680px;background:#fdfaf3;border-radius:10px;border:1px solid var(--line);box-shadow:var(--shadow);}
+  label.opt{display:flex;align-items:center;gap:6px;font-size:13px;color:var(--ink);}
+  .hint{font-size:12px;color:var(--muted);margin-top:6px;}
+  details.card > summary{margin:0 0 10px;font-size:15px;display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;}
+  details.card > summary::-webkit-details-marker{display:none;}
+  details.card > summary::before{content:'▸';display:inline-block;width:14px;color:var(--muted);transition:transform .15s;flex:none;}
+  details.card[open] > summary::before{transform:rotate(90deg);}
+  details.subtoggle{margin-top:10px;padding-top:10px;border-top:1px solid var(--line);}
+  details.subtoggle > summary{cursor:pointer;font-size:13px;font-weight:600;color:var(--ink);list-style:none;display:flex;align-items:center;gap:6px;}
+  details.subtoggle > summary::-webkit-details-marker{display:none;}
+  details.subtoggle > summary::before{content:'▸';display:inline-block;width:12px;color:var(--muted);transition:transform .15s;flex:none;font-size:11px;}
+  details.subtoggle[open] > summary::before{transform:rotate(90deg);}
+  details.subtoggle > *:not(summary){margin-top:8px;}
+  /* A direct child that sets its own "display" (e.g. .row's display:flex) otherwise overrides the
+     browser's built-in "hide non-summary content while closed" rule, because author CSS always wins
+     over the user-agent stylesheet for that property regardless of selector specificity - without
+     this, a collapsed card would look closed but its buttons/inputs would stay fully clickable. */
+  details.card:not([open]) > *:not(summary),
+  details.subtoggle:not([open]) > *:not(summary){display:none;}
+  .wizard-banner{margin:0 24px 14px;padding:11px 16px;border-radius:10px;background:#fff7ed;border:1px solid #fed7aa;border-left:3px solid var(--accent);color:#9a3412;font-size:13px;font-weight:600;}
+  .callout{font-size:12px;font-weight:600;color:#9a3412;background:#fff7ed;border:1px solid #fed7aa;border-radius:8px;padding:9px 11px;margin:8px 0;line-height:1.5;}
+</style>
+</head>
+<body>
+<header>
+  <h1>Spielzug-Analyse — Video zu Taktik-Diagramm</h1>
+  <p>Lädt ein Spielvideo, wandelt die Feldlinien-Kalibrierung in echte Feld-Koordinaten um und lässt dich Spielerpositionen direkt im Video anklicken — daraus entsteht automatisch ein geometrisch korrektes Taktik-Diagramm, ohne dass du es selbst zeichnen musst.</p>
+</header>
+
+<div id="wizardBanner" class="wizard-banner">Schritt 1 von 4: Video laden, um zu beginnen.</div>
+
+<div class="wrap">
+  <div>
+    <div class="card">
+      <h2><span class="step-badge">1</span> Video laden</h2>
+      <input type="file" id="fileInput" accept="video/*">
+      <div id="videoWrap" style="margin-top:10px;">
+        <video id="video" muted playsinline></video>
+        <canvas id="overlay"></canvas>
+      </div>
+      <div class="row" id="videoControls" style="margin-top:8px;">
+        <button id="playPauseBtn" class="ghost">▶</button>
+        <button id="stepBackBtn" class="ghost">−0,1s</button>
+        <button id="stepFwdBtn" class="ghost">+0,1s</button>
+        <input type="range" id="seekSlider" min="0" max="0" step="0.01" value="0" style="flex:1;min-width:120px;">
+        <span id="timeLabel" class="hint" style="margin:0;white-space:nowrap;">00:00.0 / 00:00.0</span>
+      </div>
+      <p class="hint">Am besten Videos aus erhöhter Kameraposition, bei denen zumindest ein paar Feldlinien sichtbar sind. Die Steuerung oben funktioniert auch während der Kalibrierung.</p>
+    </div>
+
+    <details class="card" id="rosterCard">
+      <summary><span class="step-badge" style="background:var(--muted);">★</span> Kader &amp; Trikotfarben (optional)</summary>
+      <p class="muted">Hilft der KI-Vorschlag-Funktion, Team und Rückennummer automatisch vorzuschlagen. Ohne diese Angaben funktioniert alles weiterhin rein manuell.</p>
+      <div class="row" style="align-items:center;">
+        <label class="opt">Offense-Trikot <input type="color" id="offenseColor" value="#ffffff"></label>
+        <button id="pickOffenseBtn" class="ghost">Farbe aus Video</button>
+        <label class="opt">Defense-Trikot <input type="color" id="defenseColor" value="#1d4ed8"></label>
+        <button id="pickDefenseBtn" class="ghost">Farbe aus Video</button>
+      </div>
+      <p class="hint">Am besten mit "Farbe aus Video" direkt auf ein Trikot im pausierten Video klicken, statt die Farbe zu raten.</p>
+      <div class="row" style="align-items:flex-start;">
+        <label class="opt" style="flex-direction:column;align-items:stretch;flex:1;min-width:200px;">Offense-Kader (eine Zeile pro Spieler: Nummer Name)
+          <textarea id="offenseRoster" rows="4" placeholder="4 Mueller&#10;7 Schmidt&#10;23 Yilmaz" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;"></textarea>
+        </label>
+        <label class="opt" style="flex-direction:column;align-items:stretch;flex:1;min-width:200px;">Defense-Kader (eine Zeile pro Spieler: Nummer Name)
+          <textarea id="defenseRoster" rows="4" placeholder="5 Gegner&#10;11 Gegner" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;"></textarea>
+        </label>
+      </div>
+    </details>
+
+    <details class="card" id="roboflowCard">
+      <summary><span class="step-badge" style="background:var(--muted);">★</span> Externe KI-Erkennung (Roboflow, optional)</summary>
+      <p class="muted">Zusätzlich zur eingebauten Erkennung kann ein eigenes <a href="https://roboflow.com" target="_blank" rel="noopener">Roboflow</a>-Modell verwendet werden (z.B. ein speziell auf Basketballspieler trainiertes Modell statt der allgemeinen Personenerkennung) — das kann die Erkennung deutlich verbessern. Dafür wird ein eigener, kostenloser Roboflow-Account samt API-Key benötigt. Ohne diese Angaben funktioniert alles weiterhin wie bisher.</p>
+      <div class="row" style="align-items:flex-start;">
+        <label class="opt" style="flex-direction:column;align-items:stretch;flex:1;min-width:220px;">Modell-Endpunkt
+          <input type="text" id="roboflowEndpoint" placeholder="https://detect.roboflow.com/dein-modell/1" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
+        </label>
+        <label class="opt" style="flex-direction:column;align-items:stretch;flex:1;min-width:180px;">API-Key
+          <input type="password" id="roboflowApiKey" placeholder="dein Roboflow API-Key" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
+        </label>
+      </div>
+      <label class="opt" style="flex-direction:column;align-items:stretch;margin-top:8px;">Klassennamen, die als Spieler zählen (optional, kommagetrennt — leer lassen, um alle Erkennungen zu übernehmen)
+        <input type="text" id="roboflowClassNames" placeholder="z.B. player" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
+      </label>
+      <label class="opt" style="flex-direction:column;align-items:stretch;margin-top:8px;max-width:260px;">Mindest-Konfidenz (%) — Roboflow lässt standardmäßig nur ab 50% durch; liefert "Verbindung testen" 0 Treffer, hier erstmal niedriger ansetzen (z.B. 10)
+        <input type="number" id="roboflowConfidence" value="10" min="0" max="100" step="1" style="width:100%;font:inherit;padding:6px 8px;border:1px solid var(--line);border-radius:6px;margin-top:4px;">
+      </label>
+      <div class="row" style="align-items:center;margin-top:8px;">
+        <label class="opt"><input type="checkbox" id="roboflowEnabled"> Aktivieren</label>
+        <button id="roboflowTestBtn" class="ghost">Verbindung testen</button>
+      </div>
+      <div id="roboflowStatus" class="hint"></div>
+      <div id="roboflowCallLog" class="hint">Noch kein Aufruf in dieser Sitzung.</div>
+      <p class="hint">Wichtig: Bei aktivierter Erkennung wird der aktuelle Videoframe als Bild an Roboflow übertragen (verlässt also deinen Browser). API-Key und Einstellungen werden nur lokal in diesem Browser gespeichert (localStorage), nie in dieser Datei.</p>
+    </details>
+
+    <details class="card" id="calibCard" open>
+      <summary><span class="step-badge">2</span> Spielfeld kalibrieren <span id="calibSummaryHint" class="muted" style="font-weight:400;"></span></summary>
+      <p class="muted">Pausiere das Video an einer Stelle mit gut sichtbaren Feldlinien. Über dem Video erscheint eine Halbfeld-Schablone mit mehreren Ziehpunkten. Ziehe <strong>mindestens 4</strong> davon auf ihre passende Stelle im Bild. Alle anderen Punkte richten sich automatisch mit aus. Du musst keine Koordinaten kennen. Wichtig: Die Punkte dürfen nicht alle auf derselben Linie liegen (z.B. nicht nur entlang der Grundlinie) &mdash; nimm mindestens einen Punkt, der weiter in die Tiefe des Feldes zeigt (z.B. Freiwurflinie oder Mittellinie), sonst lässt sich die Kalibrierung nicht eindeutig berechnen. Genauso wichtig: die Punkte sollten möglichst über den <strong>gesamten Bereich verteilt sein, in dem später Spieler stehen</strong> &mdash; nur den Freiwurfraum zu kalibrieren reicht nicht, auch wenn er am leichtesten zu erkennen ist. Je enger die Punkte beieinanderliegen, desto ungenauer wird die Position für alles, was weiter weg davon angeklickt wird.</p>
+      <div class="row">
+        <button id="calibEditBtn">Kalibrierung bearbeiten</button>
+        <button id="calibResetBtn" class="ghost">Punkte zurücksetzen</button>
+        <button id="calibCommitBtn" class="accent" disabled>Kalibrierung übernehmen</button>
+      </div>
+      <div id="calibStatus" class="hint">Video laden, um zu kalibrieren.</div>
+    </details>
+
+    <div class="card">
+      <h2><span class="step-badge">3</span> Frames erfassen</h2>
+      <p class="muted">Für den <strong>ersten Frame</strong> genau die Spieler anklicken, die du im Diagramm sehen willst — <strong>oft reichen die 5 Offense-Spieler</strong>, Defense ist komplett optional. Das legt fest, wer danach verfolgt wird. Für <strong>jeden weiteren Frame</strong> im Video weiterscrubben und "Position automatisch bestimmen" klicken: genau diese Spieler werden an ihrer neuen Position wiedergefunden (reine Bildverfolgung, kein Raten) — es werden dabei nie von selbst neue Spieler hinzugefügt, damit die Anzahl und Nummerierung über den ganzen Spielzug stabil bleibt. Kommt wirklich jemand neu dazu (Wechsel), dafür "Nach neuen Spielern suchen" nutzen. Unsicher wiedergefundene Spieler sind gelb markiert — kurz prüfen.</p>
+      <div class="row">
+        <button id="aiSuggestBtn" class="ghost" disabled>Position automatisch bestimmen</button>
+        <button id="findNewPlayersBtn" class="ghost" disabled>Nach neuen Spielern suchen</button>
+      </div>
+      <details class="subtoggle">
+        <summary>Erweitert: Ganzen Spielzug automatisch erfassen</summary>
+        <div class="row" style="align-items:center;">
+          <label class="opt">Intervall <input type="number" id="autoInterval" value="1.5" min="0.3" step="0.1" style="width:60px;"> s</label>
+          <button id="autoCaptureBtn" class="ghost" disabled>Ganzen Spielzug automatisch erfassen</button>
+          <button id="autoStopBtn" class="ghost" style="display:none;">Stopp</button>
+        </div>
+        <p class="hint">Setzt voraus, dass der erste Frame bereits manuell erfasst wurde (siehe oben) — verfolgt von dort ab nur noch genau diese Spieler automatisch bis zum Ende, im gewählten Zeitabstand, ohne je von selbst neue hinzuzufügen. Größere Abstände (Standard 1,5s) bedeuten weniger, aber zuverlässiger verknüpfte Frames als engmaschiges Abtasten. Bricht die Verfolgung trotzdem mal ab (z.B. nach längerer Verdeckung), bleibt der betroffene Spieler in dem Frame einfach aus — danach per "Position automatisch bestimmen" oder manuell wieder aufnehmen.</p>
+      </details>
+      <p class="callout">Beim Klicken auf einen Spieler wird die Position automatisch auf dessen von der KI erkannte <strong>Fußposition</strong> eingerastet, sofern in der Nähe erkannt (kurzer Hinweis "an erkannten Spieler angepasst" erscheint dann) — du musst also nicht pixelgenau die Füße treffen. Wird niemand erkannt, zählt der geklickte Punkt exakt so, wie geklickt; dann selbst möglichst genau auf die Fußposition zielen, nicht auf Trikot oder Kopf, da sonst besonders bei schrägen Kamerawinkeln die reale Position um mehrere Meter danebenliegen kann.</p>
+      <div class="row">
+        <button id="placeOffenseBtn" disabled>+ Offense-Spieler setzen</button>
+        <button id="placeDefenseBtn" class="ghost" disabled>+ Defense-Spieler setzen</button>
+      </div>
+      <div id="placementStatus" class="hint">Video laden und kalibrieren, um Positionen zu setzen.</div>
+      <p class="hint">Falsch gesetzten/von der KI vorgeschlagenen Punkt im Video mit <strong>Shift+Klick</strong> wieder entfernen.</p>
+      <div class="row">
+        <button id="finishFrameBtn" class="accent" disabled>Frame abschließen</button>
+        <button id="discardFrameBtn" class="ghost" disabled>Verwerfen</button>
+        <button id="clearFramesBtn" class="ghost">Alle Frames löschen</button>
+      </div>
+      <p class="hint">Für einen weiteren Frame (z.B. Endposition eines Laufwegs) im Video weiterscrubben und erneut Positionen setzen — Spieler werden anhand der Nähe zur vorherigen Position automatisch demselben Punkt zugeordnet (Farbe/Nummer bleibt erhalten), Abbrechen der Positionierung mit Esc.</p>
+      <div id="gallery"></div>
+      <details class="subtoggle">
+        <summary>Erweitert: Projekt sichern / laden</summary>
+        <div class="row">
+          <button id="saveProjectBtn" class="ghost">Projekt speichern (JSON)</button>
+          <button id="loadProjectBtn" class="ghost">Projekt laden (JSON)</button>
+          <input type="file" id="projectFileInput" accept="application/json" style="display:none;">
+        </div>
+        <p class="hint">Sichert Frames, Spieler, Namen, Kader und Trikotfarben dieses Spielzugs in einer Datei (nicht das Video selbst) — damit lässt sich die Analyse später fortsetzen oder als Playbook-Eintrag archivieren, ohne bei einem Absturz oder versehentlich geschlossenen Tab alles zu verlieren.</p>
+      </details>
+    </div>
+
+    <div id="status">Video laden, um zu beginnen.</div>
+  </div>
+
+  <div>
+    <div class="card">
+      <h2><span class="step-badge">4</span> Taktik-Diagramm</h2>
+      <div class="row">
+        <label class="opt" style="flex:1;min-width:240px;">Play-Bezeichnung:
+          <input type="text" id="playName" placeholder="z.B. Gegner #23 – High Pick and Roll" style="flex:1;min-width:180px;padding:6px 8px;border:1px solid var(--line);border-radius:6px;font-size:13px;">
+        </label>
+      </div>
+      <p class="hint">Wird auf dem Diagramm sowie im Dateinamen beim Export verwendet — hilfreich, wenn du mehrere geschnittene Spielzüge (z.B. beim Gegner-Scouting) zu einem Playbook sammelst.</p>
+      <div class="row">
+        <label class="opt"><input type="checkbox" id="showTrails" checked> Bewegungspfeil zum letzten Frame</label>
+        <label class="opt"><input type="checkbox" id="showAll"> Gesamten Spielzug überlagern</label>
+      </div>
+      <div class="row">
+        <label class="opt">Anzeige:
+          <select id="teamFilter">
+            <option value="all">Alle Spieler</option>
+            <option value="offense">Nur Offense</option>
+            <option value="defense">Nur Defense</option>
+          </select>
+        </label>
+      </div>
+      <canvas id="courtCanvas" width="680" height="640"></canvas>
+      <p class="hint">Spieler-Punkt <strong>ziehen</strong>, um seine Position in diesem Frame zu korrigieren (gestrichelter Ring = manuell korrigiert). Kurz <strong>klicken</strong> (ohne zu ziehen), um Bezeichnung/Team für alle Frames festzulegen. <strong>Shift+Klick</strong> entfernt einen fälschlich gesetzten Spieler.</p>
+      <p class="hint" id="unknownHint" style="display:none;"></p>
+      <div id="playerLegend" class="hint"></div>
+      <div class="row">
+        <button id="setBallBtn" class="ghost">Ball manuell setzen</button>
+        <button id="clearBallBtn" class="ghost">Ball entfernen</button>
+      </div>
+      <details class="subtoggle">
+        <summary>Erweitert: Aktionen markieren &amp; Tracks zusammenführen</summary>
+        <div class="row" style="align-items:center;">
+          <label class="opt">Aktion:
+            <select id="actionType">
+              <option value="pass">Pass</option>
+              <option value="block">Block/Screen</option>
+              <option value="dribble">Dribbling</option>
+              <option value="cut">Cut</option>
+              <option value="shot">Wurf</option>
+            </select>
+          </label>
+          <button id="addActionBtn" class="ghost">Aktion markieren…</button>
+          <button id="clearActionsBtn" class="ghost">Aktionen (Frame) löschen</button>
+        </div>
+        <p class="hint">Bei Pass/Block danach zwei Spieler im Diagramm anklicken (erst Ausgangs-, dann Zielspieler), bei den anderen einen.</p>
+        <div id="actionList"></div>
+        <div class="row" style="align-items:center;">
+          <button id="mergeTracksBtn" class="ghost">Tracks zusammenführen…</button>
+        </div>
+        <p class="hint">Falls ein Spieler durch einen Erkennungsaussetzer eine neue Nummer bekommen hat: Button klicken, dann nacheinander den bestehenden Punkt und den fälschlich neuen Punkt anklicken (auch in unterschiedlichen Frames über die Galerie erreichbar) — beide werden zu einem Spieler zusammengeführt.</p>
+      </details>
+      <div class="row">
+        <button id="exportFrameBtn" class="accent">Diagramm als PNG</button>
+        <button id="exportAllBtn" class="ghost">Alle Frames als Storyboard exportieren</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/pose-detection@2.1.3/dist/pose-detection.min.js"></script>
+<script>
+(function(){
+  "use strict";
+
+  // ---------- DOM ----------
+  const fileInput = document.getElementById('fileInput');
+  const video = document.getElementById('video');
+  const overlay = document.getElementById('overlay');
+  const octx = overlay.getContext('2d');
+  const calibEditBtn = document.getElementById('calibEditBtn');
+  const calibResetBtn = document.getElementById('calibResetBtn');
+  const calibCommitBtn = document.getElementById('calibCommitBtn');
+  const calibStatus = document.getElementById('calibStatus');
+  const calibSummaryHintEl = document.getElementById('calibSummaryHint');
+  const offenseColorEl = document.getElementById('offenseColor');
+  const defenseColorEl = document.getElementById('defenseColor');
+  const pickOffenseBtn = document.getElementById('pickOffenseBtn');
+  const pickDefenseBtn = document.getElementById('pickDefenseBtn');
+  const offenseRosterEl = document.getElementById('offenseRoster');
+  const defenseRosterEl = document.getElementById('defenseRoster');
+  const roboflowEndpointEl = document.getElementById('roboflowEndpoint');
+  const roboflowApiKeyEl = document.getElementById('roboflowApiKey');
+  const roboflowClassNamesEl = document.getElementById('roboflowClassNames');
+  const roboflowConfidenceEl = document.getElementById('roboflowConfidence');
+  const roboflowEnabledEl = document.getElementById('roboflowEnabled');
+  const roboflowTestBtn = document.getElementById('roboflowTestBtn');
+  const roboflowStatusEl = document.getElementById('roboflowStatus');
+  const roboflowCallLogEl = document.getElementById('roboflowCallLog');
+  const aiSuggestBtn = document.getElementById('aiSuggestBtn');
+  const findNewPlayersBtn = document.getElementById('findNewPlayersBtn');
+  const placeOffenseBtn = document.getElementById('placeOffenseBtn');
+  const placeDefenseBtn = document.getElementById('placeDefenseBtn');
+  const finishFrameBtn = document.getElementById('finishFrameBtn');
+  const discardFrameBtn = document.getElementById('discardFrameBtn');
+  const placementStatusEl = document.getElementById('placementStatus');
+  const unknownHintEl = document.getElementById('unknownHint');
+  const playerLegendEl = document.getElementById('playerLegend');
+  const clearFramesBtn = document.getElementById('clearFramesBtn');
+  const galleryEl = document.getElementById('gallery');
+  const statusEl = document.getElementById('status');
+  const courtCanvas = document.getElementById('courtCanvas');
+  const cctx = courtCanvas.getContext('2d');
+  const showTrailsEl = document.getElementById('showTrails');
+  const showAllEl = document.getElementById('showAll');
+  const exportFrameBtn = document.getElementById('exportFrameBtn');
+  const exportAllBtn = document.getElementById('exportAllBtn');
+  const teamFilterEl = document.getElementById('teamFilter');
+  const setBallBtn = document.getElementById('setBallBtn');
+  const clearBallBtn = document.getElementById('clearBallBtn');
+  const actionTypeEl = document.getElementById('actionType');
+  const addActionBtn = document.getElementById('addActionBtn');
+  const clearActionsBtn = document.getElementById('clearActionsBtn');
+  const actionListEl = document.getElementById('actionList');
+  const mergeTracksBtn = document.getElementById('mergeTracksBtn');
+  const saveProjectBtn = document.getElementById('saveProjectBtn');
+  const loadProjectBtn = document.getElementById('loadProjectBtn');
+  const projectFileInput = document.getElementById('projectFileInput');
+  const autoIntervalEl = document.getElementById('autoInterval');
+  const autoCaptureBtn = document.getElementById('autoCaptureBtn');
+  const autoStopBtn = document.getElementById('autoStopBtn');
+  const playNameEl = document.getElementById('playName');
+  function sanitizeFilename(s){
+    return (s||'').trim().toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-+|-+$/g,'') || 'spielzug';
+  }
+  const playPauseBtn = document.getElementById('playPauseBtn');
+  const stepBackBtn = document.getElementById('stepBackBtn');
+  const stepFwdBtn = document.getElementById('stepFwdBtn');
+  const seekSlider = document.getElementById('seekSlider');
+  const timeLabel = document.getElementById('timeLabel');
+  const wizardBannerEl = document.getElementById('wizardBanner');
+  const calibCardEl = document.getElementById('calibCard');
+
+  // ---------- wizard banner: a lightweight "what do I do next" guide. The video (needed for
+  // scrubbing to every frame) and the diagram (needed to see results while still capturing more
+  // frames) both stay visible at all times - only the guidance text changes, nothing is hidden,
+  // so this never fights the tool's actual back-and-forth workflow the way a real hide-everything-
+  // but-the-current-step wizard would. ----------
+  function updateWizardBanner(){
+    if(!video.src){
+      wizardBannerEl.textContent = 'Schritt 1 von 4: Video laden, um zu beginnen.';
+    } else if(!homography){
+      wizardBannerEl.textContent = 'Schritt 2 von 4: Spielfeld kalibrieren — die Punkte über dem Video auf ihre reale Position ziehen.';
+    } else if(!frames.length){
+      wizardBannerEl.textContent = 'Schritt 3 von 4: Ersten Frame erfassen — Team wählen und jeden Spieler im Video anklicken (Grundlage für die automatische Verfolgung danach).';
+    } else {
+      wizardBannerEl.textContent = `Schritt 4 von 4: Weitere Frames erfassen und das Taktik-Diagramm rechts prüfen, korrigieren und exportieren. (${frames.length} Frame${frames.length===1?'':'s'} erfasst)`;
+    }
+  }
+
+  // ---------- court geometry (FIBA half court, meters: x 0..15 sideline-sideline, y 0..14 baseline-halfcourt) ----------
+  function sampleArc(cx,cy,r,a0,a1,steps){
+    const pts = [];
+    steps = steps || 48;
+    for(let i=0;i<=steps;i++){
+      const a = (a0 + (a1-a0)*i/steps) * Math.PI/180;
+      pts.push([cx + r*Math.cos(a), cy + r*Math.sin(a)]);
+    }
+    return pts;
+  }
+  const COURT_PATHS = [
+    [[0,0],[15,0],[15,14],[0,14],[0,0]],           // Spielfeldrand
+    [[5.05,0],[9.95,0],[9.95,5.8],[5.05,5.8],[5.05,0]], // Freiwurfraum / Zone
+    sampleArc(7.5,5.8,1.8,0,360),                  // Freiwurfkreis
+    sampleArc(7.5,1.575,1.25,0,180),                // Zone unter dem Korb
+    [[0.9,0],[0.9,2.99]],
+    [[14.1,0],[14.1,2.99]],
+    sampleArc(7.5,1.575,6.75,12,168),               // Drei-Punkte-Linie
+    sampleArc(7.5,14,1.8,180,360),                  // Mittelkreis (Halbfeld-Ausschnitt)
+    [[6.6,1.2],[8.4,1.2]],                          // Brett
+    sampleArc(7.5,1.575,0.225,0,360),               // Korb
+  ];
+
+  // Draggable calibration handles: any 4+ of these can be used, whichever are visible.
+  const HANDLES = [
+    {id:'baseline_l', rx:0, ry:0}, {id:'baseline_r', rx:15, ry:0},
+    {id:'half_l', rx:0, ry:14}, {id:'half_r', rx:15, ry:14},
+    {id:'ft_l', rx:5.05, ry:5.8}, {id:'ft_r', rx:9.95, ry:5.8},
+    {id:'lane_base_l', rx:5.05, ry:0}, {id:'lane_base_r', rx:9.95, ry:0},
+    {id:'three_base_l', rx:0.9, ry:0}, {id:'three_base_r', rx:14.1, ry:0},
+    {id:'three_corner_l', rx:0.9, ry:2.99}, {id:'three_corner_r', rx:14.1, ry:2.99},
+    {id:'ftcircle_l', rx:5.7, ry:5.8}, {id:'ftcircle_r', rx:9.3, ry:5.8},
+    {id:'halfcircle_l', rx:5.7, ry:14}, {id:'halfcircle_r', rx:9.3, ry:14},
+    {id:'backboard_l', rx:6.6, ry:1.2}, {id:'backboard_r', rx:8.4, ry:1.2},
+  ];
+  // Human-readable names for diagnostics (e.g. naming exactly which point looks miscalibrated) -
+  // the handles themselves carry no label in the UI otherwise, so a warning could only ever say
+  // "a point", never which one.
+  const HANDLE_LABELS = {
+    baseline_l: 'Grundlinie links (Eckpunkt)', baseline_r: 'Grundlinie rechts (Eckpunkt)',
+    half_l: 'Mittellinie links', half_r: 'Mittellinie rechts',
+    ft_l: 'Freiwurflinie links', ft_r: 'Freiwurflinie rechts',
+    lane_base_l: 'Zone/Grundlinie links', lane_base_r: 'Zone/Grundlinie rechts',
+    three_base_l: 'Drei-Punkte-Linie an der Grundlinie links', three_base_r: 'Drei-Punkte-Linie an der Grundlinie rechts',
+    three_corner_l: 'Drei-Punkte-Ecke links', three_corner_r: 'Drei-Punkte-Ecke rechts',
+    ftcircle_l: 'Freiwurfkreis links', ftcircle_r: 'Freiwurfkreis rechts',
+    halfcircle_l: 'Mittelkreis links', halfcircle_r: 'Mittelkreis rechts',
+    backboard_l: 'Brett links', backboard_r: 'Brett rechts',
+  };
+
+  // ---------- state ----------
+  let calibMode = false;
+  let handlePos = {};       // id -> {x,y} in NATIVE video-pixel space
+  let anchored = new Set(); // ids the user has actually dragged into place
+  let draggingId = null;
+  let liveHomography = null;       // native pixel -> court meters (candidate, while calibrating)
+  let liveDisplayHomography = null;// court meters -> native pixel (for positioning un-anchored handles)
+  let homography = null;           // COMMITTED native pixel -> court meters, used for capturing frames
+  let homographyInv = null;        // COMMITTED court meters -> native pixel, used for tracking/scale math
+  let liveDistortionModel = null;      // candidate lens-distortion-aware model (see fitDistortedCalibration), or null if not trusted
+  let committedDistortionModel = null; // the COMMITTED one actually used for projecting clicks/detections to court meters
+  let lastCalibration = null;      // {videoWidth,videoHeight,handlePos,anchored} of the last COMMITTED calibration -
+                                    // carried over to the next video if its resolution matches (same camera/broadcast,
+                                    // just a different cut clip), so scouting multiple plays doesn't mean recalibrating each one.
+
+  let frames = []; // {id, time, thumb, players:[{trackId,x,y}], ball:{x,y}|null, actions:[]}
+  let tracks = {}; // trackId -> {id,color,label,team}
+  let nextTrackId = 1;
+  let selectedFrameIndex = -1;
+  let ballPlacementArmed = false;
+  let placementArmed = null; // 'offense' | 'defense' | null - clicking the video adds a player of this team
+  let pendingPositions = []; // {x,y,nx,ny,team} being placed for the frame not yet finished
+  // Two-stage detection: coco-ssd (personDetector) finds WHERE people are - a general-purpose,
+  // officially published TensorFlow.js model that handles small/crowded/far-away people far more
+  // robustly than a single whole-frame pose pass, since it's built for exactly that (multi-scale
+  // object detection), not pose estimation. poseDetector (MoveNet, single-person) then OPTIONALLY
+  // refines each detected box into a precise foot point by cropping+upscaling just that player and
+  // running a per-person pose model on it - small/far-away players effectively get "zoomed in"
+  // individually instead of everyone sharing one shrunk-down whole-frame pass. If the pose refiner
+  // never loads, detection still works from the box alone (bottom-center as the foot point estimate).
+  let personDetector = null, personDetectorLoading = false;
+  let poseDetector = null, modelLoading = false;
+  let cachedFeetTime = null, cachedFeet = null; // last detectPersonFeet() result, reused while the video stays on the same moment
+  // Optional external detector (Roboflow hosted inference) - a community-trained model aimed at this
+  // exact use case (basketball players specifically, not generic COCO "person") can outperform coco-ssd,
+  // but it means video frames leave the browser to a third-party server, and needs the user's own
+  // account/API key - never something to ship hardcoded in this file. Stored only in this browser's
+  // localStorage, read once at startup; off by default, coco-ssd remains the tested, always-available
+  // path. A fetch failure or misconfiguration here just yields zero detections (graceful fallback),
+  // never breaks manual placement or the rest of the app.
+  const ROBOFLOW_STORAGE_KEY = 'spielzugAnalyse.roboflow.v1';
+  function loadRoboflowConfig(){
+    try{
+      const raw = localStorage.getItem(ROBOFLOW_STORAGE_KEY);
+      return raw ? JSON.parse(raw) : null;
+    }catch(e){ return null; }
+  }
+  function saveRoboflowConfig(cfg){
+    try{ localStorage.setItem(ROBOFLOW_STORAGE_KEY, JSON.stringify(cfg)); }catch(e){ console.error(e); }
+  }
+  let roboflowConfig = loadRoboflowConfig(); // {endpoint, apiKey, classNames:[...], enabled} | null
+  function roboflowReady(){
+    return !!(roboflowConfig && roboflowConfig.enabled && roboflowConfig.endpoint && roboflowConfig.apiKey);
+  }
+  function detectionAvailable(){
+    return !!personDetector || roboflowReady();
+  }
+  // Restore any previously saved config into the settings form, and persist on every change - no
+  // separate "Speichern" button, since there's nothing to lose by saving immediately (it only takes
+  // effect once "Aktivieren" is also checked).
+  if(roboflowConfig){
+    roboflowEndpointEl.value = roboflowConfig.endpoint || '';
+    roboflowApiKeyEl.value = roboflowConfig.apiKey || '';
+    roboflowClassNamesEl.value = (roboflowConfig.classNames || []).join(', ');
+    roboflowConfidenceEl.value = roboflowConfig.confidence != null ? roboflowConfig.confidence : 10;
+    roboflowEnabledEl.checked = !!roboflowConfig.enabled;
+  }
+  function readRoboflowForm(){
+    const confidence = Math.max(0, Math.min(100, parseInt(roboflowConfidenceEl.value, 10) || 0));
+    return {
+      endpoint: roboflowEndpointEl.value.trim(),
+      apiKey: roboflowApiKeyEl.value.trim(),
+      classNames: roboflowClassNamesEl.value.split(',').map(s=>s.trim()).filter(Boolean),
+      confidence,
+      enabled: roboflowEnabledEl.checked,
+    };
+  }
+  function persistRoboflowForm(){
+    roboflowConfig = readRoboflowForm();
+    saveRoboflowConfig(roboflowConfig);
+    updatePlacementEnabled();
+  }
+  [roboflowEndpointEl, roboflowApiKeyEl, roboflowClassNamesEl, roboflowConfidenceEl].forEach(el => el.addEventListener('change', persistRoboflowForm));
+  roboflowEnabledEl.addEventListener('change', persistRoboflowForm);
+  roboflowTestBtn.addEventListener('click', async ()=>{
+    persistRoboflowForm();
+    if(!roboflowConfig.endpoint || !roboflowConfig.apiKey){
+      roboflowStatusEl.textContent = 'Bitte Modell-Endpunkt und API-Key eintragen.';
+      return;
+    }
+    if(!video.src || !video.videoWidth){
+      roboflowStatusEl.textContent = 'Bitte zuerst ein Video laden, damit ein echter Frame zum Testen da ist.';
+      return;
+    }
+    roboflowTestBtn.disabled = true;
+    roboflowStatusEl.textContent = 'Teste Verbindung…';
+    try{
+      const boxes = await detectViaRoboflow();
+      roboflowStatusEl.textContent = `Verbindung erfolgreich — ${boxes.length} Erkennung(en) im aktuellen Frame.`;
+    }catch(e){
+      console.error(e);
+      roboflowStatusEl.textContent = 'Verbindung fehlgeschlagen — Endpunkt/API-Key prüfen.';
+    }
+    roboflowTestBtn.disabled = false;
+  });
+  let colorPickTarget = null; // 'offense' | 'defense' | null - next video click sets that team's jersey color
+  let offenseColorSet = false, defenseColorSet = false; // true once the user actually configures a
+  // color (not just the unconfigured <input type=color> default) - classifyTeam() must never guess
+  // a team off colors nobody actually set, or "optional" jersey colors silently stop being optional.
+  offenseColorEl.addEventListener('input', ()=>{ offenseColorSet = true; });
+  defenseColorEl.addEventListener('input', ()=>{ defenseColorSet = true; });
+
+  // ---------- roster (optional): number+name pairs the user enters once per team ----------
+  function parseRoster(text){
+    return text.split('\n').map(line=>{
+      const m = line.trim().match(/^(\S+)\s+(.+)$/);
+      return m ? {number: m[1], name: m[2].trim()} : null;
+    }).filter(Boolean);
+  }
+  function rosterFor(team){
+    return parseRoster((team === 'offense' ? offenseRosterEl : defenseRosterEl).value);
+  }
+  let actionPick = null; // {type, need, picked:[trackId,...]} while marking an action
+  let mergePick = null; // [trackId] while picking the two tracks to merge into one player
+
+  // Exactly one "what does my next click do" mode should ever be active - arming a new one always
+  // cancels whatever else was armed, so a leftover pick mode never silently swallows an unrelated click.
+  function cancelAllPickModes(){
+    colorPickTarget = null;
+    placementArmed = null;
+    ballPlacementArmed = false;
+    actionPick = null;
+    mergePick = null;
+  }
+  let pointerDown = null; // {x,y,trackId|null,moved} - tracks a court-canvas mousedown for drag-vs-click detection
+
+  const PALETTE = ["#C43E0E","#2563eb","#16a34a","#9333ea","#ca8a04","#0891b2","#db2777","#65a30d","#ea580c","#4f46e5"];
+  // Lightweight semantic action markers a user can tag on top of the auto-detected positions -
+  // the AI gives the raw positions, tagging what actually happened (pass, screen, ...) stays manual.
+  const ACTION_TYPES = {
+    pass:    {label:'Pass',       players:2, color:'#0f172a'},
+    block:   {label:'Block',      players:2, color:'#b91c1c'},
+    dribble: {label:'Dribbling',  players:1, color:'#0891b2'},
+    cut:     {label:'Cut',        players:1, color:'#7c3aed'},
+    shot:    {label:'Wurf',       players:1, color:'#ea580c'},
+  };
+  function trackColor(id){ return PALETTE[(id-1) % PALETTE.length]; }
+  function uid(){ return Math.random().toString(36).slice(2,10); }
+
+  function setStatus(msg, kind){
+    statusEl.textContent = msg;
+    statusEl.className = kind || '';
+  }
+
+  // ---------- video loading ----------
+  let currentObjectUrl = null;
+  fileInput.addEventListener('change', ()=>{
+    const file = fileInput.files[0];
+    if(!file) return;
+    if(frames.length && !confirm(`Es gibt noch ${frames.length} erfasste(n) Frame(s) für den aktuellen Spielzug, die beim Laden eines neuen Videos verloren gehen. Vorher über "Projekt speichern (JSON)" sichern! Trotzdem neues Video laden und aktuelle Frames verwerfen?`)){
+      fileInput.value = '';
+      return;
+    }
+    if(currentObjectUrl) URL.revokeObjectURL(currentObjectUrl);
+    currentObjectUrl = URL.createObjectURL(file);
+    video.src = currentObjectUrl;
+    frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
+    homography = null; committedDistortionModel = null; anchored = new Set(); handlePos = {};
+    ballPlacementArmed = false; placementArmed = null; pendingPositions = []; actionPick = null; mergePick = null; pointerDown = null;
+    playNameEl.value = '';
+    updateOverlayInteractivity();
+    renderGallery(); renderMainDiagram(); updatePlacementEnabled(); updatePlacementStatus();
+    updateWizardBanner();
+    setStatus('Video wird geladen…');
+  });
+  video.addEventListener('loadedmetadata', ()=>{
+    resizeOverlay();
+    // Scouting workflow: many clips cut from the same broadcast/camera share one resolution and
+    // framing, so re-anchoring the court by hand for every single cut would be wasted repeat work -
+    // reuse the last committed calibration whenever the new video's resolution matches exactly.
+    const canReuse = lastCalibration && lastCalibration.videoWidth === video.videoWidth && lastCalibration.videoHeight === video.videoHeight;
+    if(canReuse){
+      anchored = new Set(lastCalibration.anchored);
+      handlePos = {};
+      HANDLES.forEach(h=>{ if(lastCalibration.handlePos[h.id]) handlePos[h.id] = {...lastCalibration.handlePos[h.id]}; });
+      recomputeLiveCalibration();
+    }
+    if(canReuse && liveHomography){
+      homography = liveHomography;
+      homographyInv = invertHomography(homography);
+      committedSensitivity = calibSensitivity;
+      committedCoverageFrac = calibCoverageFrac;
+      committedResidualOutliers = calibResidualOutliers;
+      committedDistortionModel = fitDistortionForAnchored();
+      setCalibMode(false);
+      const carryOverMsg = calibSensitivityMessage(committedSensitivity, committedCoverageFrac, true, committedResidualOutliers);
+      calibStatus.textContent = `Kalibrierung vom vorherigen Video übernommen (gleiche Auflösung erkannt, ${anchored.size} Referenzpunkte). Frames können direkt erfasst werden - bei Bedarf über "Kalibrierung bearbeiten" anpassen.${carryOverMsg.text}`;
+      calibStatus.className = carryOverMsg.text ? 'hint err' : 'hint ok';
+    } else {
+      resetCalibPoints();
+      setCalibMode(true);
+    }
+    seekSlider.max = video.duration || 0;
+    updateTimeLabel();
+    updatePlacementEnabled();
+    updateWizardBanner();
+    setStatus('Video bereit.', 'ok');
+  });
+  video.addEventListener('error', ()=>{
+    if(!video.src) return;
+    setStatus('Dieses Video konnte nicht abgespielt werden. Viele Handys (v.a. iPhones) nehmen im HEVC/H.265-Format auf, das Chrome/Chromium nicht unterstützt. Bitte das Video vorher in H.264-MP4 umwandeln (z.B. mit HandBrake, VLC oder einem Online-Konverter) und erneut hochladen.', 'err');
+  });
+  window.addEventListener('resize', resizeOverlay);
+  function resizeOverlay(){
+    const rect = video.getBoundingClientRect();
+    overlay.width = rect.width; overlay.height = rect.height;
+    renderCalibOverlay();
+  }
+
+  // ---------- custom video transport (works even while the calibration overlay covers the video) ----------
+  function updateTimeLabel(){
+    timeLabel.textContent = `${formatTime(video.currentTime)} / ${formatTime(video.duration || 0)}`;
+  }
+  playPauseBtn.addEventListener('click', ()=>{
+    if(video.paused) video.play(); else video.pause();
+  });
+  video.addEventListener('play', ()=>{ playPauseBtn.textContent = '⏸'; });
+  video.addEventListener('pause', ()=>{ playPauseBtn.textContent = '▶'; });
+  video.addEventListener('timeupdate', ()=>{
+    seekSlider.value = video.currentTime;
+    updateTimeLabel();
+  });
+  seekSlider.addEventListener('input', ()=>{
+    video.currentTime = parseFloat(seekSlider.value);
+  });
+  function stepBy(delta){
+    video.pause();
+    video.currentTime = Math.max(0, Math.min(video.duration || 0, video.currentTime + delta));
+  }
+  stepBackBtn.addEventListener('click', ()=> stepBy(-0.1));
+  stepFwdBtn.addEventListener('click', ()=> stepBy(0.1));
+
+  // ---------- coordinate conversion (native video pixels <-> displayed CSS pixels) ----------
+  function nativeToDisplay(x,y){
+    const rect = overlay.getBoundingClientRect();
+    return [x * (rect.width / video.videoWidth), y * (rect.height / video.videoHeight)];
+  }
+  function displayToNative(x,y){
+    const rect = overlay.getBoundingClientRect();
+    return [x * (video.videoWidth / rect.width), y * (video.videoHeight / rect.height)];
+  }
+
+  // ---------- homography (DLT via least squares, supports >=4 correspondences) ----------
+  function solveLinear(A, b){
+    const n = A.length;
+    const M = A.map((row,i)=>row.concat([b[i]]));
+    for(let col=0; col<n; col++){
+      let piv = col;
+      for(let r=col+1;r<n;r++) if(Math.abs(M[r][col]) > Math.abs(M[piv][col])) piv = r;
+      if(Math.abs(M[piv][col]) < 1e-10) throw new Error('singular matrix');
+      [M[col],M[piv]] = [M[piv],M[col]];
+      for(let r=0;r<n;r++){
+        if(r===col) continue;
+        const f = M[r][col]/M[col][col];
+        for(let c=col;c<=n;c++) M[r][c] -= f*M[col][c];
+      }
+    }
+    return M.map((row,i)=>row[n]/row[i]);
+  }
+  function computeHomography(src, dst){
+    if(src.length < 4) throw new Error('need at least 4 point correspondences');
+    const AtA = Array.from({length:8},()=>new Array(8).fill(0));
+    const Atb = new Array(8).fill(0);
+    function addRow(row, val){
+      for(let i=0;i<8;i++){
+        Atb[i] += row[i]*val;
+        for(let j=0;j<8;j++) AtA[i][j] += row[i]*row[j];
+      }
+    }
+    for(let k=0;k<src.length;k++){
+      const [x,y] = src[k], [X,Y] = dst[k];
+      addRow([x,y,1,0,0,0,-X*x,-X*y], X);
+      addRow([0,0,0,x,y,1,-Y*x,-Y*y], Y);
+    }
+    const h = solveLinear(AtA, Atb);
+    return [h[0],h[1],h[2],h[3],h[4],h[5],h[6],h[7],1];
+  }
+  function applyHomography(H, x, y){
+    const w = H[6]*x + H[7]*y + H[8];
+    return [(H[0]*x+H[1]*y+H[2])/w, (H[3]*x+H[4]*y+H[5])/w];
+  }
+  // Inverse of a 3x3 homography via the adjugate matrix - applyHomography() normalizes by its own
+  // "w" term regardless of overall scale, so the adjugate (un-normalized by determinant sign/scale)
+  // works directly without needing to force H[8]=1 first. Used to go from court meters back to native
+  // pixels (e.g. to estimate local pixel-per-meter scale for the player tracker below).
+  function invertHomography(H){
+    const [a,b,c,d,e,f,g,h,i] = H;
+    const C11 = e*i - f*h, C12 = -(d*i - f*g), C13 = d*h - e*g;
+    const C21 = -(b*i - c*h), C22 = a*i - c*g, C23 = -(a*h - b*g);
+    const C31 = b*f - c*e, C32 = -(a*f - c*d), C33 = a*e - b*d;
+    const det = a*C11 + b*C12 + c*C13;
+    if(!isFinite(det) || Math.abs(det) < 1e-12) return null;
+    return [C11,C21,C31, C12,C22,C32, C13,C23,C33].map(v=>v/det);
+  }
+
+  // ---------- lens-distortion-aware calibration (on top of the plain homography above) ----------
+  // A single flat homography assumes an ideal pinhole camera. Real lenses - especially the wide,
+  // elevated broadcast angles this app is built for - bend straight lines slightly, worse toward the
+  // image edges. A user can click every point exactly on the real line they see (confirmed: the
+  // calibration overlay visibly lines up with the court) and still get players thrown badly off-court
+  // near the frame edges, because no single projective transform can fit both the barely-distorted
+  // center and the more-distorted edge at once. This fits a classic single-coefficient radial
+  // distortion model (about the image center) jointly with the homography, to absorb that curvature
+  // instead of forcing the homography to awkwardly compromise across it.
+  //
+  // Fit via alternating closed-form steps rather than one general nonlinear solver: (1) undistort the
+  // observed points with the current k1 guess (a few fixed-point iterations - stable, no matrix
+  // inversion needed), (2) refit the homography (real -> undistorted/"ideal" native) from those via
+  // the plain DLT above, (3) re-estimate k1 by ORDINARY LINEAR least squares, since for a FIXED
+  // homography the distortion model is linear in k1 (distorted = ideal + k1 * r^2 * (ideal-center)).
+  // Each sub-step is a simple, well-understood closed-form solve, which is far more predictable with
+  // sparse, noisy human-clicked data than a general joint optimizer risking a bad local minimum.
+  function undistortPoint(ox, oy, k1, cx, cy){
+    let ix = ox, iy = oy;
+    for(let i=0;i<4;i++){
+      const r2 = (ix-cx)*(ix-cx) + (iy-cy)*(iy-cy);
+      const f = 1 + k1*r2;
+      ix = cx + (ox-cx)/f;
+      iy = cy + (oy-cy)/f;
+    }
+    return [ix, iy];
+  }
+  function fitDistortedCalibration(observedNative, realPts, cx, cy){
+    let k1 = 0, G = null;
+    for(let iter=0; iter<8; iter++){
+      const idealPts = observedNative.map(([ox,oy]) => undistortPoint(ox, oy, k1, cx, cy));
+      G = computeHomography(realPts, idealPts); // real -> undistorted native
+      const idealPred = realPts.map(([rx,ry]) => applyHomography(G, rx, ry));
+      let num = 0, den = 0;
+      for(let i=0;i<realPts.length;i++){
+        const [ix,iy] = idealPred[i];
+        const [ox,oy] = observedNative[i];
+        const r2 = (ix-cx)*(ix-cx) + (iy-cy)*(iy-cy);
+        const ax = r2*(ix-cx), ay = r2*(iy-cy);
+        num += ax*(ox-cx-(ix-cx)) + ay*(oy-cy-(iy-cy));
+        den += ax*ax + ay*ay;
+      }
+      k1 = den > 1e-9 ? num/den : 0;
+    }
+    const Ginv = invertHomography(G); // undistorted native -> real
+    if(!Ginv) return null;
+    return { G, Ginv, k1, cx, cy };
+  }
+  function projectDistorted(model, nx, ny){
+    const [ix, iy] = undistortPoint(nx, ny, model.k1, model.cx, model.cy);
+    return applyHomography(model.Ginv, ix, iy);
+  }
+  // Fitting more parameters (homography + k1) to few points trivially reduces error on THOSE SAME
+  // points even when the extra parameter is just fitting noise - verified this blind spot directly:
+  // an in-sample check alone kept endorsing models that were then shown (against synthetic ground
+  // truth with known-bad behavior) to make held-out predictions WORSE. Leave-one-out fixes that: each
+  // point is predicted from a model fit on every OTHER point, so the comparison is honestly
+  // out-of-sample. Confirmed empirically this correctly accepts the distortion model when there's
+  // real distortion and enough points (7+: with only 5-6, it can look fine in-sample yet still
+  // mispredict held-out points - not safe to trust), and correctly rejects it (falls back to the
+  // plain homography) when there's no real distortion signal to find.
+  const DISTORTION_MIN_POINTS = 7;
+  const DISTORTION_LOO_IMPROVEMENT_MIN = 0.15;
+  function fitDistortionWithLooGate(observedNative, realPts, cx, cy){
+    const n = observedNative.length;
+    if(n < DISTORTION_MIN_POINTS) return null;
+    let sumPlain = 0, sumDist = 0;
+    try{
+      for(let i=0;i<n;i++){
+        const restNative = observedNative.filter((_,j)=>j!==i);
+        const restReal = realPts.filter((_,j)=>j!==i);
+        const H_loo = computeHomography(restNative, restReal);
+        const model_loo = fitDistortedCalibration(restNative, restReal, cx, cy);
+        if(!model_loo) return null;
+        const [nx,ny] = observedNative[i], [rx,ry] = realPts[i];
+        const [pX,pY] = applyHomography(H_loo, nx, ny);
+        const [cX,cY] = projectDistorted(model_loo, nx, ny);
+        sumPlain += (pX-rx)*(pX-rx) + (pY-ry)*(pY-ry);
+        sumDist += (cX-rx)*(cX-rx) + (cY-ry)*(cY-ry);
+      }
+    }catch(e){ return null; } // a near-degenerate leave-one-out fold means the data can't support this - don't trust it
+    const rmsPlain = Math.sqrt(sumPlain/n), rmsDist = Math.sqrt(sumDist/n);
+    if(rmsPlain <= 1e-9 || (rmsPlain-rmsDist)/rmsPlain < DISTORTION_LOO_IMPROVEMENT_MIN) return null;
+    return fitDistortedCalibration(observedNative, realPts, cx, cy); // re-fit on ALL points for the model actually used
+  }
+  // Single entry point for turning a native pixel into a court-meter position - everywhere that used
+  // to call applyHomography(homography, ...) directly now goes through here, so the distortion model
+  // (when trusted) is used uniformly for placement, tracking and recovery alike.
+  function projectNativeToReal(nx, ny){
+    if(committedDistortionModel) return projectDistorted(committedDistortionModel, nx, ny);
+    return applyHomography(homography, nx, ny);
+  }
+
+  // ---------- calibration overlay ----------
+  function defaultGuessHomography(){
+    const w = video.videoWidth || 1280, h = video.videoHeight || 720;
+    const realCorners = [[0,0],[15,0],[0,14],[15,14]];
+    const nativeGuess = [[w*0.08,h*0.92],[w*0.92,h*0.92],[w*0.30,h*0.25],[w*0.70,h*0.25]];
+    return computeHomography(realCorners, nativeGuess); // real -> native
+  }
+  function resetCalibPoints(){
+    anchored = new Set();
+    liveHomography = null; liveDisplayHomography = null; calibSensitivity = null;
+    const guess = defaultGuessHomography();
+    handlePos = {};
+    HANDLES.forEach(hd=>{
+      const [nx,ny] = applyHomography(guess, hd.rx, hd.ry);
+      handlePos[hd.id] = {x:nx, y:ny};
+    });
+    updateCalibStatus();
+    renderCalibOverlay();
+  }
+  // How much a typical player's projected court position shifts if one calibration point was
+  // dragged just a few pixels off from where it "should" be - realistic human imprecision.
+  // A calibration built from points that are clustered together or nearly in a line amplifies
+  // small pixel errors into large real-world position errors for anything away from those points;
+  // this catches that before the user finds out the hard way (a player projected far off-court).
+  const CALIB_JITTER_PX = 3;
+  function assessCalibrationSensitivity(nativePts, realPts){
+    const midNative = [
+      nativePts.reduce((s,p)=>s+p[0],0)/nativePts.length,
+      nativePts.reduce((s,p)=>s+p[1],0)/nativePts.length
+    ];
+    try{
+      const base = applyHomography(computeHomography(nativePts, realPts), midNative[0], midNative[1]);
+      let maxShift = 0;
+      for(let i=0;i<nativePts.length;i++){
+        for(const [dx,dy] of [[CALIB_JITTER_PX,0],[-CALIB_JITTER_PX,0],[0,CALIB_JITTER_PX],[0,-CALIB_JITTER_PX]]){
+          const perturbed = nativePts.map((p,j)=> j===i ? [p[0]+dx,p[1]+dy] : p);
+          const proj = applyHomography(computeHomography(perturbed, realPts), midNative[0], midNative[1]);
+          maxShift = Math.max(maxShift, Math.hypot(proj[0]-base[0], proj[1]-base[1]));
+        }
+      }
+      return maxShift;
+    }catch(e){
+      return Infinity;
+    }
+  }
+  // The check above only reveals whether the calibration is over-fit to noise IN THE HANDLES
+  // THEMSELVES - it says nothing about whether the same calibration stays usable for a player
+  // standing far from those handles (e.g. all 4 points clustered inside the free-throw key, but
+  // players get clicked anywhere across the visible court). A calibration can be perfectly stable
+  // right at its own anchor points while still placing a player 20+ meters off-court elsewhere -
+  // and projecting arbitrary pixels elsewhere in the frame can't tell the difference either, since a
+  // GOOD calibration also projects genuinely off-court pixels (crowd, ceiling) to wild real-world
+  // coordinates entirely correctly. What's actually checkable without guessing at frame content is
+  // simpler: how much of the COURT'S OWN extent do the anchored points themselves span? Points
+  // confined to a small fraction of the court's width/depth (e.g. just the free-throw key, ~33%
+  // wide/41% deep) have to extrapolate far beyond where they were anchored for anything else - and
+  // since a captured play typically spans much more of the half-court than just the paint, that
+  // extrapolation is almost guaranteed to happen.
+  const COURT_WIDTH_M = 15, COURT_DEPTH_M = 14;
+  function assessCourtSpanCoverage(realPts){
+    const xs = realPts.map(p=>p[0]), ys = realPts.map(p=>p[1]);
+    const fracX = (Math.max(...xs) - Math.min(...xs)) / COURT_WIDTH_M;
+    const fracY = (Math.max(...ys) - Math.min(...ys)) / COURT_DEPTH_M;
+    return {frac: Math.min(fracX, fracY), fracX, fracY};
+  }
+  // Neither check above can catch a point that was confidently dragged to the WRONG pixel - one
+  // that doesn't actually sit on the real-world landmark it's supposed to mark (e.g. a line not
+  // clearly visible at that distance, mis-identified by eye). Sensitivity only measures how much a
+  // TINY (few-px) jitter moves the result, and a single biased-but-otherwise-well-spread point
+  // doesn't make the point set near-degenerate, so it passes that check easily; coverage only looks
+  // at how far apart the real-world coordinates of the chosen handles are, not whether the pixels
+  // placed for them are actually correct.
+  //
+  // First attempt (kept only in history, not here): flag whichever anchored point has the largest
+  // reprojection error under the single fit built from ALL points. Measured against synthetic
+  // ground-truth data this was actively misleading - a single bad point biases a shared
+  // least-squares fit so much that OTHER, perfectly-placed points can end up with a larger residual
+  // than the actual culprit (confirmed: with one corner point deliberately offset, the two
+  // untouched free-throw-line points showed bigger errors than the offset corner itself). Naming
+  // the wrong point would send the user chasing the wrong fix - worse than no diagnosis at all.
+  //
+  // What actually works: for each anchored point, refit the homography from every OTHER point and
+  // see whether (a) that reduced fit is itself well-conditioned (checked via the jitter-sensitivity
+  // test above - a near-degenerate reduced set, e.g. leaving only one point outside a shared line,
+  // can satisfy its own few points almost exactly while being numerically unstable, which would
+  // otherwise produce false accusations) and, only if so, (b) whether it reproduces the OTHER
+  // points' own positions closely (confirming "everyone but the candidate agrees") and (c) whether
+  // it disagrees with where the candidate itself was placed. Only then is the candidate named. This
+  // is intentionally conservative: with too little redundancy in one direction (e.g. only two points
+  // mark the court's depth) a bad point among those two may go undetected rather than risk blaming
+  // the wrong one - hence also recommending more than the bare minimum of points below.
+  const OUTLIER_REDUCED_FIT_STABILITY_M = 0.5;   // reduced fit must itself be well-conditioned (reuses the same bound as the sensitivity warning above)
+  const OUTLIER_OTHERS_AGREE_M = 0.15;           // reduced fit must reproduce the OTHER points' own positions this closely
+  const OUTLIER_CANDIDATE_DISAGREE_M = 0.4;      // candidate's own position must disagree with the reduced fit by at least this much to be named
+  function findMiscalibratedPoint(nativePts, realPts, ids){
+    const n = ids.length;
+    if(n < 5) return [];
+    const flagged = [];
+    for(let i=0;i<n;i++){
+      const restNative = nativePts.filter((_,j)=>j!==i);
+      const restReal = realPts.filter((_,j)=>j!==i);
+      let H;
+      try{ H = computeHomography(restNative, restReal); }catch(e){ continue; }
+      const stability = assessCalibrationSensitivity(restNative, restReal);
+      if(!isFinite(stability) || stability > OUTLIER_REDUCED_FIT_STABILITY_M) continue;
+      let othersErr = 0;
+      for(let j=0;j<restNative.length;j++){
+        const [px,py] = applyHomography(H, restNative[j][0], restNative[j][1]);
+        othersErr = Math.max(othersErr, Math.hypot(px-restReal[j][0], py-restReal[j][1]));
+      }
+      if(othersErr > OUTLIER_OTHERS_AGREE_M) continue;
+      const [px,py] = applyHomography(H, nativePts[i][0], nativePts[i][1]);
+      const errM = Math.hypot(px-realPts[i][0], py-realPts[i][1]);
+      if(errM > OUTLIER_CANDIDATE_DISAGREE_M) flagged.push({id: ids[i], errM});
+    }
+    return flagged;
+  }
+  const CALIB_SENSITIVITY_WARN_M = 0.5;
+  // Above this, the calibration isn't just imprecise, it's practically unusable - the anchored
+  // points sit on (or very near) the same straight line (e.g. only along one baseline). Below this
+  // line it's a soft warning the user can still commit past; at or above it, committing is blocked
+  // outright so a silently-broken calibration never looks "ready".
+  const CALIB_SENSITIVITY_BLOCK_M = 3;
+  // Below this fraction of the court's width/depth, warn that the points are too clustered to
+  // reliably cover the whole visible play - not a hard block, since a tightly-zoomed shot that
+  // genuinely never shows more of the court than this is a legitimate (if unusual) case.
+  const COURT_COVERAGE_WARN_FRAC = 0.5;
+  function calibSensitivityMessage(pointSensitivity, coverageFrac, hasHomography, residualOutliers){
+    if(!hasHomography || pointSensitivity == null || !isFinite(pointSensitivity) || pointSensitivity > CALIB_SENSITIVITY_BLOCK_M){
+      return { blocking: true, text: ' ⚠️ Diese Punkte lassen sich nicht eindeutig zu einer Feld-Kalibrierung auflösen — sie liegen (fast) exakt auf einer Linie (z.B. alle auf derselben Grundlinie). Wähle mindestens einen zusätzlichen Punkt, der in die Tiefe des Feldes zeigt (z.B. Freiwurflinie, Mittellinie oder Drei-Punkte-Bogen), statt nur entlang einer einzigen Linie.' };
+    }
+    // Most specific and actionable check first: this names the exact point to fix, rather than a
+    // general "spread points out more" that wouldn't help if the real problem is one wrong click.
+    if(residualOutliers && residualOutliers.length){
+      const names = residualOutliers.map(r => `"${HANDLE_LABELS[r.id] || r.id}" (${r.errM.toFixed(1)} m Abweichung)`).join(', ');
+      return { blocking: false, text: ` ⚠️ Mindestens ein gesetzter Punkt passt nicht zu den anderen: ${names}. Das deutet darauf hin, dass dieser Punkt nicht genau auf der echten Linie/Markierung im Video sitzt. Diesen Punkt im Video suchen und neu an die richtige Stelle ziehen (nicht alle Punkte neu setzen, nur den genannten) — das korrigiert typischerweise genau das Problem "Spieler landen an völlig falschen Stellen".` };
+    }
+    const lowCoverage = coverageFrac != null && coverageFrac.frac < COURT_COVERAGE_WARN_FRAC;
+    if(lowCoverage){
+      // Name the specific missing dimension(s) and a concrete handle to fix it with, rather than a
+      // generic "spread your points out more" - real-world testing showed players far from a narrow
+      // calibration's anchors can end up placed many meters away, even completely off the rendered
+      // court, so being specific about what to drag where matters.
+      const needsWidth = coverageFrac.fracX < COURT_COVERAGE_WARN_FRAC;
+      const needsDepth = coverageFrac.fracY < COURT_COVERAGE_WARN_FRAC;
+      let advice;
+      if(needsWidth && needsDepth) advice = 'in der Breite (z.B. die äußeren Punkte an der Seitenlinie oder dem Drei-Punkte-Bogen) UND in der Tiefe (z.B. Mittellinie oder Drei-Punkte-Bogen)';
+      else if(needsWidth) advice = 'in der Breite (z.B. die äußeren Punkte an der Seitenlinie oder dem Drei-Punkte-Bogen)';
+      else advice = 'in der Tiefe (z.B. Mittellinie oder Drei-Punkte-Bogen statt nur Freiwurflinie)';
+      return { blocking: false, text: ` ⚠️ Die gesetzten Punkte decken nur ${Math.round(coverageFrac.fracX*100)}% der Breite und ${Math.round(coverageFrac.fracY*100)}% der Tiefe des Spielfelds ab (z.B. nur den Freiwurfraum) — für Spieler außerhalb dieses Bereichs kann die berechnete Position um mehrere Meter danebenliegen, im Extremfall weit außerhalb des Feldes. Zusätzliche Referenzpunkte setzen, die weiter auseinanderliegen ${advice}.` };
+    }
+    if(pointSensitivity > CALIB_SENSITIVITY_WARN_M){
+      return { blocking: false, text: ` ⚠️ Diese Kalibrierung reagiert empfindlich auf kleine Ungenauigkeiten (~${pointSensitivity.toFixed(1)} m Verschiebung schon bei wenigen Pixeln Abweichung) — die gesetzten Punkte liegen vermutlich zu nah beieinander oder fast auf einer Linie. Für zuverlässigere Positionen weiter auseinanderliegende Punkte wählen.` };
+    }
+    return { blocking: false, text: '' };
+  }
+  let calibSensitivity = null, calibCoverageFrac = null, calibResidualOutliers = null;
+  let committedSensitivity = null, committedCoverageFrac = null, committedResidualOutliers = null; // of the currently active (committed) calibration
+  function recomputeLiveCalibration(){
+    const pts = HANDLES.filter(h=>anchored.has(h.id));
+    if(pts.length < 4){ liveHomography = null; liveDisplayHomography = null; calibSensitivity = null; calibCoverageFrac = null; calibResidualOutliers = null; return; }
+    const realPts = pts.map(h=>[h.rx,h.ry]);
+    const nativePts = pts.map(h=>[handlePos[h.id].x, handlePos[h.id].y]);
+    try{
+      liveHomography = computeHomography(nativePts, realPts);       // native -> real
+      liveDisplayHomography = computeHomography(realPts, nativePts); // real -> native
+      calibSensitivity = assessCalibrationSensitivity(nativePts, realPts);
+      calibCoverageFrac = assessCourtSpanCoverage(realPts);
+      calibResidualOutliers = findMiscalibratedPoint(nativePts, realPts, pts.map(h=>h.id));
+      HANDLES.forEach(h=>{
+        if(!anchored.has(h.id)){
+          const [nx,ny] = applyHomography(liveDisplayHomography, h.rx, h.ry);
+          handlePos[h.id] = {x:nx, y:ny};
+        }
+      });
+    }catch(e){
+      liveHomography = null; liveDisplayHomography = null; calibSensitivity = null; calibCoverageFrac = null; calibResidualOutliers = null;
+    }
+  }
+  // Only run at commit time (not on every drag-move) - the leave-one-out gate refits the model once
+  // per anchored point, which is too costly to repeat on every pointermove tick while still dragging,
+  // and only the COMMITTED calibration is ever actually used to convert a click/detection to a court
+  // position anyway, so there's nothing to show live during dragging that isn't already covered by
+  // the plain-homography preview above.
+  function fitDistortionForAnchored(){
+    const pts = HANDLES.filter(h=>anchored.has(h.id));
+    if(pts.length < DISTORTION_MIN_POINTS) return null;
+    const realPts = pts.map(h=>[h.rx,h.ry]);
+    const nativePts = pts.map(h=>[handlePos[h.id].x, handlePos[h.id].y]);
+    const cx = (video.videoWidth||1280)/2, cy = (video.videoHeight||720)/2;
+    try{ return fitDistortionWithLooGate(nativePts, realPts, cx, cy); }
+    catch(e){ return null; }
+  }
+  function updateCalibStatus(){
+    // The calibration card auto-collapses once committed (see setCalibMode) - a short echo of the
+    // status stays in the summary line itself so a sensitivity warning is never hidden just because
+    // the card is closed, and so it's clear at a glance whether recalibration is worth opening for.
+    if(homography && !calibMode){
+      const msg = calibSensitivityMessage(committedSensitivity, committedCoverageFrac, true, committedResidualOutliers);
+      // Surface when the lens-distortion correction actually kicked in (not just "was attempted") -
+      // it's silently skipped unless cross-validation confirmed it genuinely helps (see
+      // fitDistortionWithLooGate), so when it IS active that's worth a positive confirmation rather
+      // than a hidden implementation detail, especially after it was the fix for a real reported case.
+      const distortionNote = committedDistortionModel ? ' Objektivverzerrung erkannt und korrigiert (verbessert Positionen v.a. am Bildrand).' : '';
+      calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.${distortionNote}${msg.text}`;
+      calibStatus.className = msg.text ? 'hint err' : 'hint ok';
+      calibSummaryHintEl.textContent = msg.text ? '· ⚠️ Kalibrierung prüfen' : '· kalibriert ✓';
+    } else if(anchored.size >= 4){
+      const msg = calibSensitivityMessage(calibSensitivity, calibCoverageFrac, !!liveHomography, calibResidualOutliers);
+      calibStatus.textContent = msg.blocking
+        ? `${anchored.size} Punkte gesetzt, aber so nicht verwendbar.${msg.text}`
+        : `${anchored.size} Punkte gesetzt. Passt die Ausrichtung? Dann "Kalibrierung übernehmen" klicken.${msg.text}`;
+      calibStatus.className = msg.text ? 'hint err' : 'hint';
+      calibSummaryHintEl.textContent = '';
+    } else {
+      calibStatus.textContent = `${anchored.size}/4 Punkte gesetzt. Ziehe mindestens 4 der Punkte auf ihre reale Position im Video (idealerweise 7+, weiter auseinanderliegend, auch bis in die Bildecken — ab 7 Punkten prüft die App zusätzlich automatisch auf Objektivverzerrung, die gerade am Bildrand sonst zu falschen Positionen führen kann).`;
+      calibStatus.className = 'hint';
+      calibSummaryHintEl.textContent = '';
+    }
+    // Blocked when the anchored points can't be resolved into a usable calibration (e.g. all on one
+    // line, or clustered so tightly they don't generalize to the rest of the visible court) -
+    // otherwise the button looks ready but committing would silently do nothing or produce garbage.
+    calibCommitBtn.disabled = !calibMode || anchored.size < 4 || calibSensitivityMessage(calibSensitivity, calibCoverageFrac, !!liveHomography, calibResidualOutliers).blocking;
+    calibResetBtn.disabled = !calibMode;
+  }
+  function updateOverlayInteractivity(){
+    overlay.classList.toggle('active', calibMode);
+    overlay.classList.toggle('picking', !!placementArmed || !!colorPickTarget);
+  }
+  function setCalibMode(on){
+    calibMode = on;
+    updateOverlayInteractivity();
+    if(on && Object.keys(handlePos).length === 0) resetCalibPoints();
+    updateCalibStatus();
+    renderCalibOverlay();
+    updatePlacementEnabled();
+    // Auto-expand the calibration card while it needs attention, auto-collapse it once committed
+    // (or reused from a carried-over calibration) - a user who manually opens/closes it in between
+    // these calls is left alone, since this only fires on an actual mode transition.
+    calibCardEl.open = on;
+  }
+  calibEditBtn.addEventListener('click', ()=>{
+    if(!video.src){ alert('Bitte zuerst ein Video laden.'); return; }
+    setCalibMode(true);
+  });
+  calibResetBtn.addEventListener('click', ()=>{
+    if(!video.src) return;
+    resetCalibPoints();
+  });
+  calibCommitBtn.addEventListener('click', ()=>{
+    if(!liveHomography) return;
+    homography = liveHomography;
+    homographyInv = invertHomography(homography);
+    committedSensitivity = calibSensitivity;
+    committedCoverageFrac = calibCoverageFrac;
+    committedResidualOutliers = calibResidualOutliers;
+    committedDistortionModel = fitDistortionForAnchored();
+    lastCalibration = {
+      videoWidth: video.videoWidth, videoHeight: video.videoHeight,
+      handlePos: Object.fromEntries(Array.from(anchored).map(id=>[id, {...handlePos[id]}])),
+      anchored: new Set(anchored),
+    };
+    setCalibMode(false);
+    updateCalibStatus();
+    updatePlacementEnabled();
+    updateWizardBanner();
+  });
+
+  function renderCalibOverlay(){
+    octx.clearRect(0,0,overlay.width,overlay.height);
+    if(calibMode && video.videoWidth){
+      const H = liveDisplayHomography || (function(){ try{ return defaultGuessHomography(); }catch(e){ return null; } })();
+      octx.save();
+      octx.strokeStyle = 'rgba(196,62,14,0.85)';
+      octx.lineWidth = 2;
+      COURT_PATHS.forEach(path=>{
+        octx.beginPath();
+        path.forEach(([x,y],i)=>{
+          const [nx,ny] = anchoredTemplatePoint(x,y,H);
+          const [dx,dy] = nativeToDisplay(nx,ny);
+          i===0 ? octx.moveTo(dx,dy) : octx.lineTo(dx,dy);
+        });
+        octx.stroke();
+      });
+      octx.restore();
+
+      HANDLES.forEach(h=>{
+        const p = handlePos[h.id];
+        if(!p) return;
+        const [dx,dy] = nativeToDisplay(p.x,p.y);
+        const isAnchored = anchored.has(h.id);
+        octx.beginPath(); octx.arc(dx,dy, isAnchored?9:6, 0, Math.PI*2);
+        octx.fillStyle = isAnchored ? '#16a34a' : 'rgba(255,255,255,0.9)';
+        octx.fill();
+        octx.strokeStyle = isAnchored ? '#0f5124' : '#C43E0E';
+        octx.lineWidth = 2; octx.stroke();
+      });
+    }
+    // Player positions placed for the frame currently being built - shown directly on the video
+    // regardless of calibration mode, so you can see at a glance who's already been placed.
+    pendingPositions.forEach(p=>{
+      const [dx,dy] = nativeToDisplay(p.nx,p.ny);
+      octx.beginPath(); octx.arc(dx,dy,7,0,Math.PI*2);
+      octx.fillStyle = pendingColor(p.team);
+      octx.fill();
+      octx.strokeStyle = p.lowConfidence ? '#f59e0b' : '#fff';
+      octx.lineWidth = p.lowConfidence ? 3 : 2;
+      octx.stroke();
+      if(p.lowConfidence){
+        octx.save();
+        octx.setLineDash([3,2]); octx.strokeStyle = '#f59e0b'; octx.lineWidth = 1.5;
+        octx.beginPath(); octx.arc(dx,dy,11,0,Math.PI*2); octx.stroke();
+        octx.restore();
+      }
+    });
+  }
+  function anchoredTemplatePoint(rx,ry,H){
+    // used only to project COURT_PATHS points for the overlay preview
+    return H ? applyHomography(H, rx, ry) : [rx, ry];
+  }
+
+  // ---------- calibration dragging (pointer events: mouse + touch) ----------
+  function findHandleAt(clientX, clientY){
+    const rect = overlay.getBoundingClientRect();
+    const dx0 = clientX - rect.left, dy0 = clientY - rect.top;
+    let best = null, bestD = 16;
+    HANDLES.forEach(h=>{
+      const p = handlePos[h.id];
+      if(!p) return;
+      const [dx,dy] = nativeToDisplay(p.x,p.y);
+      const d = Math.hypot(dx-dx0, dy-dy0);
+      if(d < bestD){ bestD = d; best = h.id; }
+    });
+    return best;
+  }
+  overlay.addEventListener('pointerdown', (evt)=>{
+    if(colorPickTarget){ pickColorAt(evt.clientX, evt.clientY); return; }
+    if(evt.shiftKey && pendingPositions.length){ removePendingNear(evt.clientX, evt.clientY); return; }
+    if(placementArmed){ placePlayerAt(evt.clientX, evt.clientY); return; }
+    if(!calibMode) return;
+    const id = findHandleAt(evt.clientX, evt.clientY);
+    if(!id) return;
+    draggingId = id;
+    overlay.classList.add('dragging');
+    overlay.setPointerCapture(evt.pointerId);
+  });
+  overlay.addEventListener('pointermove', (evt)=>{
+    if(!calibMode || !draggingId) return;
+    const rect = overlay.getBoundingClientRect();
+    const [nx,ny] = displayToNative(evt.clientX-rect.left, evt.clientY-rect.top);
+    handlePos[draggingId] = {x:nx, y:ny};
+    anchored.add(draggingId);
+    recomputeLiveCalibration();
+    updateCalibStatus();
+    renderCalibOverlay();
+  });
+  function endDrag(evt){
+    if(draggingId){ overlay.classList.remove('dragging'); draggingId = null; }
+  }
+  overlay.addEventListener('pointerup', endDrag);
+  overlay.addEventListener('pointercancel', endDrag);
+
+  window.addEventListener('keydown', (evt)=>{
+    if(evt.key !== 'Escape') return;
+    if(colorPickTarget){
+      colorPickTarget = null;
+      updateOverlayInteractivity();
+      updatePlacementEnabled();
+      setStatus('Farbauswahl abgebrochen.');
+    }
+    if(placementArmed){
+      placementArmed = null;
+      updateOverlayInteractivity();
+      updatePlacementEnabled();
+      updatePlacementStatus();
+      setStatus('Positionierung pausiert.');
+    }
+    if(ballPlacementArmed){
+      ballPlacementArmed = false;
+      setStatus('Ball-Platzierung abgebrochen.');
+    }
+    if(actionPick){
+      actionPick = null;
+      setStatus('Aktions-Markierung abgebrochen.');
+    }
+    if(mergePick){
+      mergePick = null;
+      setStatus('Zusammenführen abgebrochen.');
+    }
+  });
+
+  // ---------- manual player placement: click directly on the video, converted through the
+  // committed calibration into real court coordinates - no detection model, no false positives,
+  // no per-frame correction cycle. What you click is exactly what ends up in the diagram. ----------
+  // Shared so a pending point never looks like a team it wasn't actually assigned to - 'unknown'
+  // (from an AI suggestion the jersey colors couldn't classify) must render distinctly from Defense,
+  // not fall into blue by default, right at the moment the user is supposed to be checking it.
+  function pendingColor(team){
+    return team === 'offense' ? '#C43E0E' : team === 'defense' ? '#2563eb' : '#94a3b8';
+  }
+  // Snap radius in real court meters, not screen pixels - a fixed pixel radius would be far too
+  // generous close to the camera and far too strict at the far end of an oblique broadcast shot,
+  // exactly the kind of perspective distortion this tool already has to account for elsewhere.
+  // Chosen roughly as "anywhere on a standing player's body", not just their exact feet - this is
+  // what actually fixes the earlier finding that clicking a player's head instead of their feet can
+  // shift the computed position by several meters: as long as the click lands within about a body's
+  // width of a detected player, it snaps to their precise (AI-detected) ground-contact point instead
+  // of wherever was literally clicked.
+  const PLACEMENT_SNAP_RADIUS_M = 1.2;
+  async function placePlayerAt(clientX, clientY){
+    const team = placementArmed; // capture now - an async detection gap follows, during which the
+    // user could switch teams or cancel; the point must still belong to whichever team was armed
+    // at the moment of the actual click, not whatever happens to be armed once detection resolves.
+    const rect = overlay.getBoundingClientRect();
+    const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
+    const [rawCx, rawCy] = projectNativeToReal(nx, ny);
+    let finalNx = nx, finalNy = ny, finalCx = rawCx, finalCy = rawCy, snapped = false;
+    const feet = await getFeetForCurrentMoment();
+    let bestD = PLACEMENT_SNAP_RADIUS_M;
+    feet.forEach(foot=>{
+      const [fcx, fcy] = projectNativeToReal(foot.x, foot.y);
+      const d = Math.hypot(fcx-rawCx, fcy-rawCy);
+      if(d < bestD){ bestD = d; finalNx = foot.x; finalNy = foot.y; finalCx = fcx; finalCy = fcy; snapped = true; }
+    });
+    if(!team) return; // placement was cancelled (Esc) while detection was running
+    pendingPositions.push({x:finalCx, y:finalCy, nx:finalNx, ny:finalNy, team});
+    renderCalibOverlay();
+    updatePlacementStatus();
+    if(snapped) setStatus('Position an erkannten Spieler angepasst (Fußposition).', 'ok');
+  }
+  function removePendingNear(clientX, clientY){
+    const rect = overlay.getBoundingClientRect();
+    const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
+    let bestI = -1, bestD = 25; // native-pixel hit radius
+    pendingPositions.forEach((p,i)=>{
+      const d = Math.hypot(p.nx-nx, p.ny-ny);
+      if(d < bestD){ bestD = d; bestI = i; }
+    });
+    if(bestI >= 0){
+      pendingPositions.splice(bestI,1);
+      renderCalibOverlay();
+      updatePlacementStatus();
+      setStatus('Position entfernt.');
+    }
+  }
+
+  // ---------- optional automatic detection (coco-ssd person boxes + optional MoveNet per-box
+  // refinement, see loadModelIfNeeded/detectPersonFeet below) suggests starting positions, which
+  // still need to be checked/corrected the same way as manually placed ones (drag to fix, shift+click
+  // to remove, click to assign team) - the AI never gets the final say. ----------
+  function kp(keypoints, name){ return keypoints.find(k=>k.name===name); }
+  function getFootPoint(keypoints){
+    const la = kp(keypoints,'left_ankle'), ra = kp(keypoints,'right_ankle');
+    if(la && ra && la.score>0.3 && ra.score>0.3) return {x:(la.x+ra.x)/2, y:(la.y+ra.y)/2};
+    if(la && la.score>0.3) return {x:la.x, y:la.y};
+    if(ra && ra.score>0.3) return {x:ra.x, y:ra.y};
+    const lh = kp(keypoints,'left_hip'), rh = kp(keypoints,'right_hip');
+    if(lh && rh && lh.score>0.3 && rh.score>0.3) return {x:(lh.x+rh.x)/2, y:(lh.y+rh.y)/2};
+    if(lh && lh.score>0.3) return {x:lh.x, y:lh.y};
+    if(rh && rh.score>0.3) return {x:rh.x, y:rh.y};
+    return null;
+  }
+
+  // ---------- optional jersey-color team classification (only used to pre-fill the AI-Vorschlag's
+  // team guess when colors are configured - never the only source of truth, always correctable) ----------
+  function hexToRgb(hex){
+    const m = hex.replace('#','');
+    return [parseInt(m.substr(0,2),16), parseInt(m.substr(2,2),16), parseInt(m.substr(4,2),16)];
+  }
+  function rgbToHex(r,g,b){
+    return '#' + [r,g,b].map(v => Math.max(0,Math.min(255,Math.round(v))).toString(16).padStart(2,'0')).join('');
+  }
+  function rgbToHsv(r,g,b){
+    r/=255; g/=255; b/=255;
+    const max=Math.max(r,g,b), min=Math.min(r,g,b), d=max-min;
+    let h=0;
+    if(d!==0){
+      if(max===r) h = 60*(((g-b)/d)%6);
+      else if(max===g) h = 60*((b-r)/d+2);
+      else h = 60*((r-g)/d+4);
+    }
+    if(h<0) h+=360;
+    return {h, s: max===0?0:d/max, v:max};
+  }
+  function colorDistance(rgbA, rgbB){
+    const a = rgbToHsv(rgbA[0],rgbA[1],rgbA[2]), b = rgbToHsv(rgbB[0],rgbB[1],rgbB[2]);
+    let dh = Math.abs(a.h-b.h); if(dh>180) dh = 360-dh;
+    return (dh/180)*0.6 + Math.abs(a.s-b.s)*0.25 + Math.abs(a.v-b.v)*0.15;
+  }
+  const TEAM_MATCH_THRESHOLD = 0.35;
+  function classifyTeam(avgRgb){
+    if(!avgRgb) return 'unknown';
+    if(!offenseColorSet || !defenseColorSet) return 'unknown'; // never guess off un-configured defaults
+    const dOff = colorDistance(avgRgb, hexToRgb(offenseColorEl.value));
+    const dDef = colorDistance(avgRgb, hexToRgb(defenseColorEl.value));
+    if(Math.min(dOff,dDef) > TEAM_MATCH_THRESHOLD) return 'unknown';
+    return dOff <= dDef ? 'offense' : 'defense';
+  }
+  // Skin-tone detection via YCbCr chrominance: melanin mainly changes luminance (Y), not the
+  // Cb/Cr color-difference channels, so this range catches light/medium/dark skin about equally
+  // well instead of being tuned to one tone. Used to exclude bare shoulders/arms (basketball
+  // jerseys are sleeveless) from the jersey-color sample, regardless of the player's skin color.
+  function isSkinPixel(r,g,b){
+    const y = 0.299*r + 0.587*g + 0.114*b;
+    const cb = 128 - 0.168736*r - 0.331264*g + 0.5*b;
+    const cr = 128 + 0.5*r - 0.418688*g - 0.081312*b;
+    return y>40 && cb>=75 && cb<=135 && cr>=130 && cr<=180;
+  }
+  function averageColorInBox(ctx, x0,y0,x1,y1){
+    const w = ctx.canvas.width, h = ctx.canvas.height;
+    const minX = Math.max(0, Math.floor(Math.min(x0,x1))), maxX = Math.min(w-1, Math.ceil(Math.max(x0,x1)));
+    const minY = Math.max(0, Math.floor(Math.min(y0,y1))), maxY = Math.min(h-1, Math.ceil(Math.max(y0,y1)));
+    const bw = maxX-minX, bh = maxY-minY;
+    if(bw<=0 || bh<=0) return null;
+    const data = ctx.getImageData(minX,minY,bw,bh).data;
+    let r=0,g=0,b=0,n=0, total=0;
+    for(let i=0;i<data.length;i+=4){
+      total++;
+      const pr=data[i], pg=data[i+1], pb=data[i+2];
+      if(isSkinPixel(pr,pg,pb)) continue;
+      r+=pr; g+=pg; b+=pb; n++;
+    }
+    if(!total || n < total*0.15) return null;
+    return [r/n, g/n, b/n];
+  }
+  function torsoAverageColor(fullCtx, keypoints){
+    const pts = ['left_shoulder','right_shoulder','left_hip','right_hip']
+      .map(name=>kp(keypoints,name)).filter(p=>p && p.score>0.3);
+    if(pts.length < 2) return null;
+    const xs = pts.map(p=>p.x), ys = pts.map(p=>p.y);
+    const cx = (Math.min(...xs)+Math.max(...xs))/2, cy = (Math.min(...ys)+Math.max(...ys))/2;
+    const w = Math.max(Math.max(...xs)-Math.min(...xs), 24) * 0.7;
+    const h = Math.max(Math.max(...ys)-Math.min(...ys), 24) * 0.7;
+    return averageColorInBox(fullCtx, cx-w/2, cy-h/2, cx+w/2, cy+h/2);
+  }
+  // Jersey-color sample from a coco-ssd box when no refined pose keypoints are available - the
+  // upper-middle portion of a standing person's bounding box is a reasonable torso estimate without
+  // needing actual joint positions.
+  function boxAverageColor(fullCtx, bbox){
+    const [bx,by,bw,bh] = bbox;
+    return averageColorInBox(fullCtx, bx+bw*0.2, by+bh*0.15, bx+bw*0.8, by+bh*0.55);
+  }
+  function pickColorAt(clientX, clientY){
+    const target = colorPickTarget;
+    colorPickTarget = null;
+    updateOverlayInteractivity();
+    updatePlacementEnabled();
+    const rect = overlay.getBoundingClientRect();
+    const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
+    const tmp = document.createElement('canvas');
+    tmp.width = video.videoWidth; tmp.height = video.videoHeight;
+    const tctx = tmp.getContext('2d', {willReadFrequently: true});
+    tctx.drawImage(video, 0, 0);
+    const r = 7;
+    const avg = averageColorInBox(tctx, nx-r, ny-r, nx+r, ny+r);
+    if(!avg){
+      setStatus('Konnte an dieser Stelle keine Farbe bestimmen (z.B. nur Haut erkannt) — bitte nochmal auf den Stoff des Trikots klicken.', 'err');
+      return;
+    }
+    const hex = rgbToHex(avg[0], avg[1], avg[2]);
+    (target === 'offense' ? offenseColorEl : defenseColorEl).value = hex;
+    if(target === 'offense') offenseColorSet = true; else defenseColorSet = true;
+    setStatus(`${target === 'offense' ? 'Offense' : 'Defense'}-Farbe aus Video übernommen (${hex}).`, 'ok');
+  }
+  function armColorPick(target){
+    if(!video.src || !video.videoWidth){ alert('Bitte zuerst ein Video laden.'); return; }
+    cancelAllPickModes();
+    colorPickTarget = target;
+    updateOverlayInteractivity();
+    updatePlacementEnabled();
+    updatePlacementStatus();
+    setStatus(`Klicke im Video auf das ${target === 'offense' ? 'Offense' : 'Defense'}-Trikot… (Abbrechen mit Esc)`);
+  }
+  pickOffenseBtn.addEventListener('click', ()=> armColorPick('offense'));
+  pickDefenseBtn.addEventListener('click', ()=> armColorPick('defense'));
+
+  // ---------- lightweight visual tracker: once a player has been placed in a finished frame, this
+  // re-locates them in a LATER frame by matching the visual appearance around their last known
+  // position, instead of relying on a fresh pose-detection guess every single time. This is what
+  // actually fixes "the AI makes me correct almost every frame": pose detection has to find every
+  // player from scratch in every single frame and misses some each time, while tracking only has to
+  // answer "where did THIS specific, already-identified player go" in a small, scale-aware search
+  // window around where they just were - a far easier and more reliable question for a nearly-static
+  // broadcast camera. Pose detection is still used (see detectPoseCandidates below), but only to find
+  // players who aren't tracked yet (a brand new frame, or someone entering the visible area). ----------
+  const TRACK_GRID_W = 10, TRACK_GRID_H = 16; // sparse sample grid size used for appearance matching
+  // The appearance sample box is centered above the foot point by this fraction of its own height
+  // (torso/jersey is far more discriminative than the ground at the feet) - buildTrackTemplate and
+  // matchTemplateForward must agree on this offset, since nx/ny everywhere else in this file always
+  // means the actual foot point, not the shifted sample center.
+  const TRACK_TEMPLATE_Y_OFFSET_FRAC = 0.3;
+  // Tuned against the real test footage: genuine successful tracking of real players 0.6s apart
+  // scored 0.75-1.0 confidence, while a deliberately-mismatched cross-player comparison (one player's
+  // template forced onto a different, distant player's position - not a realistic failure mode since
+  // the search below is always local to a player's own last known position, but a useful worst case)
+  // scored ~0.69 - meaningfully lower than genuine matches, but closer than ideal. Kept conservative
+  // (rather than lowered to let every real match through silently) so a borderline result still gets
+  // flagged for a quick visual check instead of being silently trusted.
+  const TRACK_CONFIDENCE_OK = 0.6; // at/above this, a tracked match is trusted without manual review
+  const TRACK_CONFIDENCE_MIN = 0.15; // below this, treat the player as lost rather than guess wildly
+  // How many native pixels correspond to one real court meter near a given native point - varies a
+  // lot across an oblique broadcast shot (near the camera vs. far away), so this is recomputed per
+  // point rather than assumed constant, the same way the existing snap-to-foot radius already has to
+  // account for perspective distortion.
+  function metersPerPixelAt(nx, ny){
+    if(!homography || !homographyInv) return null;
+    try{
+      const [cx,cy] = applyHomography(homography, nx, ny);
+      const [nx2,ny2] = applyHomography(homographyInv, cx+1, cy);
+      const d = Math.hypot(nx2-nx, ny2-ny);
+      return isFinite(d) && d>0 ? d : null;
+    }catch(e){ return null; }
+  }
+  // Extracts luma (Y) AND chroma (Cb/Cr) per pixel, not just grayscale - jersey color is one of the
+  // single most discriminative things telling a player apart from the court/crowd/background in this
+  // application (that's exactly why jersey-color team classification already exists elsewhere), so
+  // throwing color away before matching discards a strong, nearly-free signal. Testing against the
+  // real match video showed grayscale-only matching can score an unrelated background patch almost as
+  // "confidently" as the correct player when both happen to be low-contrast in luma alone - color
+  // substantially reduces that risk.
+  function toTrackFeatures(canvas){
+    const ctx = canvas.getContext('2d', {willReadFrequently:true});
+    const w = canvas.width, h = canvas.height;
+    const data = ctx.getImageData(0,0,w,h).data;
+    const n = w*h;
+    const Y = new Float32Array(n), Cb = new Float32Array(n), Cr = new Float32Array(n);
+    for(let i=0,j=0;i<data.length;i+=4,j++){
+      const r=data[i], g=data[i+1], b=data[i+2];
+      Y[j] = 0.299*r + 0.587*g + 0.114*b;
+      Cb[j] = 128 - 0.168736*r - 0.331264*g + 0.5*b;
+      Cr[j] = 128 + 0.5*r - 0.418688*g - 0.081312*b;
+    }
+    return {Y, Cb, Cr, w, h};
+  }
+  // Samples a fixed-size grid of points (nearest-pixel) across a box of real pixel size boxW x boxH
+  // centered at (cx,cy) within a pre-computed Y/Cb/Cr buffer, concatenating all three channels into
+  // one vector - this is what makes comparing many candidate positions fast: one getImageData() call
+  // per tracked player per frame-advance (via toTrackFeatures above), then every candidate position is
+  // just cheap array indexing, no further canvas operations or image resizing.
+  function samplePatchGrid(feat, regionW, regionH, cx, cy, boxW, boxH, gridW, gridH){
+    const out = new Float32Array(gridW*gridH*3);
+    let k=0;
+    for(let j=0;j<gridH;j++){
+      const fy = gridH===1 ? 0.5 : j/(gridH-1);
+      const py = Math.round(cy - boxH/2 + fy*boxH);
+      for(let i=0;i<gridW;i++){
+        const fx = gridW===1 ? 0.5 : i/(gridW-1);
+        const px = Math.round(cx - boxW/2 + fx*boxW);
+        const inBounds = px>=0 && px<regionW && py>=0 && py<regionH;
+        const idx = inBounds ? py*regionW+px : -1;
+        out[k++] = inBounds ? feat.Y[idx] : 0;
+        out[k++] = inBounds ? feat.Cb[idx] : 128;
+        out[k++] = inBounds ? feat.Cr[idx] : 128;
+      }
+    }
+    return out;
+  }
+  // Normalized cross-correlation (mean-centered, scale-invariant): a player who got slightly
+  // brighter/darker (camera auto-exposure, moving in/out of a shadow) between frames still matches
+  // well, since only the shape of light/dark variation is compared, not absolute brightness or
+  // contrast. Crucially - unlike a plain sum-of-squared-differences - this is already normalized to
+  // -1..1, so it doesn't need a separate variance-based rescaling that would otherwise make two
+  // unrelated but equally flat/textureless patches (e.g. a plain jersey vs. plain floor) look like a
+  // deceptively confident match just because both have low variance: when either patch is (near)
+  // flat, the denominator collapses and this correctly reports ~0 (no reliable signal) rather than a
+  // false high score.
+  function nccMeanCentered(a, b){
+    const n = a.length;
+    let meanA=0, meanB=0;
+    for(let i=0;i<n;i++){ meanA+=a[i]; meanB+=b[i]; }
+    meanA/=n; meanB/=n;
+    let num=0, denA=0, denB=0;
+    for(let i=0;i<n;i++){
+      const da=a[i]-meanA, db=b[i]-meanB;
+      num += da*db; denA += da*da; denB += db*db;
+    }
+    const den = Math.sqrt(denA*denB);
+    return den < 1e-6 ? 0 : num/den;
+  }
+  // Coarse-to-fine search for where a track's stored template now best matches, starting from its
+  // last known position. Search radius scales with both elapsed time (a player can only move so far
+  // per second - same MAX_PLAYER_SPEED_MPS bound used elsewhere) and local pixel-per-meter scale, so
+  // it's neither too narrow (losing a fast-moving or far-away player) nor needlessly wide (slower,
+  // and more likely to lock onto a different player or the crowd instead). The exact last-known
+  // position is always tested too (with a tiny score bonus to win genuine ties) so an unmoved player
+  // is reported as unmoved rather than drifting a few pixels onto an equally-scoring neighbor.
+  function matchTemplateForward(feat, track, elapsedSeconds){
+    const tmpl = track.template, last = track.lastNative;
+    if(!tmpl || !last) return null;
+    const pxPerM = metersPerPixelAt(last.x, last.y);
+    if(!pxPerM) return null;
+    const searchRadius = Math.max(pxPerM*1.0, pxPerM * MAX_PLAYER_SPEED_MPS * elapsedSeconds);
+    const coarseStep = Math.max(2, Math.round(searchRadius/18));
+    let best = null;
+    function consider(cx, cy){
+      // cx,cy is a candidate FOOT point (matching the semantics of track.lastNative everywhere else) -
+      // the actual sample box is centered above it by the same offset buildTrackTemplate used.
+      const grid = samplePatchGrid(feat, feat.w, feat.h, cx, cy - tmpl.boxH*TRACK_TEMPLATE_Y_OFFSET_FRAC, tmpl.boxW, tmpl.boxH, TRACK_GRID_W, TRACK_GRID_H);
+      let score = nccMeanCentered(tmpl.grid, grid);
+      if(cx===last.x && cy===last.y) score += 1e-4;
+      if(!best || score > best.score) best = {score, nx:cx, ny:cy};
+    }
+    consider(last.x, last.y);
+    for(let dy=-searchRadius; dy<=searchRadius; dy+=coarseStep){
+      for(let dx=-searchRadius; dx<=searchRadius; dx+=coarseStep){
+        if(dx===0 && dy===0) continue;
+        consider(last.x+dx, last.y+dy);
+      }
+    }
+    const coarseNx = best.nx, coarseNy = best.ny;
+    for(let dy=-coarseStep; dy<=coarseStep; dy++){
+      for(let dx=-coarseStep; dx<=coarseStep; dx++){
+        if(dx===0 && dy===0) continue;
+        consider(coarseNx+dx, coarseNy+dy);
+      }
+    }
+    const confidence = Math.max(0, Math.min(1, best.score));
+    if(confidence < TRACK_CONFIDENCE_MIN) return null; // track lost - don't guess wildly
+    const [rx, ry] = projectNativeToReal(best.nx, best.ny);
+    return {x:rx, y:ry, nx:best.nx, ny:best.ny, confidence};
+  }
+  // Builds and stores the appearance template a track will be matched against in later frames -
+  // called once per player whenever a frame is finished (see finishCurrentFrame), from the exact
+  // full-resolution frame that was just captured. The sample box is anchored a bit above the player's
+  // foot point (not centered on it) so it mostly covers jersey/torso rather than mostly floor, since
+  // jersey color/number contrast is far more discriminative for matching than the ground beneath it.
+  function buildTrackTemplate(feat, nx, ny){
+    const pxPerM = metersPerPixelAt(nx, ny);
+    if(!pxPerM) return null;
+    const boxW = pxPerM*0.9, boxH = pxPerM*1.9;
+    const grid = samplePatchGrid(feat, feat.w, feat.h, nx, ny - boxH*TRACK_TEMPLATE_Y_OFFSET_FRAC, boxW, boxH, TRACK_GRID_W, TRACK_GRID_H);
+    return {grid, boxW, boxH};
+  }
+
+  async function loadModelIfNeeded(){
+    const tasks = [];
+    if(!personDetector && !personDetectorLoading) tasks.push(loadPersonDetector());
+    if(!poseDetector && !modelLoading) tasks.push(loadPoseRefiner());
+    if(tasks.length) await Promise.all(tasks);
+  }
+  // Primary detector: coco-ssd finds person bounding boxes. This is the one that must succeed for
+  // any automatic detection to work at all - the pose refiner below is a bonus for precision, not a
+  // requirement.
+  async function loadPersonDetector(){
+    personDetectorLoading = true;
+    updatePlacementEnabled();
+    setStatus('Spieler-Erkennung wird geladen…');
+    try{
+      await tf.setBackend('webgl'); await tf.ready();
+      // mobilenet_v2 (the library's most accurate base, vs. the faster/smaller lite_mobilenet_v2) -
+      // this runs once per capture action a user explicitly triggers, not every video frame, so the
+      // extra accuracy is worth the modest extra load time and inference cost.
+      personDetector = await cocoSsd.load({base:'mobilenet_v2'});
+    }catch(e){
+      console.error(e);
+      setStatus('Spieler-Erkennung konnte nicht geladen werden (Internetverbindung prüfen). Manuelles Setzen funktioniert trotzdem.', 'err');
+    }
+    personDetectorLoading = false;
+    updatePlacementEnabled();
+  }
+  // Optional per-player refinement: MoveNet single-person, run on an upscaled crop of just one
+  // detected box (see detectPersonFeet) rather than the whole frame - gives real ankle keypoints for a
+  // precise foot point where the box-bottom-center estimate would otherwise have to do. If this never
+  // loads (or errors on a given box), detection still works from the box alone.
+  async function loadPoseRefiner(){
+    modelLoading = true;
+    updatePlacementEnabled();
+    try{
+      await tf.setBackend('webgl'); await tf.ready();
+      poseDetector = await poseDetection.createDetector(
+        poseDetection.SupportedModels.MoveNet,
+        { modelType: poseDetection.movenet.modelType.SINGLEPOSE_THUNDER }
+      );
+    }catch(e){
+      console.error(e); // non-fatal - box-bottom-center fallback still works without this
+    }
+    modelLoading = false;
+    updatePlacementEnabled();
+  }
+  // Sends the current video frame to the user's configured Roboflow hosted-inference endpoint and
+  // returns boxes in the same shape coco-ssd's own predictions use ({bbox:[x,y,w,h], score}), so
+  // detectRawBoxes() below can treat either source identically. A basketball-specific trained model
+  // here can have much better recall/precision than coco-ssd's generic "person" class, especially
+  // from a broadcast angle with small/far/occluded players - but it means this frame leaves the
+  // browser to a third-party server, which is why it's opt-in and never the only path (see
+  // roboflowReady()/detectionAvailable()). Any failure (network, bad key, malformed response) just
+  // yields zero boxes - callers already treat "nothing detected" as a normal, non-fatal outcome.
+  // Visible call counter/log - the earlier version of this feature was invisible in normal use (it
+  // only ran at a few specific moments, like recovering a track the pixel tracker lost), so a user
+  // enabling it had no way to tell whether it was actually being called at all, or being called but
+  // failing silently (wrong CORS setup, bad key, network block), versus genuinely just not finding
+  // anything. This makes every call and its outcome visible in the settings card in real time.
+  let roboflowCallCount = 0;
+  function logRoboflowCall(outcome){
+    roboflowCallCount++;
+    if(roboflowCallLogEl) roboflowCallLogEl.textContent = `Roboflow-Aufrufe in dieser Sitzung: ${roboflowCallCount}. Letztes Ergebnis: ${outcome}`;
+  }
+  async function detectViaRoboflow(){
+    const cfg = roboflowConfig;
+    const canvas = document.createElement('canvas');
+    canvas.width = video.videoWidth; canvas.height = video.videoHeight;
+    canvas.getContext('2d').drawImage(video, 0, 0);
+    const base64 = canvas.toDataURL('image/jpeg', 0.85).split(',')[1];
+    let data;
+    try{
+      // Roboflow's own default minimum confidence is 50% - far too strict for a model evaluated on
+      // footage very different from what it was trained on (different camera, players, lighting than
+      // whatever the model's own training images used), where even a real player may only score
+      // 10-30%. Since these results only ever feed into something the user reviews (a suggestion, a
+      // "search new players" pass, or recovering a SPECIFIC already-known track within a tight
+      // position/scale check) rather than being auto-committed, erring low here is safe - cfg.confidence
+      // is user-adjustable (see "Mindest-Konfidenz" in the settings card) for exactly this reason.
+      const confidence = cfg.confidence != null ? cfg.confidence : 10;
+      const url = cfg.endpoint + (cfg.endpoint.includes('?') ? '&' : '?') + 'confidence=' + encodeURIComponent(confidence);
+      // Current Roboflow hosted-inference servers (inference v1.5.0+) expect the key as a Bearer
+      // token rather than a ?api_key= query param - the query-param form is older/deprecated and
+      // some endpoints no longer accept it, so this is the one actually confirmed to work.
+      const resp = await fetch(url, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Authorization': 'Bearer ' + cfg.apiKey,
+        },
+        body: base64,
+      });
+      if(!resp.ok) throw new Error('HTTP ' + resp.status);
+      data = await resp.json();
+    }catch(e){
+      console.error('Roboflow-Anfrage fehlgeschlagen', e);
+      logRoboflowCall('Fehler — ' + (e && e.message ? e.message : e));
+      return [];
+    }
+    const preds = Array.isArray(data && data.predictions) ? data.predictions : [];
+    const wanted = (cfg.classNames && cfg.classNames.length) ? cfg.classNames : null;
+    const result = preds
+      .filter(p => !wanted || wanted.includes(p.class))
+      .map(p => ({ bbox: [p.x - p.width/2, p.y - p.height/2, p.width, p.height], score: p.confidence }));
+    logRoboflowCall(`${preds.length} Rohtreffer, ${result.length} nach Klassenfilter`);
+    return result;
+  }
+  // Picks whichever detection source is configured: the user's own Roboflow model when set up and
+  // enabled, otherwise the always-available built-in coco-ssd. Both return the same {bbox,score}[]
+  // shape so detectPersonFeet below doesn't need to know or care which one ran.
+  const PERSON_MIN_SCORE = 0.3; // permissive - every suggestion still requires manual review
+  const PERSON_MAX_BOXES = 30; // generous - a full-court shot can have 10 players plus refs/bench
+  async function detectRawBoxes(){
+    if(roboflowReady()) return await detectViaRoboflow();
+    if(!personDetector) return [];
+    let predictions;
+    // coco-ssd's own default minScore (0.5) is higher than PERSON_MIN_SCORE (0.3) - passing it
+    // explicitly here is what actually makes PERSON_MIN_SCORE take effect; without this, the library
+    // silently discards anything between 0.3 and 0.5 before this code ever sees it, no matter what
+    // PERSON_MIN_SCORE is set to.
+    let preds;
+    try{ preds = await personDetector.detect(video, PERSON_MAX_BOXES, PERSON_MIN_SCORE); }
+    catch(e){ console.error(e); return []; }
+    return preds.filter(p => p.class === 'person').map(p => ({bbox:p.bbox, score:p.score}));
+  }
+  // Runs the configured detector on the current video moment, then for each detected person tries to
+  // refine their foot point via a per-box MoveNet pass on an upscaled crop (much higher effective
+  // resolution for a small/far-away player than any whole-frame pass could give them). Falls back to
+  // the box's own bottom-center when refinement isn't available or doesn't find confident ankle
+  // keypoints.
+  const POSE_REFINE_INPUT_PX = 256; // upscale target for the per-box refinement crop
+  async function detectPersonFeet(){
+    if(!detectionAvailable()) return [];
+    const boxes = await detectRawBoxes();
+    const results = [];
+    for(const p of boxes){
+      const [bx,by,bw,bh] = p.bbox;
+      let footX = bx + bw/2, footY = by + bh, refined = false, score = p.score;
+      if(poseDetector){
+        try{
+          // Pad on every side, including below the box - coco-ssd's boxes aren't pixel-perfect, and
+          // padding only above (as an earlier version of this did) meant the crop's bottom edge was
+          // exactly the box's bottom edge, with zero room to spare right where the feet actually are -
+          // exactly the part this refinement step is supposed to pin down precisely.
+          const padX = bw*0.15, padYTop = bh*0.1, padYBottom = bh*0.08;
+          const cropX = Math.max(0, bx - padX), cropY = Math.max(0, by - padYTop);
+          const cropW = Math.min(video.videoWidth - cropX, bw + padX*2);
+          const cropH = Math.min(video.videoHeight - cropY, bh + padYTop + padYBottom);
+          if(cropW > 8 && cropH > 8){
+            const scale = Math.min(4, POSE_REFINE_INPUT_PX / Math.max(cropW, cropH));
+            const cropCanvas = document.createElement('canvas');
+            cropCanvas.width = Math.max(1, Math.round(cropW*scale));
+            cropCanvas.height = Math.max(1, Math.round(cropH*scale));
+            cropCanvas.getContext('2d').drawImage(video, cropX, cropY, cropW, cropH, 0, 0, cropCanvas.width, cropCanvas.height);
+            const poses = await poseDetector.estimatePoses(cropCanvas, {flipHorizontal:false});
+            const foot = poses[0] ? getFootPoint(poses[0].keypoints) : null;
+            if(foot){
+              footX = cropX + foot.x/scale;
+              footY = cropY + foot.y/scale;
+              refined = true;
+              score = poses[0].score || score;
+            }
+          }
+        }catch(e){ console.error(e); } // refinement is optional - box-bottom-center still used
+      }
+      results.push({x:footX, y:footY, score, refined, bbox:p.bbox});
+    }
+    return results;
+  }
+  // Reused by manual-placement snapping (below) so every click on the same paused moment doesn't
+  // re-run detection from scratch - cached per exact video.currentTime, invalidated the moment the
+  // video is scrubbed anywhere else. Never throws: a model load failure or detection error just
+  // means no foot points to snap to, so manual placement keeps working exactly as it always has.
+  async function getFeetForCurrentMoment(){
+    if(cachedFeetTime === video.currentTime && cachedFeet) return cachedFeet;
+    if(!detectionAvailable()){
+      if(personDetectorLoading) return [];
+      try{ await loadModelIfNeeded(); }catch(e){ return []; }
+    }
+    if(!detectionAvailable()) return [];
+    const feet = await detectPersonFeet();
+    cachedFeetTime = video.currentTime;
+    cachedFeet = feet;
+    return feet;
+  }
+  // Kept small and constant - real-world testing showed WIDENING this for a poor-coverage calibration
+  // (the original idea being "extrapolated positions may legitimately land further out") backfires in
+  // practice: it mainly lets in far more spectators/bench, not more real players, since a true player
+  // near the court boundary already gets caught by the height-plausibility check below on their own
+  // merits. The real fix for a poor-coverage calibration is fixing the calibration itself (already
+  // flagged clearly via calibSensitivityMessage), never a looser detection filter.
+  const COURT_MARGIN_M = 2;
+  function courtMarginForCalibration(){
+    return COURT_MARGIN_M;
+  }
+  // Core of "KI-Vorschlag", factored out so both the manual button and the auto-capture loop
+  // (below) share the exact same detection+classification logic. With aggregate=true, samples a few
+  // nearby moments in addition to the exact current instant and merges the results - a player who's
+  // momentarily blurred or occluded at this one precise frame is often clearly detectable a fraction
+  // of a second before or after, so this catches misses that a single snapshot never would. Both the
+  // manual button and the whole-play auto-capture loop use aggregate=true, since detection precision
+  // matters more than the extra time this costs per step.
+  const AI_AGGREGATION_OFFSETS_S = [0, -0.2, 0.2];
+  const AI_DEDUP_DIST_M = 0.8; // treat detections this close together as the same player
+  // A real standing player's box should measure roughly this tall in PIXELS at a given spot, given the
+  // camera's local perspective scale (metersPerPixelAt) - not just the court-coordinate margin check
+  // above, which only catches detections OUTSIDE the court area, not wrong-scale detections that still
+  // happen to land inside it (a seated spectator/bench box right at the sideline, several overlapping
+  // people merged into one oversized box, a stray sliver misdetected as a tiny "person"). Bounds are
+  // generous (allows crouching, jumping, partial occlusion, imprecise box padding) - this is a coarse
+  // plausibility check, not a precise height measurement.
+  const PLAYER_HEIGHT_M = 1.85;
+  const PLAYER_HEIGHT_MIN_FRAC = 0.35;
+  const PLAYER_HEIGHT_MAX_FRAC = 2.2;
+  // Pure detection step, used by runAiSuggestion below (the first frame's initial suggestion, and the
+  // explicit "Nach neuen Spielern suchen" action) - returns raw candidates without touching
+  // pendingPositions itself, so callers can filter/merge them differently.
+  async function detectPoseCandidates(aggregate){
+    if(!homography || !detectionAvailable()) return [];
+    const courtMargin = courtMarginForCalibration();
+    const originalTime = video.currentTime;
+    const duration = video.duration || 0;
+    const offsets = aggregate ? AI_AGGREGATION_OFFSETS_S : [0];
+    const candidates = []; // {x, y, nx, ny, team, score}
+    for(const offset of offsets){
+      const t = Math.max(0, Math.min(duration, originalTime + offset));
+      if(t !== video.currentTime) await seekAndWaitApp(t);
+      const feet = await detectPersonFeet();
+      // Sample jersey colors from this exact sampled frame, if offense/defense colors were
+      // configured, so the suggestion can pre-fill a team guess instead of always leaving it open.
+      const fullCanvas = document.createElement('canvas');
+      fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+      const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
+      fullCtx.drawImage(video, 0, 0);
+      feet.forEach(foot=>{
+        const [cx,cy] = projectNativeToReal(foot.x, foot.y);
+        // Anything projected well outside the court is almost certainly not a player - a
+        // spectator, bench personnel, or a stray false-positive - not worth suggesting.
+        if(cx < -courtMargin || cx > 15+courtMargin || cy < -courtMargin || cy > 14+courtMargin) return;
+        // Coordinate alone isn't enough: a detection can land within the court-area margin by
+        // position while still being the wrong SCALE for an actual standing player there - a
+        // courtside spectator/bench box that happens to project just inside the margin, or a box
+        // spanning several overlapping people merged into one. Compare the detected box's own pixel
+        // height against what a standing adult should measure at this exact spot, given the camera's
+        // perspective (the same local px-per-meter scale the visual tracker already uses elsewhere).
+        const pxPerM = metersPerPixelAt(foot.x, foot.y);
+        if(pxPerM){
+          const expectedPx = pxPerM * PLAYER_HEIGHT_M;
+          const boxHeightPx = foot.bbox[3];
+          if(boxHeightPx < expectedPx * PLAYER_HEIGHT_MIN_FRAC || boxHeightPx > expectedPx * PLAYER_HEIGHT_MAX_FRAC) return;
+        }
+        const score = foot.score || 0;
+        const team = classifyTeam(boxAverageColor(fullCtx, foot.bbox));
+        const dupIdx = candidates.findIndex(c => Math.hypot(c.x-cx,c.y-cy) < AI_DEDUP_DIST_M);
+        if(dupIdx >= 0){
+          if(score > candidates[dupIdx].score) candidates[dupIdx] = {x:cx, y:cy, nx:foot.x, ny:foot.y, team, score};
+          return;
+        }
+        candidates.push({x:cx, y:cy, nx:foot.x, ny:foot.y, team, score});
+      });
+    }
+    if(video.currentTime !== originalTime) await seekAndWaitApp(originalTime);
+    return candidates;
+  }
+  // Legacy single-shot wrapper (pose detection only, no tracking) - kept for the very first frame of
+  // a play, where there's nothing yet to track forward from.
+  async function runAiSuggestion(aggregate){
+    const candidates = await detectPoseCandidates(aggregate);
+    let added = 0, guessed = 0;
+    candidates.forEach(c=>{
+      if(pendingPositions.some(p => Math.hypot(p.x-c.x,p.y-c.y) < 0.8)) return; // already have a point there
+      if(c.team !== 'unknown') guessed++;
+      pendingPositions.push({x:c.x, y:c.y, nx:c.nx, ny:c.ny, team:c.team});
+      added++;
+    });
+    renderCalibOverlay();
+    updatePlacementStatus();
+    return {added, guessed};
+  }
+  // Core of the main "Position automatisch bestimmen" workflow - and now the ONLY thing it does.
+  // Re-locates every player already seen in the most recently captured frame via the visual tracker
+  // above (matchTemplateForward) first - nothing else runs unless that fails for someone. It used to
+  // also run pose detection to pick up new people every single time, but real-world use showed that
+  // silently adds spectators/bench and fragments players into ever-growing numbers of tracks every
+  // time detection briefly missed someone - exactly what you don't want for "mark the 5 offense
+  // players once, then have them followed through the play". Finding someone NEW (a substitution, a
+  // player who was off-screen) is still a separate, deliberate action (see "Nach neuen Spielern
+  // suchen" below) that the user triggers on purpose.
+  //
+  // What IS new here: when pure template matching loses an EXISTING track (occlusion, motion blur,
+  // camera cut), this now makes one attempt to recover that exact trackId - never a new one - via
+  // whichever AI detector is configured (Roboflow if set up, else coco-ssd), restricted to a small
+  // search radius around that player's last known position. A detected box far outside that radius,
+  // or the wrong scale for a standing player there, is ignored - this is recovery of someone already
+  // being tracked, not a general re-scan. Without this, a user who enabled Roboflow would see it do
+  // nothing during the everyday workflow, since template matching alone handles the common case fine.
+  async function recoverLostTrack(last, elapsedSeconds, boxes){
+    const pxPerM = metersPerPixelAt(last.x, last.y);
+    if(!pxPerM) return null;
+    const searchRadius = Math.max(pxPerM*1.0, pxPerM * MAX_PLAYER_SPEED_MPS * elapsedSeconds);
+    const expectedPx = pxPerM * PLAYER_HEIGHT_M;
+    let best = null;
+    for(let i=0;i<boxes.length;i++){
+      const [bx,by,bw,bh] = boxes[i].bbox;
+      const footX = bx+bw/2, footY = by+bh;
+      const dist = Math.hypot(footX-last.x, footY-last.y);
+      if(dist > searchRadius) continue;
+      if(bh < expectedPx*PLAYER_HEIGHT_MIN_FRAC || bh > expectedPx*PLAYER_HEIGHT_MAX_FRAC) continue;
+      if(!best || dist < best.dist) best = {dist, footX, footY, boxIdx:i};
+    }
+    if(best) boxes.splice(best.boxIdx, 1); // don't let a second lost track grab the same box
+    return best;
+  }
+  // How long a track stays eligible for automatic re-matching after it was last actually seen in a
+  // committed frame, even if it was missing from one or more frames in between. Directly modeled on
+  // a side-by-side experiment (YOLO+ByteTrack, several configurations, on this exact video): tuning
+  // the TRACKER's own tolerance for how long to keep searching for a track before giving up turned
+  // out to cut identity churn by roughly 3x on its own - far more than any change to the detector
+  // (model size, resolution, cropping) achieved. The equivalent lever here is this buffer: previously
+  // trackKnownPlayers only ever attempted players who were in the SINGLE immediately preceding
+  // captured frame, so missing a player for even one frame meant they were permanently abandoned by
+  // automatic tracking (never attempted again) until a user noticed and fixed it manually.
+  const TRACK_BUFFER_SECONDS = 8;
+  async function trackKnownPlayers(){
+    if(!homography) return {trackedOk:0, trackedLow:0, recovered:0, hadPrevFrame:false};
+    const idx = findChronoInsertIndex(video.currentTime);
+    const prevFrame = idx>0 ? frames[idx-1] : null;
+    if(!prevFrame) return {trackedOk:0, trackedLow:0, recovered:0, hadPrevFrame:false};
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+    fullCanvas.getContext('2d').drawImage(video, 0, 0);
+    const feat = toTrackFeatures(fullCanvas);
+    let trackedOk = 0, trackedLow = 0, recovered = 0;
+    const lost = []; // {trackId, track} - filled in the loop below, resolved afterwards
+    Object.keys(tracks).forEach(key=>{
+      const trackId = Number(key);
+      const track = tracks[trackId];
+      if(!track || !track.template || !track.lastNative || track.lastSeenTime == null) return;
+      if(pendingPositions.some(pp => pp.trackId === trackId)) return;
+      const elapsed = Math.max(0, video.currentTime - track.lastSeenTime);
+      // Seen only in the future, or given up on too long ago - "Nach neuen Spielern suchen" (or a
+      // manual click) is the right tool past this point, not an ever-widening blind search.
+      if(track.lastSeenTime > video.currentTime || elapsed > TRACK_BUFFER_SECONDS) return;
+      const m = matchTemplateForward(feat, track, elapsed);
+      if(!m){ lost.push({trackId, track}); return; }
+      if(pendingPositions.some(pp => Math.hypot(pp.x-m.x,pp.y-m.y) < 0.8)) return;
+      const lowConfidence = m.confidence < TRACK_CONFIDENCE_OK;
+      pendingPositions.push({x:m.x, y:m.y, nx:m.nx, ny:m.ny, team:track.team, trackId, tracked:true, lowConfidence});
+      if(lowConfidence) trackedLow++; else trackedOk++;
+    });
+    if(lost.length && detectionAvailable()){
+      let boxes;
+      try{ boxes = await detectRawBoxes(); }catch(e){ console.error(e); boxes = []; }
+      for(const {trackId, track} of lost){
+        if(pendingPositions.some(pp => pp.trackId === trackId)) continue;
+        const elapsed = Math.max(0, video.currentTime - track.lastSeenTime);
+        const found = await recoverLostTrack(track.lastNative, elapsed, boxes);
+        if(!found) continue;
+        const [rx, ry] = projectNativeToReal(found.footX, found.footY);
+        if(pendingPositions.some(pp => Math.hypot(pp.x-rx,pp.y-ry) < 0.8)) continue;
+        pendingPositions.push({x:rx, y:ry, nx:found.footX, ny:found.footY, team:track.team, trackId, tracked:true, lowConfidence:true, recovered:true});
+        recovered++;
+      }
+    }
+    renderCalibOverlay();
+    updatePlacementStatus();
+    return {trackedOk, trackedLow, recovered, hadPrevFrame:true};
+  }
+  aiSuggestBtn.addEventListener('click', async ()=>{
+    if(!homography) return;
+    aiSuggestBtn.disabled = true;
+    setStatus('Verfolgt bereits platzierte Spieler automatisch weiter…');
+    try{
+      const {trackedOk, trackedLow, recovered, hadPrevFrame} = await trackKnownPlayers();
+      if(!hadPrevFrame){
+        setStatus('Noch kein vorheriger Frame zum Weiterverfolgen — bitte die gewünschten Spieler (z.B. nur die 5 Offense) erst manuell setzen und "Frame abschließen" klicken.', 'err');
+      } else if(trackedOk || trackedLow || recovered){
+        const lowHint = trackedLow ? ` (davon ${trackedLow} unsicher, gelb markiert, bitte prüfen)` : '';
+        const recoveredHint = recovered ? ` ${recovered} davon per KI-Erkennung wiedergefunden, nachdem die reine Bildverfolgung sie verloren hatte (gelb markiert, bitte prüfen).` : '';
+        setStatus(`${trackedOk+trackedLow+recovered} Spieler automatisch weiterverfolgt${lowHint}.${recoveredHint} Fehlt jemand oder kommt neu dazu? Manuell ergänzen oder "Nach neuen Spielern suchen" nutzen.`, 'ok');
+      } else {
+        setStatus('Keine der bekannten Spielerpositionen wiedergefunden — bitte manuell setzen.', 'err');
+      }
+    }catch(e){
+      console.error(e);
+      setStatus('Fehler beim automatischen Weiterverfolgen.', 'err');
+    }
+    updatePlacementEnabled();
+  });
+  // Separate, deliberate action for the one case automatic tracking above intentionally never handles
+  // on its own: a player who wasn't tracked before (a substitution, someone stepping into frame).
+  // Reuses the same coco-ssd-based detection as the very first frame's suggestion, filtered down to
+  // genuinely new people (deduped against whatever's already tracked/pending).
+  findNewPlayersBtn.addEventListener('click', async ()=>{
+    if(!homography) return;
+    await loadModelIfNeeded();
+    if(!detectionAvailable()){ setStatus('Spieler-Erkennung nicht verfügbar (Internetverbindung prüfen) — bitte manuell setzen.', 'err'); return; }
+    findNewPlayersBtn.disabled = true;
+    setStatus('Suche nach neuen Spielern…');
+    try{
+      const {added, guessed} = await runAiSuggestion(true);
+      if(added){
+        const guessHint = guessed ? ` Team bei ${guessed} davon anhand der Trikotfarbe vorgeschlagen (bitte gegenprüfen).` : '';
+        setStatus(`${added} neue Position(en) gefunden.${guessHint} Ausreißer mit Shift+Klick entfernen.`, 'ok');
+      } else {
+        setStatus('Keine zusätzlichen Spieler gefunden.');
+      }
+    }catch(e){
+      console.error(e);
+      setStatus('Fehler bei der Suche nach neuen Spielern.', 'err');
+    }
+    updatePlacementEnabled();
+  });
+  placeOffenseBtn.addEventListener('click', ()=>{
+    cancelAllPickModes();
+    placementArmed = 'offense';
+    updateOverlayInteractivity();
+    updatePlacementStatus();
+    loadModelIfNeeded(); // warm up in the background so the first click can snap immediately, not after a model-load delay
+  });
+  placeDefenseBtn.addEventListener('click', ()=>{
+    cancelAllPickModes();
+    placementArmed = 'defense';
+    updateOverlayInteractivity();
+    updatePlacementStatus();
+    loadModelIfNeeded();
+  });
+  function updatePlacementStatus(){
+    const off = pendingPositions.filter(p=>p.team==='offense').length;
+    const def = pendingPositions.filter(p=>p.team==='defense').length;
+    const unk = pendingPositions.filter(p=>p.team==='unknown').length;
+    const lowConf = pendingPositions.filter(p=>p.lowConfidence).length;
+    if(!pendingPositions.length && !placementArmed){
+      placementStatusEl.textContent = homography
+        ? '"Position automatisch bestimmen" nutzen oder "+ Offense"/"+ Defense" wählen und auf die Spieler im Video klicken.'
+        : 'Video laden und kalibrieren, um Positionen zu setzen.';
+    } else {
+      const armedHint = placementArmed ? ` — weitere Klicks setzen ${placementArmed === 'offense' ? 'Offense' : 'Defense'}-Spieler (Esc zum Pausieren).` : '';
+      const unkHint = unk ? ` ${unk} von KI vorgeschlagen, Team wird nach "Frame abschließen" per Klick auf den Spieler zugeordnet.` : '';
+      const lowConfHint = lowConf ? ` ${lowConf} automatisch verfolgte Position(en) unsicher (gelb markiert) — bitte prüfen/korrigieren.` : '';
+      placementStatusEl.textContent = `${off} Offense, ${def} Defense gesetzt.${unkHint}${lowConfHint}${armedHint} Fertig? "Frame abschließen" klicken.`;
+    }
+    finishFrameBtn.disabled = !pendingPositions.length;
+    discardFrameBtn.disabled = !pendingPositions.length;
+  }
+
+  function updatePlacementEnabled(){
+    const ready = !!homography && !calibMode && !!video.src && !colorPickTarget && !autoCaptureRunning;
+    placeOffenseBtn.disabled = !ready;
+    placeDefenseBtn.disabled = !ready;
+    aiSuggestBtn.disabled = !ready; // pure tracking, no model needed - never blocked on model loading
+    findNewPlayersBtn.disabled = !ready || (personDetectorLoading && !roboflowReady());
+    autoCaptureBtn.disabled = !ready || !frames.length; // nothing to track forward from without a first frame
+    // Finishing/discarding already-placed points must stay available even while re-editing the
+    // calibration or picking a jersey color mid-placement - otherwise those points get stranded
+    // (can't finish, can't discard) until the user backs out of that other mode first.
+    finishFrameBtn.disabled = autoCaptureRunning || !pendingPositions.length;
+    discardFrameBtn.disabled = autoCaptureRunning || !pendingPositions.length;
+  }
+
+  function effectiveTeam(trackId){
+    const t = tracks[trackId];
+    return t ? t.team : 'unknown';
+  }
+  function visiblePlayers(frame){
+    const filter = teamFilterEl.value;
+    if(filter === 'all') return frame.players;
+    return frame.players.filter(p => effectiveTeam(p.trackId) === filter);
+  }
+
+  const MAX_PLAYER_SPEED_MPS = 8;  // generous upper bound (sprint speed) for track-matching
+  const MIN_MATCH_DIST = 1.5;      // meters; floor for near-zero elapsed time (pose jitter, stance shift)
+  // A position that already carries a trackId (from the visual tracker in trackKnownPlayers, which
+  // already knows exactly which player it just re-located) is passed through as-is - nearest-position
+  // guessing is only needed for positions that DON'T already know their identity (manual clicks, new
+  // pose-detected entrants). Mixing the two means a confidently-tracked player can never accidentally
+  // get swapped with a different nearby new detection during the matching below.
+  function matchTracks(prevPlayers, newPositions, elapsedSeconds){
+    const result = new Array(newPositions.length);
+    const preAssigned = new Set();
+    newPositions.forEach((np,i)=>{
+      if(np.trackId != null && tracks[np.trackId]){
+        result[i] = {...np};
+        preAssigned.add(np.trackId);
+      }
+    });
+    const remainingPrev = prevPlayers.filter(p=>!preAssigned.has(p.trackId));
+    const remainingIdx = [];
+    newPositions.forEach((np,i)=>{ if(!result[i]) remainingIdx.push(i); });
+    const pairs = [];
+    for(const prev of remainingPrev){
+      for(const i of remainingIdx){
+        const np = newPositions[i];
+        pairs.push({prevId: prev.trackId, npIdx:i, d: Math.hypot(prev.x-np.x, prev.y-np.y)});
+      }
+    }
+    pairs.sort((a,b)=>a.d-b.d);
+    // scale the match radius with how much time actually passed between the two captured frames,
+    // instead of a fixed distance - otherwise a sprinting player captured a second or two later
+    // (easily 8+ meters away) gets wrongly treated as a brand-new player.
+    const MAX_DIST = Math.max(MIN_MATCH_DIST, (elapsedSeconds||0) * MAX_PLAYER_SPEED_MPS);
+    const usedPrev = new Set(), usedNew = new Set();
+    for(const pair of pairs){
+      if(pair.d > MAX_DIST) break;
+      if(usedPrev.has(pair.prevId) || usedNew.has(pair.npIdx)) continue;
+      usedPrev.add(pair.prevId); usedNew.add(pair.npIdx);
+      result[pair.npIdx] = {...newPositions[pair.npIdx], trackId: pair.prevId};
+    }
+    newPositions.forEach((np,i)=>{
+      if(result[i]) return;
+      const id = nextTrackId++;
+      tracks[id] = {id, color: trackColor(id), label: String(id), name: null, team: np.team};
+      result[i] = {...np, trackId:id};
+    });
+    return result;
+  }
+
+  // ---------- merge two tracks that are really the same player, split apart because a detection
+  // gap (occlusion, a missed frame) made the nearest-position matching above start a new track
+  // instead of continuing the old one. Keeps the first-clicked track's identity (color/label/name)
+  // and folds every frame's occurrence of the second one into it. ----------
+  function mergeTracks(keepId, mergeId){
+    if(keepId === mergeId) return;
+    frames.forEach(f=>{
+      const hasKeep = f.players.some(p=>p.trackId===keepId);
+      f.players = f.players
+        .filter(p => !(p.trackId===mergeId && hasKeep)) // both in the same frame - drop the duplicate
+        .map(p => p.trackId===mergeId ? {...p, trackId:keepId} : p);
+      (f.actions||[]).forEach(act=>{
+        if(act.a===mergeId) act.a = keepId;
+        if(act.b===mergeId) act.b = keepId;
+      });
+      // if the merged pair were also the two participants of an action (e.g. a Pass tagged between
+      // them before the merge revealed they're the same player), remapping both ends onto the same
+      // id would leave a meaningless "pass to yourself" - drop it instead.
+      f.actions = (f.actions||[]).filter(act => act.b == null || act.a !== act.b);
+    });
+    delete tracks[mergeId];
+  }
+  mergeTracksBtn.addEventListener('click', ()=>{
+    if(!frames.length){ alert('Noch keine Frames vorhanden.'); return; }
+    cancelAllPickModes();
+    mergePick = [];
+    updateOverlayInteractivity(); updatePlacementEnabled(); updatePlacementStatus();
+    setStatus('Tracks zusammenführen: zuerst den bestehenden (richtigen) Spieler-Punkt anklicken…');
+  });
+
+  // ---------- project save/load: exports frames/tracks/roster/colors as JSON so an analysis can be
+  // backed up or resumed later. The video itself is never embedded (far too large for a JSON file) -
+  // re-loading a matching video is only needed to keep capturing NEW frames. Already-captured frames
+  // are fully self-contained (player/ball positions are stored in real court meters, not video
+  // pixels) and render/export just fine with no video loaded at all. ----------
+  const PROJECT_VERSION = 1;
+  function serializeProject(){
+    return {
+      version: PROJECT_VERSION,
+      playName: playNameEl.value,
+      offenseColor: offenseColorEl.value, offenseColorSet,
+      defenseColor: defenseColorEl.value, defenseColorSet,
+      offenseRoster: offenseRosterEl.value, defenseRoster: defenseRosterEl.value,
+      nextTrackId, tracks, frames,
+    };
+  }
+  function applyProject(data){
+    playNameEl.value = data.playName || '';
+    offenseColorEl.value = data.offenseColor || '#ffffff';
+    defenseColorEl.value = data.defenseColor || '#1d4ed8';
+    offenseColorSet = !!data.offenseColorSet;
+    defenseColorSet = !!data.defenseColorSet;
+    offenseRosterEl.value = data.offenseRoster || '';
+    defenseRosterEl.value = data.defenseRoster || '';
+    tracks = data.tracks && typeof data.tracks === 'object' ? data.tracks : {};
+    nextTrackId = data.nextTrackId || 1;
+    frames = Array.isArray(data.frames) ? data.frames : [];
+    selectedFrameIndex = frames.length ? frames.length - 1 : -1;
+    pendingPositions = [];
+    cancelAllPickModes();
+    updateOverlayInteractivity();
+    renderGallery(); renderMainDiagram(); updatePlacementStatus(); updatePlacementEnabled(); updateWizardBanner();
+  }
+  function downloadJSON(obj, filename){
+    const blob = new Blob([JSON.stringify(obj)], {type:'application/json'});
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url; a.download = filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+  saveProjectBtn.addEventListener('click', ()=>{
+    if(!frames.length){ alert('Noch keine Frames vorhanden.'); return; }
+    downloadJSON(serializeProject(), `${sanitizeFilename(playNameEl.value)}-projekt.json`);
+    setStatus('Projekt als JSON-Datei gespeichert.', 'ok');
+  });
+  loadProjectBtn.addEventListener('click', ()=>{
+    if(frames.length && !confirm(`Es gibt noch ${frames.length} erfasste(n) Frame(s), die beim Laden eines Projekts überschrieben werden. Vorher sichern? Trotzdem fortfahren?`)) return;
+    projectFileInput.value = '';
+    projectFileInput.click();
+  });
+  projectFileInput.addEventListener('change', ()=>{
+    const file = projectFileInput.files[0];
+    if(!file) return;
+    const reader = new FileReader();
+    reader.onload = ()=>{
+      try{
+        const data = JSON.parse(reader.result);
+        if(!data || typeof data !== 'object' || !Array.isArray(data.frames)) throw new Error('invalid project file');
+        applyProject(data);
+        setStatus(`Projekt geladen (${data.frames.length} Frame(s)). Zum Erfassen weiterer Frames ein passendes Video laden und kalibrieren.`, 'ok');
+      }catch(e){
+        console.error(e);
+        setStatus('Diese Datei konnte nicht als Projekt gelesen werden.', 'err');
+      }
+    };
+    reader.readAsText(file);
+  });
+
+  // ---------- finish/discard the frame currently being placed ----------
+  function makeThumbnail(fullCanvas, positions){
+    const tw = 200, th = Math.round(200 * fullCanvas.height / fullCanvas.width);
+    const c = document.createElement('canvas'); c.width = tw; c.height = th;
+    const tctx = c.getContext('2d');
+    tctx.drawImage(fullCanvas, 0, 0, tw, th);
+    const sx = tw/fullCanvas.width, sy = th/fullCanvas.height;
+    positions.forEach(p=>{
+      tctx.beginPath(); tctx.arc(p.nx*sx, p.ny*sy, 3, 0, Math.PI*2);
+      tctx.fillStyle = pendingColor(p.team);
+      tctx.fill();
+    });
+    return c.toDataURL('image/png');
+  }
+  // Frames are always kept sorted by video timestamp, not by capture order - scrubbing back to
+  // fill in an earlier moment after already capturing later ones (e.g. adding a play's starting
+  // position as an afterthought) must not scramble the movement trails, track-matching, or the
+  // exported storyboard's left-to-right order.
+  function findChronoInsertIndex(time){
+    let i = 0;
+    while(i < frames.length && frames[i].time <= time) i++;
+    return i;
+  }
+  function finishCurrentFrame(){
+    if(!pendingPositions.length) return 0;
+    const fullCanvas = document.createElement('canvas');
+    fullCanvas.width = video.videoWidth; fullCanvas.height = video.videoHeight;
+    fullCanvas.getContext('2d').drawImage(video, 0, 0);
+    const insertIndex = findChronoInsertIndex(video.currentTime);
+    const prevFrame = insertIndex > 0 ? frames[insertIndex-1] : null;
+    const elapsed = prevFrame ? Math.max(0, video.currentTime - prevFrame.time) : 0;
+    const matched = matchTracks(prevFrame ? prevFrame.players : [], pendingPositions, elapsed);
+    // Build/refresh each player's visual template from the frame just captured, so the NEXT frame can
+    // re-locate them via tracking instead of needing a fresh AI guess - this is what lets automatic
+    // capture carry a player's identity forward reliably instead of re-detecting from scratch each time.
+    if(homography && homographyInv){
+      const feat = toTrackFeatures(fullCanvas);
+      matched.forEach(p=>{
+        if(p.nx == null || p.ny == null || !tracks[p.trackId]) return;
+        const template = buildTrackTemplate(feat, p.nx, p.ny);
+        if(template){
+          tracks[p.trackId].template = template;
+          tracks[p.trackId].lastNative = {x:p.nx, y:p.ny};
+          tracks[p.trackId].lastSeenTime = video.currentTime;
+        }
+      });
+    }
+    const thumb = makeThumbnail(fullCanvas, pendingPositions);
+    frames.splice(insertIndex, 0, {id: uid(), time: video.currentTime, thumb, players: matched, ball: null, actions: []});
+    selectedFrameIndex = insertIndex;
+    const count = pendingPositions.length;
+    pendingPositions = []; placementArmed = null;
+    updateOverlayInteractivity(); renderCalibOverlay();
+    renderGallery(); renderMainDiagram(); updatePlacementStatus();
+    updateWizardBanner();
+    return count;
+  }
+  finishFrameBtn.addEventListener('click', ()=>{
+    const count = finishCurrentFrame();
+    if(count) setStatus(`Frame erfasst (${count} Spieler gesetzt).`, 'ok');
+  });
+  discardFrameBtn.addEventListener('click', ()=>{
+    pendingPositions = []; placementArmed = null;
+    updateOverlayInteractivity(); renderCalibOverlay(); updatePlacementStatus();
+    setStatus('Positionierung verworfen.');
+  });
+
+  // ---------- auto-capture the whole play: repeats KI-Vorschlag + Frame-abschließen at a fixed
+  // interval from the current position to the end. A larger interval means fewer frames, but each
+  // one is a genuine tracking hop rather than a near-duplicate of the last - and since nearest-
+  // position matching has no re-identification, fewer hops mean fewer chances for a missed
+  // detection to fragment a player into a new track (see "Tracks zusammenführen" for cleanup
+  // when it still happens). ----------
+  let autoCaptureRunning = false;
+  function seekAndWaitApp(t){
+    return new Promise(resolve=>{
+      const onSeeked = ()=>{ video.removeEventListener('seeked', onSeeked); resolve(); };
+      video.addEventListener('seeked', onSeeked);
+      video.currentTime = t;
+    });
+  }
+  autoCaptureBtn.addEventListener('click', async ()=>{
+    if(!homography){ alert('Bitte zuerst kalibrieren.'); return; }
+    if(!frames.length){ alert('Bitte zuerst einen ersten Frame manuell erfassen (die gewünschten Spieler anklicken, "Frame abschließen") - die automatische Erfassung verfolgt ab dort nur noch genau diese Spieler weiter, ohne von selbst neue hinzuzufügen.'); return; }
+    // Any leftover points from an abandoned manual/AI placement belong to whatever moment they were
+    // placed at, not to this run's first sampled instant - starting the loop with them still pending
+    // would silently fold them into the wrong frame.
+    if(pendingPositions.length){ pendingPositions = []; renderCalibOverlay(); updatePlacementStatus(); }
+    const interval = Math.max(0.3, parseFloat(autoIntervalEl.value) || 1.5);
+    const duration = video.duration || 0;
+    autoCaptureRunning = true;
+    autoCaptureBtn.style.display = 'none';
+    autoStopBtn.style.display = '';
+    updatePlacementEnabled();
+    let t = video.currentTime;
+    // If the video is still sitting at (essentially) the exact moment of an already-captured frame -
+    // the common case right after manually finishing frame 1 and immediately starting auto-capture -
+    // starting the loop here would re-capture that same frame as a near-duplicate. Skip ahead one
+    // interval instead.
+    {
+      const idx0 = findChronoInsertIndex(t);
+      const prevFrame0 = idx0>0 ? frames[idx0-1] : null;
+      if(prevFrame0 && Math.abs(prevFrame0.time - t) < 0.05) t += interval;
+    }
+    let totalAdded = 0, totalSkipped = 0;
+    while(autoCaptureRunning && t <= duration + 0.001){
+      await seekAndWaitApp(Math.min(t, duration));
+      await new Promise(r=>setTimeout(r, 30)); // let the seeked frame actually paint before sampling it
+      setStatus(`Automatische Erfassung: ${formatTime(t)} / ${formatTime(duration)}…`);
+      try{
+        // Pure tracking only - deliberately never searches for new players mid-loop (see
+        // trackKnownPlayers' own comment): that was exactly what caused track counts to balloon and
+        // get renumbered on every real play tested. The known players simply go missing from a frame
+        // if their track is lost, rather than being replaced by a fresh, wrongly-identified one.
+        await trackKnownPlayers();
+        const count = finishCurrentFrame();
+        // Nothing tracked at this one instant (e.g. everyone briefly occluded) - skip it and keep
+        // going instead of abandoning the rest of the play.
+        if(count) totalAdded++; else totalSkipped++;
+      }catch(e){
+        console.error(e);
+        break;
+      }
+      t += interval;
+    }
+    autoCaptureRunning = false;
+    autoCaptureBtn.style.display = '';
+    autoStopBtn.style.display = 'none';
+    updatePlacementEnabled();
+    const skipHint = totalSkipped ? ` (${totalSkipped} Moment(e) ohne Erkennung übersprungen)` : '';
+    setStatus(`Automatische Erfassung abgeschlossen (${frames.length} Frames insgesamt${skipHint}). Ergebnis prüfen — bei fragmentierten Spielern "Tracks zusammenführen" nutzen.`, 'ok');
+  });
+  autoStopBtn.addEventListener('click', ()=>{ autoCaptureRunning = false; });
+
+  function formatTime(t){
+    const rounded = Math.round(t*10)/10;
+    const m = Math.floor(rounded/60), s = rounded - m*60;
+    return `${String(m).padStart(2,'0')}:${s.toFixed(1).padStart(4,'0')}`;
+  }
+
+  function renderGallery(){
+    galleryEl.innerHTML = '';
+    frames.forEach((f,i)=>{
+      const div = document.createElement('div');
+      div.className = 'thumb' + (i===selectedFrameIndex ? ' active' : '');
+      div.innerHTML = `<img src="${f.thumb}"><div class="cap">#${i+1} · ${formatTime(f.time)}</div><button class="del" title="Löschen">×</button>`;
+      div.addEventListener('click', (e)=>{
+        if(e.target.classList.contains('del')) return;
+        selectedFrameIndex = i; renderGallery(); renderMainDiagram();
+      });
+      div.querySelector('.del').addEventListener('click', ()=>{
+        frames.splice(i,1);
+        if(selectedFrameIndex >= frames.length) selectedFrameIndex = frames.length-1;
+        renderGallery(); renderMainDiagram();
+      });
+      galleryEl.appendChild(div);
+    });
+  }
+  clearFramesBtn.addEventListener('click', ()=>{
+    if(!frames.length) return;
+    if(!confirm(`Wirklich alle ${frames.length} Frame(s) dieses Spielzugs unwiderruflich löschen?`)) return;
+    frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
+    renderGallery(); renderMainDiagram(); updateWizardBanner();
+  });
+
+  // ---------- court diagram rendering (fixed diagram canvas, not the video overlay) ----------
+  function toPix(ox,oy,s,x,y){ return [ox + x*s, oy - y*s]; }
+
+  function drawCourt(ctx, ox, oy, s){
+    ctx.save();
+    const [rx1,ry1] = toPix(ox,oy,s,0,14), [rx2,ry2] = toPix(ox,oy,s,15,0);
+    ctx.fillStyle = '#fdfaf3';
+    ctx.fillRect(Math.min(rx1,rx2), Math.min(ry1,ry2), Math.abs(rx2-rx1), Math.abs(ry2-ry1));
+    ctx.lineWidth = Math.max(1, s*0.05);
+    ctx.strokeStyle = '#334155';
+    COURT_PATHS.forEach(path=>{
+      ctx.beginPath();
+      path.forEach(([x,y],i)=>{
+        const [px,py] = toPix(ox,oy,s,x,y);
+        i===0 ? ctx.moveTo(px,py) : ctx.lineTo(px,py);
+      });
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+
+  function drawArrow(ctx, x1,y1,x2,y2, color){
+    const d = Math.hypot(x2-x1,y2-y1);
+    if(d < 3) return;
+    ctx.save();
+    ctx.strokeStyle = color; ctx.fillStyle = color; ctx.lineWidth = 2;
+    ctx.beginPath(); ctx.moveTo(x1,y1); ctx.lineTo(x2,y2); ctx.stroke();
+    const angle = Math.atan2(y2-y1, x2-x1);
+    const ah = 8;
+    ctx.beginPath();
+    ctx.moveTo(x2,y2);
+    ctx.lineTo(x2 - ah*Math.cos(angle-Math.PI/6), y2 - ah*Math.sin(angle-Math.PI/6));
+    ctx.lineTo(x2 - ah*Math.cos(angle+Math.PI/6), y2 - ah*Math.sin(angle+Math.PI/6));
+    ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  function drawPlayers(ctx, ox,oy,s, frame, prevFrame, showTrails, alpha, dotR){
+    ctx.save();
+    ctx.globalAlpha = alpha == null ? 1 : alpha;
+    if(showTrails && prevFrame){
+      frame.players.forEach(p=>{
+        const prev = prevFrame.players.find(q=>q.trackId===p.trackId);
+        if(prev){
+          const [x1,y1] = toPix(ox,oy,s,prev.x,prev.y);
+          const [x2,y2] = toPix(ox,oy,s,p.x,p.y);
+          drawArrow(ctx, x1,y1,x2,y2, tracks[p.trackId] ? tracks[p.trackId].color : '#94a3b8');
+        }
+      });
+    }
+    const r = dotR || 15;
+    frame.players.forEach(p=>{
+      const [x,y] = toPix(ox,oy,s,p.x,p.y);
+      const track = tracks[p.trackId];
+      ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2);
+      ctx.fillStyle = track ? (track.team === 'unknown' ? '#94a3b8' : track.color) : '#64748b'; ctx.fill();
+      ctx.strokeStyle = '#fff'; ctx.lineWidth = 2; ctx.stroke();
+      ctx.fillStyle = '#fff'; ctx.font = `bold ${Math.round(r)}px sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      ctx.fillText(track ? track.label : '?', x, y);
+      if(p.manualPosition){
+        ctx.save();
+        ctx.setLineDash([3,2]); ctx.strokeStyle = '#0f172a'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x,y,r+4,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+      } else if(p.lowConfidence){
+        ctx.save();
+        ctx.setLineDash([3,2]); ctx.strokeStyle = '#f59e0b'; ctx.lineWidth = 1.5;
+        ctx.beginPath(); ctx.arc(x,y,r+4,0,Math.PI*2); ctx.stroke();
+        ctx.restore();
+      }
+    });
+    if(frame.ball){
+      const [x,y] = toPix(ox,oy,s,frame.ball.x,frame.ball.y);
+      ctx.beginPath(); ctx.arc(x,y,r*0.55,0,Math.PI*2);
+      ctx.fillStyle = '#f97316'; ctx.fill();
+      ctx.strokeStyle = '#7c2d12'; ctx.lineWidth = 1.5; ctx.stroke();
+    }
+    ctx.restore();
+  }
+
+  // Manually-tagged actions (pass/block/dribble/cut/shot) - the AI never infers these, they are
+  // purely what the user marks on top of the (auto- or manually-corrected) player positions.
+  function drawActions(ctx, ox,oy,s, frame){
+    if(!frame.actions || !frame.actions.length) return;
+    ctx.save();
+    frame.actions.forEach(act=>{
+      const cfg = ACTION_TYPES[act.type];
+      if(!cfg) return;
+      const pa = frame.players.find(q=>q.trackId===act.a);
+      if(!pa) return;
+      const [ax,ay] = toPix(ox,oy,s,pa.x,pa.y);
+      ctx.strokeStyle = cfg.color; ctx.fillStyle = cfg.color; ctx.lineWidth = 2;
+      ctx.font = 'bold 11px sans-serif'; ctx.textAlign = 'center';
+      if(cfg.players === 2){
+        const pb = frame.players.find(q=>q.trackId===act.b);
+        if(!pb) return;
+        const [bx,by] = toPix(ox,oy,s,pb.x,pb.y);
+        if(act.type === 'block'){
+          ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+          const angle = Math.atan2(by-ay, bx-ax);
+          const midx = (ax+bx)/2, midy = (ay+by)/2, tick = 9;
+          ctx.beginPath();
+          ctx.moveTo(midx + tick*Math.cos(angle+Math.PI/2), midy + tick*Math.sin(angle+Math.PI/2));
+          ctx.lineTo(midx - tick*Math.cos(angle+Math.PI/2), midy - tick*Math.sin(angle+Math.PI/2));
+          ctx.stroke();
+        } else {
+          ctx.setLineDash([6,4]);
+          ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(bx,by); ctx.stroke();
+          ctx.setLineDash([]);
+        }
+        ctx.fillText(cfg.label, (ax+bx)/2, (ay+by)/2 - 8);
+      } else if(act.type === 'shot'){
+        ctx.fillText(cfg.label, ax, ay - 26);
+        ctx.beginPath(); ctx.arc(ax, ay-16, 5, 0, Math.PI*2); ctx.stroke();
+      } else if(act.type === 'dribble'){
+        ctx.fillText(cfg.label, ax, ay - 22);
+        ctx.beginPath(); ctx.arc(ax+16, ay, 6, 0.2*Math.PI, 1.8*Math.PI); ctx.stroke();
+      } else if(act.type === 'cut'){
+        ctx.fillText(cfg.label, ax, ay - 22);
+        const ex = ax+22, ey = ay-14;
+        ctx.beginPath(); ctx.moveTo(ax,ay); ctx.lineTo(ex,ey); ctx.stroke();
+        const ang = Math.atan2(ey-ay, ex-ax), ah = 6;
+        ctx.beginPath();
+        ctx.moveTo(ex,ey);
+        ctx.lineTo(ex - ah*Math.cos(ang-Math.PI/6), ey - ah*Math.sin(ang-Math.PI/6));
+        ctx.lineTo(ex - ah*Math.cos(ang+Math.PI/6), ey - ah*Math.sin(ang+Math.PI/6));
+        ctx.closePath(); ctx.fill();
+      }
+    });
+    ctx.restore();
+  }
+
+  // The diagram's origin/scale used to be fixed to exactly the half-court rectangle, with only a
+  // fixed 40px margin around it - any player placed even slightly outside that rectangle (baseline,
+  // bench area, a slightly imprecise calibration) got silently clipped off the edge of the canvas,
+  // looking like the click "didn't register" even though the position was stored correctly. Instead,
+  // the view now fits itself to include every player/ball position across the WHOLE captured play,
+  // never just the fixed court bounds.
+  let OX = 40, OY = 600, S = 40;
+  const DIAGRAM_MARGIN_PX = 40;
+  const DIAGRAM_PAD_M = 0.8; // breathing room beyond the outermost player, not flush to the canvas edge
+  function computeCourtFit(points){
+    let minX = 0, maxX = 15, minY = 0, maxY = 14;
+    points.forEach(p=>{
+      if(p.x < minX) minX = p.x;
+      if(p.x > maxX) maxX = p.x;
+      if(p.y < minY) minY = p.y;
+      if(p.y > maxY) maxY = p.y;
+    });
+    minX -= DIAGRAM_PAD_M; maxX += DIAGRAM_PAD_M; minY -= DIAGRAM_PAD_M; maxY += DIAGRAM_PAD_M;
+    const availW = courtCanvas.width - DIAGRAM_MARGIN_PX*2, availH = courtCanvas.height - DIAGRAM_MARGIN_PX*2;
+    const s = Math.min(availW/(maxX-minX), availH/(maxY-minY));
+    return { ox: DIAGRAM_MARGIN_PX - minX*s, oy: DIAGRAM_MARGIN_PX + maxY*s, s };
+  }
+  // Fit is computed from EVERY frame's players/ball, not just the selected one, and reused for all
+  // of them - otherwise switching frames (or toggling "gesamten Spielzug überlagern") would rescale
+  // the view underneath a movement trail, making arrows between frames geometrically wrong.
+  function updateDiagramFit(){
+    const pts = [];
+    frames.forEach(f=>{
+      f.players.forEach(p=>pts.push(p));
+      if(f.ball) pts.push(f.ball);
+    });
+    const fit = computeCourtFit(pts);
+    OX = fit.ox; OY = fit.oy; S = fit.s;
+  }
+  function renderMainDiagram(){
+    updateDiagramFit();
+    cctx.clearRect(0,0,courtCanvas.width,courtCanvas.height);
+    drawCourt(cctx, OX, OY, S);
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
+
+    if(showAllEl.checked){
+      frames.forEach((f,i)=>{
+        const prev = i>0 ? frames[i-1] : null;
+        const alpha = i===selectedFrameIndex ? 1 : 0.28;
+        drawPlayers(cctx, OX, OY, S, {...f, players: visiblePlayers(f)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, alpha);
+        if(i===selectedFrameIndex) drawActions(cctx, OX, OY, S, f);
+      });
+    } else {
+      const frame = frames[selectedFrameIndex];
+      const prev = selectedFrameIndex>0 ? frames[selectedFrameIndex-1] : null;
+      drawPlayers(cctx, OX, OY, S, {...frame, players: visiblePlayers(frame)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, 1);
+      drawActions(cctx, OX, OY, S, frame);
+    }
+
+    cctx.save();
+    cctx.fillStyle = '#0f172a'; cctx.font = 'bold 13px sans-serif'; cctx.textAlign='left';
+    cctx.fillText(`Frame #${selectedFrameIndex+1} · ${formatTime(frames[selectedFrameIndex].time)}`, 12, 20);
+    if(playNameEl.value.trim()){
+      cctx.font = '12px sans-serif'; cctx.fillStyle = '#64748b';
+      cctx.fillText(playNameEl.value.trim(), 12, 36);
+    }
+    cctx.restore();
+
+    updateUnknownHint();
+    renderPlayerLegend();
+    renderActionList();
+  }
+  function renderPlayerLegend(){
+    const frame = frames[selectedFrameIndex];
+    const named = visiblePlayers(frame).map(p => tracks[p.trackId]).filter(t => t && t.name);
+    if(!named.length){ playerLegendEl.innerHTML = ''; return; }
+    playerLegendEl.innerHTML = 'Namen: ' + named.map(t =>
+      `<span style="display:inline-flex;align-items:center;gap:4px;margin-right:10px;"><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:${t.color};"></span>${t.label} – ${t.name}</span>`
+    ).join('');
+  }
+  function updateUnknownHint(){
+    const frame = frames[selectedFrameIndex];
+    const unknownCount = frame.players.filter(p => effectiveTeam(p.trackId) === 'unknown').length;
+    if(unknownCount > 0){
+      unknownHintEl.textContent = `${unknownCount} von der KI vorgeschlagene(r) Spieler noch ohne Team — anklicken, um Bezeichnung/Team festzulegen.`;
+      unknownHintEl.style.display = '';
+    } else {
+      unknownHintEl.style.display = 'none';
+    }
+  }
+  function playerLabel(trackId){
+    const t = tracks[trackId];
+    if(!t) return '?';
+    return t.name ? `${t.label} (${t.name})` : t.label;
+  }
+  function renderActionList(){
+    actionListEl.innerHTML = '';
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
+    const frame = frames[selectedFrameIndex];
+    const actions = frame.actions || [];
+    actions.forEach((act,i)=>{
+      const cfg = ACTION_TYPES[act.type];
+      const span = document.createElement('span');
+      span.style.cssText = 'display:inline-flex;align-items:center;gap:4px;background:#f1f5f9;border-radius:6px;padding:2px 6px;margin:2px 4px 2px 0;font-size:12px;';
+      const desc = cfg.players===2 ? `${cfg.label}: ${playerLabel(act.a)} → ${playerLabel(act.b)}` : `${cfg.label}: ${playerLabel(act.a)}`;
+      span.textContent = desc + ' ';
+      const del = document.createElement('button');
+      del.textContent = '×';
+      del.style.cssText = 'background:none;border:none;color:#b91c1c;cursor:pointer;font-weight:700;padding:0 2px;font-size:13px;';
+      del.addEventListener('click', ()=>{
+        actions.splice(i,1);
+        renderMainDiagram();
+      });
+      span.appendChild(del);
+      actionListEl.appendChild(span);
+    });
+  }
+  showTrailsEl.addEventListener('change', renderMainDiagram);
+  showAllEl.addEventListener('change', renderMainDiagram);
+  playNameEl.addEventListener('input', renderMainDiagram);
+  teamFilterEl.addEventListener('change', renderMainDiagram);
+
+  function pixToCourt(ox,oy,s,px,py){ return [(px-ox)/s, (oy-py)/s]; }
+
+  setBallBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0){ alert('Bitte zuerst einen Frame erfassen bzw. auswählen.'); return; }
+    cancelAllPickModes();
+    ballPlacementArmed = true;
+    updateOverlayInteractivity(); updatePlacementEnabled(); updatePlacementStatus();
+    setStatus('Klicke auf die Ball-Position im Diagramm…');
+  });
+  clearBallBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0) return;
+    frames[selectedFrameIndex].ball = null;
+    renderMainDiagram();
+  });
+
+  addActionBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0){ alert('Bitte zuerst einen Frame erfassen bzw. auswählen.'); return; }
+    cancelAllPickModes();
+    const type = actionTypeEl.value;
+    const need = ACTION_TYPES[type].players;
+    actionPick = {type, need, picked: []};
+    updateOverlayInteractivity(); updatePlacementEnabled(); updatePlacementStatus();
+    setStatus(`Aktion "${ACTION_TYPES[type].label}": klicke im Diagramm auf ${need===2 ? 'den Ausgangsspieler, dann den Zielspieler' : 'den betroffenen Spieler'}…`);
+  });
+  clearActionsBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0) return;
+    frames[selectedFrameIndex].actions = [];
+    renderMainDiagram();
+  });
+
+  function courtEventPos(evt){
+    const rect = courtCanvas.getBoundingClientRect();
+    const scaleX = courtCanvas.width/rect.width, scaleY = courtCanvas.height/rect.height;
+    return [(evt.clientX-rect.left)*scaleX, (evt.clientY-rect.top)*scaleY];
+  }
+  function findPlayerAt(cx,cy){
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return null;
+    let closest = null, closestD = 18;
+    visiblePlayers(frames[selectedFrameIndex]).forEach(p=>{
+      const [x,y] = toPix(OX,OY,S,p.x,p.y);
+      const d = Math.hypot(x-cx,y-cy);
+      if(d < closestD){ closestD = d; closest = p; }
+    });
+    return closest;
+  }
+
+  // A player point can be dragged (correct its position in this frame only) or clicked without
+  // moving (open the rename/team prompt, or feed an armed ball/action pick) - mousedown+mousemove+
+  // mouseup is tracked manually so a small accidental jiggle during a click isn't misread as a drag.
+  const DRAG_THRESHOLD_PX = 3;
+  courtCanvas.addEventListener('mousedown', (evt)=>{
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
+    const [cx,cy] = courtEventPos(evt);
+    const p = findPlayerAt(cx,cy);
+    pointerDown = {x:cx, y:cy, trackId: p ? p.trackId : null, moved:false};
+  });
+  courtCanvas.addEventListener('mousemove', (evt)=>{
+    if(!pointerDown || !pointerDown.trackId) return;
+    if(ballPlacementArmed || actionPick) return; // those modes only react on release, never drag
+    const [cx,cy] = courtEventPos(evt);
+    if(!pointerDown.moved && Math.hypot(cx-pointerDown.x, cy-pointerDown.y) < DRAG_THRESHOLD_PX) return;
+    pointerDown.moved = true;
+    const [rx,ry] = pixToCourt(OX,OY,S,cx,cy);
+    const entry = frames[selectedFrameIndex].players.find(q=>q.trackId===pointerDown.trackId);
+    if(entry){ entry.x = rx; entry.y = ry; entry.manualPosition = true; entry.lowConfidence = false; renderMainDiagram(); }
+  });
+  window.addEventListener('mouseup', (evt)=>{
+    if(!pointerDown) return;
+    const wasDrag = pointerDown.moved;
+    pointerDown = null;
+    if(wasDrag){ setStatus('Position manuell korrigiert.', 'ok'); return; }
+    handleCourtClick(evt);
+  });
+
+  function handleCourtClick(evt){
+    if(selectedFrameIndex < 0 || !frames[selectedFrameIndex]) return;
+    const [cx,cy] = courtEventPos(evt);
+    const frame = frames[selectedFrameIndex];
+
+    if(ballPlacementArmed){
+      const [rx,ry] = pixToCourt(OX,OY,S,cx,cy);
+      frame.ball = {x:rx,y:ry};
+      ballPlacementArmed = false;
+      setStatus('Ball-Position gesetzt.', 'ok');
+      renderMainDiagram();
+      return;
+    }
+
+    const closest = findPlayerAt(cx,cy);
+
+    if(evt.shiftKey && closest){
+      frame.players = frame.players.filter(p => p.trackId !== closest.trackId);
+      // drop any action that pointed at the now-removed player rather than leaving a dead reference
+      frame.actions = (frame.actions||[]).filter(act => act.a !== closest.trackId && act.b !== closest.trackId);
+      setStatus('Spieler aus diesem Frame entfernt.', 'ok');
+      renderMainDiagram();
+      return;
+    }
+
+    if(mergePick){
+      if(!closest || !tracks[closest.trackId]) return;
+      if(mergePick.includes(closest.trackId)){
+        setStatus('Bitte zwei unterschiedliche Spieler-Punkte anklicken.', 'err');
+        return;
+      }
+      mergePick.push(closest.trackId);
+      if(mergePick.length < 2){
+        setStatus('Tracks zusammenführen: jetzt den fälschlich getrennten zweiten Punkt anklicken (ggf. anderen Frame über die Galerie auswählen)…');
+        return;
+      }
+      mergeTracks(mergePick[0], mergePick[1]);
+      mergePick = null;
+      setStatus('Tracks zusammengeführt.', 'ok');
+      renderGallery();
+      renderMainDiagram();
+      return;
+    }
+
+    if(actionPick){
+      if(!closest || !tracks[closest.trackId]) return;
+      if(actionPick.picked.includes(closest.trackId)) return;
+      actionPick.picked.push(closest.trackId);
+      if(actionPick.picked.length < actionPick.need){
+        setStatus(`Aktion "${ACTION_TYPES[actionPick.type].label}": jetzt den Zielspieler anklicken…`);
+        return;
+      }
+      frame.actions = frame.actions || [];
+      frame.actions.push({type: actionPick.type, a: actionPick.picked[0], b: actionPick.picked[1] || null});
+      actionPick = null;
+      setStatus('Aktion markiert.', 'ok');
+      renderMainDiagram();
+      return;
+    }
+
+    if(closest && tracks[closest.trackId]){
+      const track = tracks[closest.trackId];
+      const teamInput = prompt("Team: 'o' = Offense, 'd' = Defense", track.team === 'offense' ? 'o' : track.team === 'defense' ? 'd' : '');
+      if(teamInput != null){
+        const v = teamInput.trim().toLowerCase();
+        if(v === 'o') track.team = 'offense';
+        else if(v === 'd') track.team = 'defense';
+      }
+      const roster = track.team === 'offense' || track.team === 'defense' ? rosterFor(track.team) : [];
+      const rosterHint = roster.length ? ` (Kader: ${roster.map(r=>`${r.number} ${r.name}`).join(', ')})` : '';
+      const numInput = prompt(`Rückennummer${rosterHint}:`, track.label);
+      if(numInput != null){
+        const num = numInput.trim();
+        if(num){
+          const match = roster.find(r => r.number === num);
+          track.label = num;
+          track.name = match ? match.name : null;
+        }
+      }
+      renderMainDiagram();
+    }
+  }
+
+  // ---------- export ----------
+  function downloadCanvas(canvas, filename){
+    const a = document.createElement('a');
+    a.href = canvas.toDataURL('image/png');
+    a.download = filename;
+    a.click();
+  }
+  exportFrameBtn.addEventListener('click', ()=>{
+    if(selectedFrameIndex < 0) { alert('Bitte zuerst einen Frame erfassen bzw. auswählen.'); return; }
+    downloadCanvas(courtCanvas, `${sanitizeFilename(playNameEl.value)}-frame-${selectedFrameIndex+1}.png`);
+  });
+  exportAllBtn.addEventListener('click', ()=>{
+    if(!frames.length){ alert('Keine Frames vorhanden.'); return; }
+    // Same reasoning as the main diagram: don't hard-crop to exactly the 15x14m court rectangle -
+    // grow each cell to include every player/ball position across the whole play instead of
+    // clipping anyone standing outside it.
+    let minX = 0, maxX = 15, minY = 0, maxY = 14;
+    frames.forEach(f=>{
+      f.players.forEach(p=>{
+        if(p.x < minX) minX = p.x; if(p.x > maxX) maxX = p.x;
+        if(p.y < minY) minY = p.y; if(p.y > maxY) maxY = p.y;
+      });
+      if(f.ball){
+        if(f.ball.x < minX) minX = f.ball.x; if(f.ball.x > maxX) maxX = f.ball.x;
+        if(f.ball.y < minY) minY = f.ball.y; if(f.ball.y > maxY) maxY = f.ball.y;
+      }
+    });
+    minX -= DIAGRAM_PAD_M; maxX += DIAGRAM_PAD_M; minY -= DIAGRAM_PAD_M; maxY += DIAGRAM_PAD_M;
+    const s2 = 15, marginX = 20, marginY = 20, capH = 18;
+    const titleH = playNameEl.value.trim() ? 28 : 0;
+    const cellW = (maxX-minX)*s2 + marginX*2, cellH = (maxY-minY)*s2 + marginY*2 + capH;
+    const cols = Math.min(4, frames.length);
+    const rows = Math.ceil(frames.length/cols);
+    const big = document.createElement('canvas');
+    big.width = cellW*cols; big.height = cellH*rows + titleH;
+    const bctx = big.getContext('2d');
+    bctx.fillStyle = '#fff'; bctx.fillRect(0,0,big.width,big.height);
+    if(titleH){
+      bctx.fillStyle = '#0f172a'; bctx.font = 'bold 15px sans-serif'; bctx.textAlign='left';
+      bctx.fillText(playNameEl.value.trim(), marginX, 20);
+    }
+    frames.forEach((f,i)=>{
+      const col = i%cols, row = Math.floor(i/cols);
+      const ox = col*cellW + marginX - minX*s2, oy = row*cellH + marginY + maxY*s2 + titleH;
+      bctx.save();
+      bctx.translate(0, capH);
+      drawCourt(bctx, ox, oy, s2);
+      const prev = i>0 ? frames[i-1] : null;
+      drawPlayers(bctx, ox, oy, s2, {...f, players: visiblePlayers(f)}, prev ? {...prev, players: visiblePlayers(prev)} : null, showTrailsEl.checked, 1, 8);
+      drawActions(bctx, ox, oy, s2, f);
+      bctx.restore();
+      bctx.fillStyle = '#0f172a'; bctx.font = 'bold 11px sans-serif'; bctx.textAlign='left';
+      bctx.fillText(`#${i+1} · ${formatTime(f.time)}`, col*cellW+marginX, row*cellH+14+titleH);
+    });
+    downloadCanvas(big, `${sanitizeFilename(playNameEl.value)}-storyboard.png`);
+  });
+
+  updatePlacementStatus();
+  renderMainDiagram();
+  updateWizardBanner();
+})();
+</script>
+</body>
+</html>
