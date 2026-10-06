@@ -411,6 +411,8 @@
   let liveDisplayHomography = null;// court meters -> native pixel (for positioning un-anchored handles)
   let homography = null;           // COMMITTED native pixel -> court meters, used for capturing frames
   let homographyInv = null;        // COMMITTED court meters -> native pixel, used for tracking/scale math
+  let liveDistortionModel = null;      // candidate lens-distortion-aware model (see fitDistortedCalibration), or null if not trusted
+  let committedDistortionModel = null; // the COMMITTED one actually used for projecting clicks/detections to court meters
   let lastCalibration = null;      // {videoWidth,videoHeight,handlePos,anchored} of the last COMMITTED calibration -
                                     // carried over to the next video if its resolution matches (same camera/broadcast,
                                     // just a different cut clip), so scouting multiple plays doesn't mean recalibrating each one.
@@ -567,7 +569,7 @@
     currentObjectUrl = URL.createObjectURL(file);
     video.src = currentObjectUrl;
     frames = []; tracks = {}; nextTrackId = 1; selectedFrameIndex = -1;
-    homography = null; anchored = new Set(); handlePos = {};
+    homography = null; committedDistortionModel = null; anchored = new Set(); handlePos = {};
     ballPlacementArmed = false; placementArmed = null; pendingPositions = []; actionPick = null; mergePick = null; pointerDown = null;
     playNameEl.value = '';
     updateOverlayInteractivity();
@@ -593,6 +595,7 @@
       committedSensitivity = calibSensitivity;
       committedCoverageFrac = calibCoverageFrac;
       committedResidualOutliers = calibResidualOutliers;
+      committedDistortionModel = fitDistortionForAnchored();
       setCalibMode(false);
       const carryOverMsg = calibSensitivityMessage(committedSensitivity, committedCoverageFrac, true, committedResidualOutliers);
       calibStatus.textContent = `Kalibrierung vom vorherigen Video übernommen (gleiche Auflösung erkannt, ${anchored.size} Referenzpunkte). Frames können direkt erfasst werden - bei Bedarf über "Kalibrierung bearbeiten" anpassen.${carryOverMsg.text}`;
@@ -702,6 +705,99 @@
     const det = a*C11 + b*C12 + c*C13;
     if(!isFinite(det) || Math.abs(det) < 1e-12) return null;
     return [C11,C21,C31, C12,C22,C32, C13,C23,C33].map(v=>v/det);
+  }
+
+  // ---------- lens-distortion-aware calibration (on top of the plain homography above) ----------
+  // A single flat homography assumes an ideal pinhole camera. Real lenses - especially the wide,
+  // elevated broadcast angles this app is built for - bend straight lines slightly, worse toward the
+  // image edges. A user can click every point exactly on the real line they see (confirmed: the
+  // calibration overlay visibly lines up with the court) and still get players thrown badly off-court
+  // near the frame edges, because no single projective transform can fit both the barely-distorted
+  // center and the more-distorted edge at once. This fits a classic single-coefficient radial
+  // distortion model (about the image center) jointly with the homography, to absorb that curvature
+  // instead of forcing the homography to awkwardly compromise across it.
+  //
+  // Fit via alternating closed-form steps rather than one general nonlinear solver: (1) undistort the
+  // observed points with the current k1 guess (a few fixed-point iterations - stable, no matrix
+  // inversion needed), (2) refit the homography (real -> undistorted/"ideal" native) from those via
+  // the plain DLT above, (3) re-estimate k1 by ORDINARY LINEAR least squares, since for a FIXED
+  // homography the distortion model is linear in k1 (distorted = ideal + k1 * r^2 * (ideal-center)).
+  // Each sub-step is a simple, well-understood closed-form solve, which is far more predictable with
+  // sparse, noisy human-clicked data than a general joint optimizer risking a bad local minimum.
+  function undistortPoint(ox, oy, k1, cx, cy){
+    let ix = ox, iy = oy;
+    for(let i=0;i<4;i++){
+      const r2 = (ix-cx)*(ix-cx) + (iy-cy)*(iy-cy);
+      const f = 1 + k1*r2;
+      ix = cx + (ox-cx)/f;
+      iy = cy + (oy-cy)/f;
+    }
+    return [ix, iy];
+  }
+  function fitDistortedCalibration(observedNative, realPts, cx, cy){
+    let k1 = 0, G = null;
+    for(let iter=0; iter<8; iter++){
+      const idealPts = observedNative.map(([ox,oy]) => undistortPoint(ox, oy, k1, cx, cy));
+      G = computeHomography(realPts, idealPts); // real -> undistorted native
+      const idealPred = realPts.map(([rx,ry]) => applyHomography(G, rx, ry));
+      let num = 0, den = 0;
+      for(let i=0;i<realPts.length;i++){
+        const [ix,iy] = idealPred[i];
+        const [ox,oy] = observedNative[i];
+        const r2 = (ix-cx)*(ix-cx) + (iy-cy)*(iy-cy);
+        const ax = r2*(ix-cx), ay = r2*(iy-cy);
+        num += ax*(ox-cx-(ix-cx)) + ay*(oy-cy-(iy-cy));
+        den += ax*ax + ay*ay;
+      }
+      k1 = den > 1e-9 ? num/den : 0;
+    }
+    const Ginv = invertHomography(G); // undistorted native -> real
+    if(!Ginv) return null;
+    return { G, Ginv, k1, cx, cy };
+  }
+  function projectDistorted(model, nx, ny){
+    const [ix, iy] = undistortPoint(nx, ny, model.k1, model.cx, model.cy);
+    return applyHomography(model.Ginv, ix, iy);
+  }
+  // Fitting more parameters (homography + k1) to few points trivially reduces error on THOSE SAME
+  // points even when the extra parameter is just fitting noise - verified this blind spot directly:
+  // an in-sample check alone kept endorsing models that were then shown (against synthetic ground
+  // truth with known-bad behavior) to make held-out predictions WORSE. Leave-one-out fixes that: each
+  // point is predicted from a model fit on every OTHER point, so the comparison is honestly
+  // out-of-sample. Confirmed empirically this correctly accepts the distortion model when there's
+  // real distortion and enough points (7+: with only 5-6, it can look fine in-sample yet still
+  // mispredict held-out points - not safe to trust), and correctly rejects it (falls back to the
+  // plain homography) when there's no real distortion signal to find.
+  const DISTORTION_MIN_POINTS = 7;
+  const DISTORTION_LOO_IMPROVEMENT_MIN = 0.15;
+  function fitDistortionWithLooGate(observedNative, realPts, cx, cy){
+    const n = observedNative.length;
+    if(n < DISTORTION_MIN_POINTS) return null;
+    let sumPlain = 0, sumDist = 0;
+    try{
+      for(let i=0;i<n;i++){
+        const restNative = observedNative.filter((_,j)=>j!==i);
+        const restReal = realPts.filter((_,j)=>j!==i);
+        const H_loo = computeHomography(restNative, restReal);
+        const model_loo = fitDistortedCalibration(restNative, restReal, cx, cy);
+        if(!model_loo) return null;
+        const [nx,ny] = observedNative[i], [rx,ry] = realPts[i];
+        const [pX,pY] = applyHomography(H_loo, nx, ny);
+        const [cX,cY] = projectDistorted(model_loo, nx, ny);
+        sumPlain += (pX-rx)*(pX-rx) + (pY-ry)*(pY-ry);
+        sumDist += (cX-rx)*(cX-rx) + (cY-ry)*(cY-ry);
+      }
+    }catch(e){ return null; } // a near-degenerate leave-one-out fold means the data can't support this - don't trust it
+    const rmsPlain = Math.sqrt(sumPlain/n), rmsDist = Math.sqrt(sumDist/n);
+    if(rmsPlain <= 1e-9 || (rmsPlain-rmsDist)/rmsPlain < DISTORTION_LOO_IMPROVEMENT_MIN) return null;
+    return fitDistortedCalibration(observedNative, realPts, cx, cy); // re-fit on ALL points for the model actually used
+  }
+  // Single entry point for turning a native pixel into a court-meter position - everywhere that used
+  // to call applyHomography(homography, ...) directly now goes through here, so the distortion model
+  // (when trusted) is used uniformly for placement, tracking and recovery alike.
+  function projectNativeToReal(nx, ny){
+    if(committedDistortionModel) return projectDistorted(committedDistortionModel, nx, ny);
+    return applyHomography(homography, nx, ny);
   }
 
   // ---------- calibration overlay ----------
@@ -883,13 +979,32 @@
       liveHomography = null; liveDisplayHomography = null; calibSensitivity = null; calibCoverageFrac = null; calibResidualOutliers = null;
     }
   }
+  // Only run at commit time (not on every drag-move) - the leave-one-out gate refits the model once
+  // per anchored point, which is too costly to repeat on every pointermove tick while still dragging,
+  // and only the COMMITTED calibration is ever actually used to convert a click/detection to a court
+  // position anyway, so there's nothing to show live during dragging that isn't already covered by
+  // the plain-homography preview above.
+  function fitDistortionForAnchored(){
+    const pts = HANDLES.filter(h=>anchored.has(h.id));
+    if(pts.length < DISTORTION_MIN_POINTS) return null;
+    const realPts = pts.map(h=>[h.rx,h.ry]);
+    const nativePts = pts.map(h=>[handlePos[h.id].x, handlePos[h.id].y]);
+    const cx = (video.videoWidth||1280)/2, cy = (video.videoHeight||720)/2;
+    try{ return fitDistortionWithLooGate(nativePts, realPts, cx, cy); }
+    catch(e){ return null; }
+  }
   function updateCalibStatus(){
     // The calibration card auto-collapses once committed (see setCalibMode) - a short echo of the
     // status stays in the summary line itself so a sensitivity warning is never hidden just because
     // the card is closed, and so it's clear at a glance whether recalibration is worth opening for.
     if(homography && !calibMode){
       const msg = calibSensitivityMessage(committedSensitivity, committedCoverageFrac, true, committedResidualOutliers);
-      calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.${msg.text}`;
+      // Surface when the lens-distortion correction actually kicked in (not just "was attempted") -
+      // it's silently skipped unless cross-validation confirmed it genuinely helps (see
+      // fitDistortionWithLooGate), so when it IS active that's worth a positive confirmation rather
+      // than a hidden implementation detail, especially after it was the fix for a real reported case.
+      const distortionNote = committedDistortionModel ? ' Objektivverzerrung erkannt und korrigiert (verbessert Positionen v.a. am Bildrand).' : '';
+      calibStatus.textContent = `Kalibriert (${anchored.size} Referenzpunkte gesetzt). Frames können erfasst werden.${distortionNote}${msg.text}`;
       calibStatus.className = msg.text ? 'hint err' : 'hint ok';
       calibSummaryHintEl.textContent = msg.text ? '· ⚠️ Kalibrierung prüfen' : '· kalibriert ✓';
     } else if(anchored.size >= 4){
@@ -900,7 +1015,7 @@
       calibStatus.className = msg.text ? 'hint err' : 'hint';
       calibSummaryHintEl.textContent = '';
     } else {
-      calibStatus.textContent = `${anchored.size}/4 Punkte gesetzt. Ziehe mindestens 4 der Punkte auf ihre reale Position im Video (idealerweise 5-6, weiter auseinanderliegend — damit ein versehentlich falsch gesetzter Punkt überhaupt auffallen kann).`;
+      calibStatus.textContent = `${anchored.size}/4 Punkte gesetzt. Ziehe mindestens 4 der Punkte auf ihre reale Position im Video (idealerweise 7+, weiter auseinanderliegend, auch bis in die Bildecken — ab 7 Punkten prüft die App zusätzlich automatisch auf Objektivverzerrung, die gerade am Bildrand sonst zu falschen Positionen führen kann).`;
       calibStatus.className = 'hint';
       calibSummaryHintEl.textContent = '';
     }
@@ -941,6 +1056,7 @@
     committedSensitivity = calibSensitivity;
     committedCoverageFrac = calibCoverageFrac;
     committedResidualOutliers = calibResidualOutliers;
+    committedDistortionModel = fitDistortionForAnchored();
     lastCalibration = {
       videoWidth: video.videoWidth, videoHeight: video.videoHeight,
       handlePos: Object.fromEntries(Array.from(anchored).map(id=>[id, {...handlePos[id]}])),
@@ -1099,12 +1215,12 @@
     // at the moment of the actual click, not whatever happens to be armed once detection resolves.
     const rect = overlay.getBoundingClientRect();
     const [nx, ny] = displayToNative(clientX - rect.left, clientY - rect.top);
-    const [rawCx, rawCy] = applyHomography(homography, nx, ny);
+    const [rawCx, rawCy] = projectNativeToReal(nx, ny);
     let finalNx = nx, finalNy = ny, finalCx = rawCx, finalCy = rawCy, snapped = false;
     const feet = await getFeetForCurrentMoment();
     let bestD = PLACEMENT_SNAP_RADIUS_M;
     feet.forEach(foot=>{
-      const [fcx, fcy] = applyHomography(homography, foot.x, foot.y);
+      const [fcx, fcy] = projectNativeToReal(foot.x, foot.y);
       const d = Math.hypot(fcx-rawCx, fcy-rawCy);
       if(d < bestD){ bestD = d; finalNx = foot.x; finalNy = foot.y; finalCx = fcx; finalCy = fcy; snapped = true; }
     });
@@ -1402,7 +1518,7 @@
     }
     const confidence = Math.max(0, Math.min(1, best.score));
     if(confidence < TRACK_CONFIDENCE_MIN) return null; // track lost - don't guess wildly
-    const [rx, ry] = applyHomography(homography, best.nx, best.ny);
+    const [rx, ry] = projectNativeToReal(best.nx, best.ny);
     return {x:rx, y:ry, nx:best.nx, ny:best.ny, confidence};
   }
   // Builds and stores the appearance template a track will be matched against in later frames -
@@ -1652,7 +1768,7 @@
       const fullCtx = fullCanvas.getContext('2d', {willReadFrequently: true});
       fullCtx.drawImage(video, 0, 0);
       feet.forEach(foot=>{
-        const [cx,cy] = applyHomography(homography, foot.x, foot.y);
+        const [cx,cy] = projectNativeToReal(foot.x, foot.y);
         // Anything projected well outside the court is almost certainly not a player - a
         // spectator, bench personnel, or a stray false-positive - not worth suggesting.
         if(cx < -courtMargin || cx > 15+courtMargin || cy < -courtMargin || cy > 14+courtMargin) return;
@@ -1775,7 +1891,7 @@
         const elapsed = Math.max(0, video.currentTime - track.lastSeenTime);
         const found = await recoverLostTrack(track.lastNative, elapsed, boxes);
         if(!found) continue;
-        const [rx, ry] = applyHomography(homography, found.footX, found.footY);
+        const [rx, ry] = projectNativeToReal(found.footX, found.footY);
         if(pendingPositions.some(pp => Math.hypot(pp.x-rx,pp.y-ry) < 0.8)) continue;
         pendingPositions.push({x:rx, y:ry, nx:found.footX, ny:found.footY, team:track.team, trackId, tracked:true, lowConfidence:true, recovered:true});
         recovered++;
