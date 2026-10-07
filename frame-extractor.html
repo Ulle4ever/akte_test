@@ -1,0 +1,294 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Frame-Extraktor &amp; Vorab-Markierung</title>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/jszip@3.10.1/dist/jszip.min.js"></script>
+<style>
+  :root{ --accent:#C43E0E; --ink:#1e2430; --muted:#5b6472; --line:#d8dde3; --bg:#f7f8fa; }
+  *{ box-sizing:border-box; }
+  body{ font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif; margin:0; background:var(--bg); color:var(--ink); }
+  header{ background:#fff; border-bottom:1px solid var(--line); padding:18px 24px; }
+  header h1{ margin:0 0 4px; font-size:20px; }
+  header p{ margin:0; color:var(--muted); font-size:14px; }
+  main{ max-width:900px; margin:0 auto; padding:20px 24px 60px; }
+  .card{ background:#fff; border:1px solid var(--line); border-radius:10px; padding:18px 20px; margin-bottom:18px; }
+  .card h2{ font-size:15px; margin:0 0 12px; }
+  label{ display:block; font-size:13px; font-weight:600; margin-bottom:4px; }
+  .row{ display:flex; gap:16px; flex-wrap:wrap; margin-bottom:14px; }
+  .field{ flex:1; min-width:160px; }
+  input[type=text], input[type=number]{ width:100%; padding:7px 9px; border:1px solid var(--line); border-radius:6px; font-size:14px; }
+  input[type=range]{ width:100%; }
+  .hint{ color:var(--muted); font-size:12.5px; margin-top:4px; }
+  button{ background:var(--accent); color:#fff; border:none; border-radius:7px; padding:10px 18px; font-size:14px; font-weight:600; cursor:pointer; }
+  button:disabled{ background:#c9ccd1; cursor:not-allowed; }
+  button.secondary{ background:#fff; color:var(--ink); border:1px solid var(--line); }
+  .canvas-wrap{ position:relative; max-width:100%; background:#000; border-radius:8px; overflow:hidden; }
+  canvas{ display:block; max-width:100%; height:auto; }
+  .status{ font-size:13.5px; margin-top:10px; padding:10px 12px; border-radius:7px; background:#f1f3f5; }
+  .status.ok{ background:#e9f7ee; color:#1e6b3a; }
+  .status.err{ background:#fdecea; color:#9e2a1f; }
+  .stats{ display:flex; gap:24px; flex-wrap:wrap; margin-top:12px; }
+  .stat{ font-size:13px; }
+  .stat b{ display:block; font-size:20px; }
+  progress{ width:100%; height:10px; margin-top:10px; }
+  .footnote{ font-size:12.5px; color:var(--muted); line-height:1.5; }
+  code{ background:#eef0f2; padding:1px 5px; border-radius:4px; font-size:12.5px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Frame-Extraktor &amp; Vorab-Markierung</h1>
+  <p>Zieht Einzelbilder aus einem Spielvideo, schlägt Spieler-Kästen automatisch vor (läuft komplett im Browser, nichts wird hochgeladen) und exportiert alles fertig für den Roboflow-Import.</p>
+</header>
+<main>
+
+  <div class="card">
+    <h2>1. Video wählen</h2>
+    <div class="row">
+      <div class="field">
+        <label for="fileInput">Videodatei</label>
+        <input type="file" id="fileInput" accept="video/*">
+      </div>
+      <div class="field">
+        <label for="prefixInput">Kürzel für dieses Spiel (für Dateinamen)</label>
+        <input type="text" id="prefixInput" placeholder="z.B. proa_spiel1" value="spiel1">
+      </div>
+    </div>
+    <video id="video" style="display:none"></video>
+    <div id="videoInfo" class="hint">Noch kein Video geladen.</div>
+  </div>
+
+  <div class="card">
+    <h2>2. Einstellungen</h2>
+    <div class="row">
+      <div class="field">
+        <label for="intervalInput">Abstand zwischen Frames (Sekunden)</label>
+        <input type="number" id="intervalInput" value="8" min="1" step="1">
+        <div class="hint">Größerer Abstand = weniger, dafür vielfältigere Bilder. 8s ist ein guter Start für ein ganzes Spiel.</div>
+      </div>
+      <div class="field">
+        <label for="confInput">Mindest-Konfidenz für Vorschläge: <span id="confValue">0.35</span></label>
+        <input type="range" id="confInput" min="0.1" max="0.8" step="0.05" value="0.35">
+        <div class="hint">Niedriger = mehr (aber unsicherere) Kasten-Vorschläge. Unsichere Vorschläge lassen sich in Roboflow leicht löschen, fehlende Spieler müssen von Hand ergänzt werden.</div>
+      </div>
+    </div>
+    <div id="estimate" class="hint"></div>
+  </div>
+
+  <div class="card">
+    <h2>3. Verarbeiten</h2>
+    <button id="startBtn" disabled>Verarbeitung starten</button>
+    <button id="downloadBtn" class="secondary" disabled>ZIP herunterladen</button>
+    <div class="canvas-wrap" style="margin-top:14px;">
+      <canvas id="previewCanvas" width="640" height="360"></canvas>
+    </div>
+    <div class="stats">
+      <div class="stat">Frames verarbeitet<b id="statFrames">0</b></div>
+      <div class="stat">Spieler-Kästen gesamt<b id="statBoxes">0</b></div>
+      <div class="stat">Frames ohne Treffer<b id="statEmpty">0</b></div>
+    </div>
+    <progress id="progressBar" value="0" max="1"></progress>
+    <div id="status" class="status">Video wählen, dann Verarbeitung starten.</div>
+  </div>
+
+  <div class="card">
+    <h2>Import in Roboflow</h2>
+    <p class="footnote">
+      Das ZIP enthält pro Bild eine <code>.jpg</code>-Datei und eine gleichnamige <code>.txt</code>-Datei im YOLO-Format
+      (eine Zeile pro erkanntem Spieler: Klasse, Mittelpunkt, Breite, Höhe, normiert 0-1), plus eine <code>classes.txt</code>
+      mit der einen Klasse <code>player</code>. In Roboflow: neues Projekt → Upload → das ZIP auswählen und als
+      "YOLO Darknet TXT" / "YOLOv5" importieren lassen (Roboflow erkennt das Format meist automatisch). Die Boxen
+      erscheinen dann schon vorausgefüllt zur Kontrolle, statt von Null gezeichnet werden zu müssen. Falls der
+      Bulk-Import bei dir nicht klappt: die Bilder trotzdem einzeln hochladen und stattdessen Roboflows eigenes
+      "Label Assist" nutzen (die Bilder sind so oder so bereits sinnvoll ausgewählt).
+    </p>
+  </div>
+
+</main>
+
+<script>
+(function(){
+  const fileInput = document.getElementById('fileInput');
+  const prefixInput = document.getElementById('prefixInput');
+  const intervalInput = document.getElementById('intervalInput');
+  const confInput = document.getElementById('confInput');
+  const confValue = document.getElementById('confValue');
+  const video = document.getElementById('video');
+  const videoInfo = document.getElementById('videoInfo');
+  const estimate = document.getElementById('estimate');
+  const startBtn = document.getElementById('startBtn');
+  const downloadBtn = document.getElementById('downloadBtn');
+  const previewCanvas = document.getElementById('previewCanvas');
+  const pctx = previewCanvas.getContext('2d');
+  const statFrames = document.getElementById('statFrames');
+  const statBoxes = document.getElementById('statBoxes');
+  const statEmpty = document.getElementById('statEmpty');
+  const progressBar = document.getElementById('progressBar');
+  const statusEl = document.getElementById('status');
+
+  let detector = null, detectorLoading = false;
+  let results = []; // {name, blob, labelLines}
+  let processing = false;
+
+  function setStatus(text, cls){
+    statusEl.textContent = text;
+    statusEl.className = 'status' + (cls ? ' ' + cls : '');
+  }
+
+  confInput.addEventListener('input', () => { confValue.textContent = parseFloat(confInput.value).toFixed(2); });
+
+  function updateEstimate(){
+    if(!video.duration) { estimate.textContent = ''; return; }
+    const interval = Math.max(1, parseFloat(intervalInput.value) || 8);
+    const count = Math.floor(video.duration / interval) + 1;
+    estimate.textContent = `Geschätzt ca. ${count} Frames bei ${formatDuration(video.duration)} Videolänge und ${interval}s Abstand.`;
+  }
+  intervalInput.addEventListener('input', updateEstimate);
+
+  function formatDuration(s){
+    const m = Math.floor(s/60), sec = Math.round(s%60);
+    return `${m}:${sec.toString().padStart(2,'0')}`;
+  }
+
+  fileInput.addEventListener('change', () => {
+    const file = fileInput.files[0];
+    if(!file) return;
+    results = [];
+    downloadBtn.disabled = true;
+    statFrames.textContent = '0'; statBoxes.textContent = '0'; statEmpty.textContent = '0';
+    progressBar.value = 0;
+    const url = URL.createObjectURL(file);
+    video.src = url;
+    video.addEventListener('loadedmetadata', () => {
+      videoInfo.textContent = `${video.videoWidth}x${video.videoHeight}, ${formatDuration(video.duration)}`;
+      previewCanvas.width = video.videoWidth; previewCanvas.height = video.videoHeight;
+      updateEstimate();
+      startBtn.disabled = false;
+      setStatus('Video bereit. "Verarbeitung starten" klicken.');
+    }, { once:true });
+  });
+
+  async function loadDetector(){
+    if(detector || detectorLoading) return;
+    detectorLoading = true;
+    setStatus('Erkennungsmodell wird geladen…');
+    await tf.setBackend('webgl'); await tf.ready();
+    detector = await cocoSsd.load({base:'mobilenet_v2'});
+    detectorLoading = false;
+  }
+
+  function seekTo(t){
+    return new Promise((resolve) => {
+      const onSeeked = () => { video.removeEventListener('seeked', onSeeked); resolve(); };
+      video.addEventListener('seeked', onSeeked);
+      video.currentTime = t;
+    });
+  }
+
+  function drawBoxes(boxes){
+    pctx.drawImage(video, 0, 0, previewCanvas.width, previewCanvas.height);
+    pctx.strokeStyle = '#C43E0E'; pctx.lineWidth = Math.max(2, previewCanvas.width/320);
+    pctx.font = `${Math.max(12, previewCanvas.width/60)}px sans-serif`;
+    pctx.fillStyle = '#C43E0E';
+    boxes.forEach(b => {
+      const [x,y,w,h] = b.bbox;
+      pctx.strokeRect(x,y,w,h);
+      pctx.fillText(b.score.toFixed(2), x+3, Math.max(14,y-4));
+    });
+  }
+
+  startBtn.addEventListener('click', async () => {
+    if(processing) return;
+    processing = true;
+    startBtn.disabled = true; downloadBtn.disabled = true;
+    results = [];
+    const prefix = (prefixInput.value || 'spiel').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+    const interval = Math.max(1, parseFloat(intervalInput.value) || 8);
+    const minConf = parseFloat(confInput.value);
+    const duration = video.duration;
+    const totalSteps = Math.floor(duration / interval) + 1;
+
+    try{
+      await loadDetector();
+    }catch(e){
+      setStatus('Erkennungsmodell konnte nicht geladen werden (Internetverbindung prüfen). Verarbeitung abgebrochen.', 'err');
+      processing = false; startBtn.disabled = false;
+      return;
+    }
+
+    let totalBoxes = 0, emptyFrames = 0, idx = 0;
+    for(let t = 0; t <= duration; t += interval){
+      idx++;
+      await seekTo(t);
+      pctx.drawImage(video, 0, 0, previewCanvas.width, previewCanvas.height);
+      let predictions = [];
+      try{ predictions = await detector.detect(previewCanvas); }
+      catch(e){ console.error(e); }
+      const boxes = predictions.filter(p => p.class === 'person' && p.score >= minConf);
+      drawBoxes(boxes);
+      if(boxes.length === 0) emptyFrames++;
+      totalBoxes += boxes.length;
+
+      const labelLines = boxes.map(b => {
+        const [x,y,w,h] = b.bbox;
+        const cx = (x + w/2) / previewCanvas.width, cy = (y + h/2) / previewCanvas.height;
+        const nw = w / previewCanvas.width, nh = h / previewCanvas.height;
+        return `0 ${cx.toFixed(6)} ${cy.toFixed(6)} ${nw.toFixed(6)} ${nh.toFixed(6)}`;
+      }).join('\n');
+
+      const name = `${prefix}_${idx.toString().padStart(4,'0')}`;
+      const blob = await new Promise(res => previewCanvas.toBlob(res, 'image/jpeg', 0.85));
+      results.push({ name, blob, labelLines });
+
+      statFrames.textContent = String(idx);
+      statBoxes.textContent = String(totalBoxes);
+      statEmpty.textContent = String(emptyFrames);
+      progressBar.value = idx / totalSteps;
+      setStatus(`Frame ${idx}/${totalSteps} verarbeitet (${boxes.length} Spieler erkannt)…`);
+      await new Promise(r => setTimeout(r, 0)); // yield to keep UI responsive
+    }
+
+    processing = false;
+    startBtn.disabled = false;
+    downloadBtn.disabled = results.length === 0;
+    setStatus(`Fertig: ${results.length} Frames, ${totalBoxes} Spieler-Kästen insgesamt (${emptyFrames} Frames ohne Treffer).`, 'ok');
+  });
+
+  downloadBtn.addEventListener('click', async () => {
+    if(!results.length) return;
+    downloadBtn.disabled = true;
+    setStatus('ZIP wird zusammengestellt…');
+    const zip = new JSZip();
+    zip.file('classes.txt', 'player\n');
+    zip.file('README.txt',
+      'Import in Roboflow:\n' +
+      '1. Neues (oder bestehendes) Object-Detection-Projekt öffnen.\n' +
+      '2. "Upload" -> dieses ZIP auswählen.\n' +
+      '3. Format "YOLO Darknet TXT" bzw. "YOLOv5 PyTorch" wählen, falls gefragt (Roboflow erkennt es meist automatisch).\n' +
+      '4. Die Boxen erscheinen vorausgefüllt - pro Bild prüfen, falsche Boxen löschen, fehlende Spieler ergänzen.\n\n' +
+      'Klasse: player (id 0)\n' +
+      `Erzeugt mit frame-extractor.html, ${results.length} Frames.\n`
+    );
+    results.forEach(r => {
+      zip.file(`${r.name}.jpg`, r.blob);
+      zip.file(`${r.name}.txt`, r.labelLines + (r.labelLines ? '\n' : ''));
+    });
+    const blob = await zip.generateAsync({ type:'blob' }, (meta) => {
+      setStatus(`ZIP wird zusammengestellt… ${meta.percent.toFixed(0)}%`);
+    });
+    const a = document.createElement('a');
+    const prefix = (prefixInput.value || 'spiel').trim().replace(/[^a-zA-Z0-9_-]/g, '_');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${prefix}_frames.zip`;
+    a.click();
+    setStatus(`ZIP heruntergeladen: ${results.length} Frames.`, 'ok');
+    downloadBtn.disabled = false;
+  });
+})();
+</script>
+</body>
+</html>
