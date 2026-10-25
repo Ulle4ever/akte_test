@@ -1135,52 +1135,6 @@ function SpielerAkte() {
             persistPrivateFields(playerId, { attendance: [...cur, ...newRecords] });
         });
     }
-    function handleImportHabitStats(perPlayerValues, date, gegner) {
-        const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
-        let hustleCat = cats.find((c) => c.id === "hustle");
-        if (!hustleCat) {
-            hustleCat = { id: "hustle", label: "Hustle-Stats", fields: [] };
-            cats.push(hustleCat);
-        }
-        const allLabels = new Set();
-        Object.values(perPlayerValues).forEach((v) => Object.keys(v).forEach((label) => allLabels.add(label)));
-        const labelToFieldId = {};
-        allLabels.forEach((label) => {
-            let foundId = null;
-            for (const c of cats) {
-                const f = c.fields.find((f) => f.label.toLowerCase() === label.toLowerCase());
-                if (f) {
-                    foundId = f.id;
-                    break;
-                }
-            }
-            if (foundId) {
-                labelToFieldId[label] = foundId;
-            }
-            else {
-                const newField = { id: uid(), label, kind: "number" };
-                hustleCat.fields = [...hustleCat.fields, newField];
-                labelToFieldId[label] = newField.id;
-            }
-        });
-        persistMeta({ statCategories: cats });
-        Object.entries(perPlayerValues).forEach(([playerId, valuesByLabel]) => {
-            const fieldValues = {};
-            Object.entries(valuesByLabel).forEach(([label, val]) => { fieldValues[labelToFieldId[label]] = val; });
-            const player = players.find((p) => p.id === playerId);
-            if (!player)
-                return;
-            const newStats = [...(player.stats || [])];
-            const existingIdx = newStats.findIndex((s) => s.date === date);
-            if (existingIdx !== -1) {
-                newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
-            }
-            else {
-                newStats.push({ id: uid(), date, gegner: gegner || "", minuten: 0, ...fieldValues });
-            }
-            persistPlayerFields(playerId, { stats: newStats });
-        });
-    }
     function handleImportBoxscore(entries, date, gegner) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
         let normalCat = cats.find((c) => c.id === "normal") || cats[0];
@@ -1492,7 +1446,6 @@ function SpielerAkte() {
                         { label: "Kalender importieren (.ics)", icon: IconCalendar, onClick: () => setModal("importCalendar") },
                         { label: "Kalender aus Screenshot (Beta)", icon: IconUpload, onClick: () => setModal("importScreenshot") },
                         { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
-                        { label: "Habit-Stats importieren", icon: IconActivity, onClick: () => setModal("importHabits") },
                         { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => setModal("importBoxscore") },
                         { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
                         { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
@@ -2105,8 +2058,6 @@ function SpielerAkte() {
             React.createElement(IcsImportModal, { teams: teams, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
         modal === "importScreenshot" && (React.createElement(Modal, { title: "Kalender aus Screenshot importieren (Beta)", onClose: () => setModal(null), wide: true },
             React.createElement(ScreenshotImportModal, { teams: teams, allPlayers: players, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
-        modal === "importHabits" && (React.createElement(Modal, { title: "Habit-Stats aus CSV importieren", onClose: () => setModal(null), wide: true },
-            React.createElement(HabitStatsImportModal, { players: players, teams: teams, onConfirm: handleImportHabitStats, onClose: () => setModal(null) }))),
         modal === "importBoxscore" && (React.createElement(Modal, { title: "Boxscore einf\u00FCgen", onClose: () => setModal(null), wide: true },
             React.createElement(BoxscoreImportModal, { players: players, teams: teams, onConfirm: handleImportBoxscore, onClose: () => setModal(null) }))),
         modal === "importAdvanced" && (React.createElement(Modal, { title: "Advanced Stats importieren", onClose: () => setModal(null), wide: true },

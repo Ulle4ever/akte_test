@@ -139,16 +139,6 @@ const DEFAULT_STAT_CATEGORIES = [
             { id: "ft", label: "Freiwürfe", kind: "shooting" },
         ],
     },
-    {
-        id: "hustle", label: "Hustle-Stats",
-        fields: [
-            { id: "deflections", label: "Deflections", kind: "number" },
-            { id: "charges", label: "Charges", kind: "number" },
-            { id: "looseBalls", label: "Loose Balls", kind: "number" },
-            { id: "contestedShots", label: "Kontestierte Würfe", kind: "number" },
-            { id: "screenAssists", label: "Screen Assists", kind: "number" },
-        ],
-    },
 ];
 const DEFAULT_TEST_TYPES = [
     { id: "sprint20", label: "Sprint 20m" },
@@ -334,57 +324,6 @@ function parseAttendanceCsv(text) {
         });
     }
     return { rows, error: null };
-}
-function parseHabitsCsv(text) {
-    const clean = text.replace(/^\uFEFF/, "");
-    const lines = clean.split(/\r\n|\n|\r/);
-    const summaryMarkerIdx = lines.findIndex((l) => l.trim().toUpperCase().startsWith("AUSWERTUNG"));
-    if (summaryMarkerIdx === -1)
-        return { players: [], habits: [], error: "Konnte den Abschnitt \"AUSWERTUNG GESAMT\" nicht finden. Ist das die richtige Datei?" };
-    let headerIdx = -1;
-    for (let i = summaryMarkerIdx + 1; i < Math.min(lines.length, summaryMarkerIdx + 5); i++) {
-        const cells = lines[i].split(";");
-        if (cells.some((c) => c.trim().toLowerCase() === "habit")) {
-            headerIdx = i;
-            break;
-        }
-    }
-    if (headerIdx === -1)
-        return { players: [], habits: [], error: "Konnte die Spieler-Kopfzeile nicht finden." };
-    const headerCells = lines[headerIdx].split(";");
-    const habitColIdx = headerCells.findIndex((c) => c.trim().toLowerCase() === "habit");
-    const players = [];
-    for (let c = habitColIdx + 1; c < headerCells.length; c++) {
-        const raw = headerCells[c].trim();
-        if (!raw)
-            continue;
-        const m = raw.match(/^#(\d+)\s*(.+)$/);
-        if (m)
-            players.push({ colIndex: c, number: parseInt(m[1], 10), name: m[2].trim() });
-    }
-    const skipLabels = ["summe", "situationen", "schnitt"];
-    const habits = [];
-    for (let i = headerIdx + 1; i < lines.length; i++) {
-        const cells = lines[i].split(";");
-        if (cells.length <= habitColIdx)
-            break;
-        const label = (cells[habitColIdx] || "").trim();
-        if (!label)
-            break;
-        if (skipLabels.includes(label.toLowerCase()))
-            continue;
-        const values = {};
-        players.forEach((p) => {
-            const raw = (cells[p.colIndex] || "").trim();
-            if (raw === "")
-                return;
-            const num = parseFloat(raw.replace(",", "."));
-            if (!isNaN(num))
-                values[p.colIndex] = num;
-        });
-        habits.push({ label, values });
-    }
-    return { players, habits, error: null };
 }
 const BOX_ALIASES = {
     min: ["min", "minuten", "mp", "gespielte minuten"],
