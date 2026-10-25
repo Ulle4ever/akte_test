@@ -179,7 +179,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
     const gameTeams = teams.map((t, i) => {
         const doc = (dbbData || {})[t.id];
         const summary = doc && doc.matches ? dbbTeamSummary(doc) : null;
-        const manualNext = sortByDateDesc(events.filter((e) => e.teamId === t.id && e.type === "spiel" && e.date >= todayKeyLoad)).reverse()[0] || null;
+        const manualNext = summary ? null : sortByDateDesc(events.filter((e) => e.teamId === t.id && e.type === "spiel" && e.date >= todayKeyLoad && !e.dbbResult)).reverse()[0] || null;
         return { team: t, colorIdx: i, doc, summary, manualNext, connected: !!(doc && doc.matches) };
     });
     const connectedGameTeams = gameTeams.filter((g) => g.connected);
@@ -233,7 +233,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                 React.createElement(IconRefresh, { size: 13, className: dbbSyncing ? "animate-spin" : "" }),
                 React.createElement("span", { className: "hidden sm:inline" }, dbbSyncing ? "Aktualisiert…" : "Jetzt aktualisieren"))),
         shownGameTeams.length > 0
-            ? React.createElement("div", { className: `relative grid gap-3 ${shownGameTeams.length > 1 ? "md:grid-cols-2" : ""} ${shownGameTeams.length > 2 ? "2xl:grid-cols-3" : ""}` }, shownGameTeams.map(gamePanel))
+            ? React.createElement("div", { className: `relative grid gap-3 ${shownGameTeams.length > 1 ? "md:grid-cols-2" : ""} ${shownGameTeams.length === 3 ? "lg:grid-cols-3" : shownGameTeams.length > 3 ? "2xl:grid-cols-3" : ""}` }, shownGameTeams.map(gamePanel))
             : React.createElement("div", { className: "relative rounded-2xl bg-white/[0.06] border border-white/10 p-5" },
                 React.createElement("p", { className: "text-lg font-bold text-white" }, "Spielplan automatisch vom DBB"),
                 React.createElement("p", { className: "text-sm text-white/60 mt-1 max-w-xl" }, "Hinterlege bei einem Team die DBB-Team-ID. Dann erscheinen hier nächstes Spiel, Ergebnisse und Tabellenplatz, und die Spiele landen automatisch im Kalender."),

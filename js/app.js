@@ -1680,7 +1680,7 @@ function SpielerAkte() {
                         React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-[#C43E0E] z-10" }),
                         // Vereinslogo gross und dezent als Wasserzeichen (statt des frueheren wiederholten Team-Schriftzugs)
                         React.createElement("div", { className: "pointer-events-none select-none absolute inset-0 overflow-hidden", "aria-hidden": "true" },
-                            React.createElement("img", { src: LOGO_DATA_URI, alt: "", className: "absolute -right-8 -bottom-10 sm:-right-6 sm:-bottom-16 w-52 sm:w-80 opacity-[0.08]" })),
+                            React.createElement("img", { src: LOGO_DATA_URI, alt: "", className: "absolute right-[-12%] sm:right-[-4%] top-1/2 -translate-y-1/2 w-60 sm:w-[26rem] opacity-[0.13] blur-[2px] [mask-image:radial-gradient(closest-side,black_55%,transparent)]" })),
                         React.createElement("div", { className: "relative z-[1] p-4 sm:p-7 flex gap-4 sm:gap-7" },
                             React.createElement("div", { className: "relative shrink-0" },
                                 selectedPlayer.photoUrl
@@ -1697,8 +1697,7 @@ function SpielerAkte() {
                                         React.createElement("h2", { className: "font-display italic font-black uppercase text-xl sm:text-4xl leading-[0.95] text-white [overflow-wrap:anywhere] [hyphens:auto]" }, selectedPlayer.name),
                                         React.createElement("div", { className: "flex items-center gap-2 mt-2 flex-wrap" },
                                             React.createElement("p", { className: "text-sm text-white/60" }, selectedTeam?.name || "Kein Team"),
-                                            STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label)),
-                                            getLeagueLogo(selectedTeam?.altersklasse) && React.createElement("img", { src: getLeagueLogo(selectedTeam?.altersklasse), alt: selectedTeam?.altersklasse || "", className: "h-5 w-auto rounded-[3px] opacity-90" }))),
+                                            STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label)))),
                                     React.createElement("div", { className: "flex gap-2 shrink-0" },
                                         isTrainer && (React.createElement(React.Fragment, null,
                                             React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-black/35 text-white/80", "aria-label": "Bearbeiten" },
