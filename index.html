@@ -4910,7 +4910,7 @@ function AdvancedRechnerLiveModal({ players, teams, onConfirm, onClose }) {
                 " Spieler importieren"))));
 }
 const HEADER_MENU_WIDTH = 256; // entspricht w-64
-function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
+function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose, header }) {
     const btnRef = useRef(null);
     const [menuPos, setMenuPos] = useState(null);
     useEffect(() => {
@@ -4937,20 +4937,24 @@ function HeaderMenu({ label, icon: Icon, items, isOpen, onToggle, onClose }) {
         };
     }, [isOpen]);
     return (React.createElement("div", { className: "relative" },
-        React.createElement("button", { ref: btnRef, onClick: onToggle, className: `flex items-center gap-1.5 text-xs font-medium px-3 py-1.5 rounded-full transition ${isOpen ? "bg-white text-slate-900 shadow-sm" : "text-white/80 bg-white/10 hover:bg-white/20"}` },
-            React.createElement(Icon, { size: 13 }),
-            " ",
-            label,
+        React.createElement("button", { ref: btnRef, onClick: onToggle, "aria-label": label, title: label, className: `flex items-center gap-1.5 text-xs font-medium px-2.5 sm:px-3 py-1.5 rounded-full transition ${isOpen ? "bg-white text-slate-900 shadow-sm" : "text-white/80 bg-white/10 hover:bg-white/20"}` },
+            React.createElement(Icon, { size: 14 }),
+            React.createElement("span", { className: "hidden sm:inline max-w-[140px] truncate" }, label),
             React.createElement(IconArrowDown, { size: 11, className: `transition-transform ${isOpen ? "rotate-180" : ""}` })),
         isOpen && (React.createElement(React.Fragment, null,
             React.createElement("div", { className: "fixed inset-0 z-40", onClick: onClose }),
-            React.createElement("div", { className: "fixed w-64 bg-white rounded-xl shadow-xl border border-stone-200 py-1.5 z-50 overflow-hidden origin-top rsk-pop-in", style: menuPos ? { top: menuPos.top, left: menuPos.left } : { visibility: "hidden" } }, items.map((item) => {
-                const ItemIcon = item.icon;
-                return (React.createElement("button", { key: item.label, onClick: () => { item.onClick(); onClose(); }, className: "w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm text-slate-700 hover:bg-stone-50 transition text-left" },
-                    React.createElement("span", { className: "w-7 h-7 rounded-full bg-red-50 text-[#C43E0E] flex items-center justify-center shrink-0" },
-                        React.createElement(ItemIcon, { size: 13 })),
-                    item.label));
-            }))))));
+            React.createElement("div", { className: "fixed w-64 bg-white rounded-xl shadow-xl border border-stone-200 py-1.5 z-50 overflow-hidden origin-top rsk-pop-in", style: menuPos ? { top: menuPos.top, left: menuPos.left } : { visibility: "hidden" } },
+                header && React.createElement("div", { className: "px-3.5 pt-1.5 pb-2.5 mb-1 border-b border-stone-100" }, header),
+                items.map((item) => {
+                    const ItemIcon = item.icon;
+                    return (React.createElement(React.Fragment, { key: item.label },
+                        item.dividerBefore && React.createElement("div", { className: "my-1 border-t border-stone-100" }),
+                        React.createElement("button", { onClick: () => { item.onClick(); if (!item.keepOpen) onClose(); }, disabled: item.disabled, className: `w-full flex items-center gap-2.5 px-3.5 py-2.5 text-sm hover:bg-stone-50 transition text-left disabled:opacity-50 ${item.danger ? "text-red-600" : "text-slate-700"}` },
+                            React.createElement("span", { className: `w-7 h-7 rounded-full flex items-center justify-center shrink-0 ${item.danger ? "bg-red-50 text-red-600" : "bg-red-50 text-[#C43E0E]"}` },
+                                React.createElement(ItemIcon, { size: 13 })),
+                            React.createElement("span", { className: "flex-1" }, item.label),
+                            item.hint && React.createElement("span", { className: "text-[11px] text-slate-400 shrink-0" }, item.hint))));
+                }))))));
 }
 const ATTENDANCE_WARN_THRESHOLD = 75;
 const ATTENDANCE_MIN_MARKED = 3; // erst ab so vielen markierten Einheiten ueberhaupt eine Quote bilden
@@ -4971,6 +4975,8 @@ const TRAINING_LOAD_TYPE_DEFAULTS = {
 // Farbcodierung "Braucht Aufmerksamkeit": jede Art bekommt ihre eigene Farbe,
 // damit man Zeilen (aufgeklappt) und Anzahl-Badges (eingeklappt) auf einen
 // Blick unterscheiden kann.
+const ATTENTION_KIND_LABEL = { injury: "Verletzt/Reha", profile: "Profil", feedback: "Feedback", wellness: "Wellness", attendance: "Anwesenheit", devplan: "Dev-Plan", load: "Belastung" };
+const ATTENTION_PREVIEW_COUNT = 6; // so viele Zeilen zeigt "Braucht Aufmerksamkeit", bevor "Alle anzeigen" kommt
 const ATTENTION_KIND_STYLE = {
     injury: { icon: IconAlert, row: "bg-orange-50 hover:bg-orange-100 border-orange-500", text: "text-orange-700", badge: "bg-orange-500 text-white" },
     profile: { icon: IconEdit, row: "bg-red-50 hover:bg-red-100 border-red-500", text: "text-red-700", badge: "bg-red-500 text-white" },
@@ -4983,7 +4989,9 @@ const ATTENTION_KIND_STYLE = {
 const ATTENTION_KIND_ORDER = ["injury", "profile", "feedback", "wellness", "attendance", "devplan", "load"];
 function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
     const [showEventForm, setShowEventForm] = useState(false);
-    const [attentionExpanded, setAttentionExpanded] = useState(false);
+    const [attentionExpanded, setAttentionExpanded] = useState(true);
+    const [attentionFilter, setAttentionFilter] = useState(null);
+    const [attentionShowAll, setAttentionShowAll] = useState(false);
     const [loadExpanded, setLoadExpanded] = useState(false);
     const [editingEvent, setEditingEvent] = useState(null);
     const days = [];
@@ -5036,18 +5044,20 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
     }
     const hour = new Date().getHours();
     const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Willkommen zurück" : "Guten Abend";
+    // Vier Kennzahlen (statt fuenf), damit das Raster auf Handy (2x2) und
+    // Desktop (1x4) ohne einzelne "Waisen"-Kachel aufgeht.
     const kpiTiles = [
-        { label: "Teams", value: teams.length, icon: IconUsers, grad: "from-slate-900 to-[#8A2C0A]" },
-        { label: "Spieler gesamt", value: players.length, icon: IconUsers, grad: "from-slate-700 to-slate-900" },
-        { label: "Verletzt / Reha", value: outPlayers.length, icon: IconAlert, grad: outPlayers.length > 0 ? "from-amber-500 to-amber-700" : "from-emerald-500 to-emerald-700" },
-        { label: "Monitoring-Check-ins", value: `${checkedInWellness.length}/${players.length}`, icon: IconHeart, grad: "from-[#FF6A2B] to-[#C43E0E]" },
-        { label: "Belastungsalarm", value: loadAlarmRows.length, icon: IconTrendUp, grad: loadAlarmRows.length > 0 ? "from-fuchsia-500 to-fuchsia-700" : "from-emerald-500 to-emerald-700" },
-    ].map((k) => React.createElement("div", { key: k.label, className: "bg-white border border-stone-100 rounded-2xl p-3 sm:p-4 flex items-center gap-2.5 sm:gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)]" },
+        { label: "Spieler", sub: `in ${teams.length} ${teams.length === 1 ? "Team" : "Teams"}`, value: players.length, icon: IconUsers, grad: "from-slate-900 to-[#8A2C0A]" },
+        { label: "Verletzt / Reha", sub: outPlayers.length > 0 ? "fallen aus" : "alle fit", value: outPlayers.length, icon: IconAlert, grad: outPlayers.length > 0 ? "from-amber-500 to-amber-700" : "from-emerald-500 to-emerald-700" },
+        { label: "Check-ins", sub: "diese Woche", value: `${checkedInWellness.length}/${players.length}`, icon: IconHeart, grad: "from-[#FF6A2B] to-[#C43E0E]" },
+        { label: "Belastungsalarm", sub: "ACWR ≥ " + String(ACWR_ALARM).replace(".", ","), value: loadAlarmRows.length, icon: IconTrendUp, grad: loadAlarmRows.length > 0 ? "from-fuchsia-500 to-fuchsia-700" : "from-emerald-500 to-emerald-700" },
+    ].map((k) => React.createElement("div", { key: k.label, className: "bg-white border border-stone-100 rounded-2xl p-3 sm:p-4 flex flex-col items-start sm:flex-row sm:items-center gap-2.5 sm:gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] min-w-0" },
         React.createElement("span", { className: `w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br ${k.grad} text-white flex items-center justify-center shrink-0` },
             React.createElement(k.icon, { size: 16 })),
-        React.createElement("div", { className: "min-w-0" },
-            React.createElement("p", { className: "text-xl font-black text-slate-900 leading-tight" }, k.value),
-            React.createElement("p", { className: "text-[11px] sm:text-xs text-slate-400 uppercase tracking-wide leading-tight" }, k.label))));
+        React.createElement("div", { className: "min-w-0 w-full" },
+            React.createElement("p", { className: "text-xl sm:text-2xl font-black text-slate-900 leading-none tabular-nums" }, k.value),
+            React.createElement("p", { className: "text-xs font-semibold text-slate-600 mt-1 truncate" }, k.label),
+            React.createElement("p", { className: "text-[11px] text-slate-400 truncate" }, k.sub))));
     const terminCard = React.createElement("div", { className: `${cardClass} p-5` },
         React.createElement("div", { className: "flex items-center justify-between" },
             React.createElement(SectionLabel, null, "Nächste Termine"),
@@ -5079,11 +5089,15 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         React.createElement(SectionLabel, null, "Teams"),
         React.createElement("div", { className: "mt-3 space-y-1.5" }, teams.length === 0
             ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch kein Team angelegt.")
-            : teams.map((t, i) => (React.createElement("button", { key: t.id, onClick: () => onSelectTeam(t.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition group" },
-                React.createElement("span", { className: `w-7 h-7 rounded-lg bg-gradient-to-br ${TEAM_COLORS[i % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, (t.name || "?").charAt(0).toUpperCase()),
-                React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, t.name),
-                React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, players.filter((p) => p.teamId === t.id).length, " Spieler"),
-                React.createElement(IconArrowLeft, { size: 12, className: "text-slate-300 group-hover:text-[#C43E0E] rotate-180 shrink-0" }))))));
+            : teams.map((t, i) => {
+                const count = players.filter((p) => p.teamId === t.id).length;
+                return React.createElement("button", { key: t.id, onClick: () => onSelectTeam(t.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition group" },
+                    React.createElement("span", { className: `w-8 h-8 rounded-lg bg-gradient-to-br ${TEAM_COLORS[i % TEAM_COLORS.length]} text-white flex items-center justify-center text-xs font-black shrink-0` }, (t.name || "?").charAt(0).toUpperCase()),
+                    React.createElement("span", { className: "min-w-0 flex-1" },
+                        React.createElement("span", { className: "block text-sm font-semibold text-slate-800 break-words leading-snug" }, t.name),
+                        React.createElement("span", { className: "block text-xs text-slate-400" }, count, " Spieler")),
+                    React.createElement(IconArrowLeft, { size: 12, className: "text-slate-300 group-hover:text-[#C43E0E] rotate-180 shrink-0" }));
+            })));
     const incompleteProfilePlayers = players.filter((p) => p.onboardingCompleted !== true);
     // Anwesenheitsquote aus den direkt in "Alle Einheiten"/"Anwesenheit" markierten
     // Status berechnen (nur vergangene Einheiten, erst ab ein paar entschiedenen
@@ -5133,35 +5147,45 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         return React.createElement("button", { key: item.id, onClick: () => onSelectPlayer(item.player.id), className: `w-full flex items-center gap-2.5 ${style.row} border-l-2 rounded-xl px-3 py-2 text-left transition` },
             React.createElement(style.icon, { size: 14, className: `${style.text} shrink-0` }),
             React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.player.name),
-            React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(item.player.teamId)),
-            React.createElement("span", { className: `text-xs font-medium shrink-0 max-w-[40%] truncate ${style.text}` }, item.label));
+            React.createElement("span", { className: "hidden sm:inline text-xs text-slate-400 shrink-0" }, teamName(item.player.teamId)),
+            React.createElement("span", { className: `text-xs font-medium shrink-0 max-w-[45%] truncate ${style.text}` }, item.label));
     });
     const attentionCountsByKind = attentionItems.reduce((acc, item) => { acc[item.kind] = (acc[item.kind] || 0) + 1; return acc; }, {});
+    // Chips sind gleichzeitig Filter: Klick zeigt nur noch diese Art an.
     const attentionBadges = ATTENTION_KIND_ORDER.filter((k) => attentionCountsByKind[k] > 0).map((k) => {
         const style = ATTENTION_KIND_STYLE[k];
-        return React.createElement("span", { key: k, className: `inline-flex items-center gap-1 text-[11px] font-bold pl-1 pr-1.5 py-0.5 rounded-full ${style.badge}` },
-            React.createElement(style.icon, { size: 10 }),
-            attentionCountsByKind[k]);
+        const active = attentionFilter === k;
+        const dimmed = attentionFilter && !active;
+        return React.createElement("button", { key: k, type: "button", onClick: () => { setAttentionFilter(active ? null : k); setAttentionExpanded(true); setAttentionShowAll(false); }, "aria-pressed": active, className: `inline-flex items-center gap-1 text-[11px] font-bold pl-1.5 pr-2 py-1 rounded-full transition ${style.badge} ${dimmed ? "opacity-35 hover:opacity-70" : ""} ${active ? "ring-2 ring-offset-1 ring-slate-900/30" : ""}` },
+            React.createElement(style.icon, { size: 11 }),
+            ATTENTION_KIND_LABEL[k],
+            React.createElement("span", { className: "tabular-nums opacity-90" }, attentionCountsByKind[k]));
     });
+    const filteredAttentionRows = attentionFilter ? attentionRows.filter((_, i) => attentionItems[i].kind === attentionFilter) : attentionRows;
+    const visibleAttentionRows = attentionShowAll ? filteredAttentionRows : filteredAttentionRows.slice(0, ATTENTION_PREVIEW_COUNT);
     const scheduleConflicts = groupConflictsByEventPair(findScheduleConflicts(events, players, CONFLICT_MIN_OVERLAP_MINUTES));
     const conflictBanner = scheduleConflicts.length > 0 && React.createElement("button", { onClick: onGoToAllUnits, className: "w-full flex items-center gap-2.5 bg-amber-50 hover:bg-amber-100 border-l-2 border-amber-500 rounded-xl px-3 py-2.5 text-left transition" },
         React.createElement(IconAlert, { size: 14, className: "text-amber-600 shrink-0" }),
         React.createElement("span", { className: "text-sm font-semibold text-amber-800 flex-1" }, scheduleConflicts.length, " Terminüberschneidung", scheduleConflicts.length > 1 ? "en" : "", " gefunden"),
         React.createElement("span", { className: "text-xs font-medium text-amber-700 shrink-0" }, "In „Alle Einheiten“ ansehen →"));
     const attentionCard = React.createElement("div", { className: `${cardClass} p-5` },
-        React.createElement("button", { type: "button", onClick: () => setAttentionExpanded((v) => !v), className: "w-full flex items-center justify-between" },
-            React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+        React.createElement("button", { type: "button", onClick: () => setAttentionExpanded((v) => !v), className: "w-full flex items-center justify-between gap-3" },
+            React.createElement("div", { className: "flex items-center gap-2" },
                 React.createElement(SectionLabel, null, "Braucht Aufmerksamkeit"),
-                attentionBadges),
+                React.createElement("span", { className: `text-xs font-bold tabular-nums rounded-full px-2 py-0.5 ${attentionItems.length > 0 ? "bg-slate-900 text-white" : "bg-emerald-100 text-emerald-700"}` }, attentionItems.length)),
             React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform shrink-0 ${attentionExpanded ? "rotate-180" : ""}` })),
+        attentionBadges.length > 1 && React.createElement("div", { className: "flex flex-wrap gap-1.5 mt-3" }, attentionBadges),
         attentionExpanded && React.createElement("div", { className: "mt-3 space-y-1.5" },
             conflictBanner,
             attentionRows.length === 0 && !conflictBanner
                 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Alles im grünen Bereich - keine Auffälligkeiten.")
-                : attentionRows));
+                : visibleAttentionRows,
+            filteredAttentionRows.length > ATTENTION_PREVIEW_COUNT && React.createElement("button", { type: "button", onClick: () => setAttentionShowAll((v) => !v), className: "w-full text-center text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B] pt-2" },
+                attentionShowAll ? "Weniger anzeigen" : `Alle ${filteredAttentionRows.length} anzeigen`)));
     // "Team heute": Trainingsbelastung (sRPE/ACWR) je Spieler, analog zur
     // Team-Uebersicht der Athletik-Trainer-Vorlage - Alarm-/Erhoeht-Zonen zuerst.
     const loadEntryCount = trainingLoadRows.filter((r) => r.todaysEntries.length > 0).length;
+    const loadHighCount = trainingLoadRows.filter((r) => r.zone.label === "Erhöht").length;
     const trainingLoadTableRows = [...trainingLoadRows].sort((a, b) => {
         const rank = (r) => (r.zone.label === "Alarm" ? 0 : r.zone.label === "Erhöht" ? 1 : r.todaysEntries.length === 0 ? 2 : 3);
         return rank(a) - rank(b) || a.player.name.localeCompare(b.player.name);
@@ -5170,7 +5194,9 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         React.createElement("button", { type: "button", onClick: () => setLoadExpanded((v) => !v), className: "w-full flex items-center justify-between" },
             React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
                 React.createElement(SectionLabel, null, "Trainingsbelastung heute"),
-                players.length > 0 && React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, `${loadEntryCount}/${players.length} eingetragen`)),
+                players.length > 0 && React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, `${loadEntryCount}/${players.length} eingetragen`),
+                loadAlarmRows.length > 0 && React.createElement("span", { className: "text-[11px] font-bold rounded-full px-2 py-0.5 bg-fuchsia-500 text-white" }, `${loadAlarmRows.length} Alarm`),
+                loadHighCount > 0 && React.createElement("span", { className: "text-[11px] font-bold rounded-full px-2 py-0.5 bg-amber-100 text-amber-800" }, `${loadHighCount} erhöht`)),
             React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform shrink-0 ${loadExpanded ? "rotate-180" : ""}` })),
         loadExpanded && (players.length === 0
             ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4 mt-3" }, "Noch keine Spieler.")
@@ -5179,14 +5205,14 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                     React.createElement("thead", null,
                         React.createElement("tr", { className: "border-b-2 border-[#C43E0E]/20 bg-stone-50/60 text-slate-500 text-xs uppercase tracking-wide" },
                             React.createElement("th", { className: "text-left px-3 py-2" }, "Spieler"),
-                            React.createElement("th", { className: "text-left px-3 py-2" }, "Team"),
+                            React.createElement("th", { className: "hidden sm:table-cell text-left px-3 py-2" }, "Team"),
                             React.createElement("th", { className: "text-center px-3 py-2" }, "Heute"),
                             React.createElement("th", { className: "text-right px-3 py-2" }, "Load 7T Ø"),
                             React.createElement("th", { className: "text-right px-3 py-2" }, "ACWR"),
                             React.createElement("th", { className: "text-left px-3 py-2" }, "Zone"))),
                     React.createElement("tbody", null, trainingLoadTableRows.map((r) => React.createElement("tr", { key: r.player.id, onClick: () => onSelectPlayer(r.player.id), className: "border-b border-stone-100 last:border-0 odd:bg-stone-50/40 hover:bg-red-50/60 cursor-pointer transition-colors" },
                         React.createElement("td", { className: "px-3 py-2 font-medium text-slate-800 truncate max-w-[160px]" }, r.player.name),
-                        React.createElement("td", { className: "px-3 py-2 text-slate-400" }, teamName(r.player.teamId)),
+                        React.createElement("td", { className: "hidden sm:table-cell px-3 py-2 text-slate-400" }, teamName(r.player.teamId)),
                         React.createElement("td", { className: "px-3 py-2 text-center" }, r.todaysEntries.length > 0
                             ? React.createElement("span", { className: "text-emerald-600 font-bold" }, "S")
                             : React.createElement("span", { className: "text-slate-300" }, "–")),
@@ -5206,13 +5232,13 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                 React.createElement("button", { onClick: onOpenNoteForm, className: btnPrimaryClass + " text-sm px-3.5 py-2 shrink-0" },
                     React.createElement(IconPaperclip, { size: 14 }),
                     " Notiz/Datei für Spieler")),
-            React.createElement("div", { className: "relative grid grid-cols-2 sm:grid-cols-4 gap-4 mt-6" }, kpiTiles)),
+            React.createElement("div", { className: "relative grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 mt-6" }, kpiTiles)),
         showEventForm && (React.createElement(Modal, { title: editingEvent ? "Termin bearbeiten" : "Termin anlegen", onClose: () => setShowEventForm(false), wide: true },
             React.createElement(EventForm, { initialEvent: editingEvent, teams: teams, allPlayers: players, onSubmit: (vals) => { editingEvent ? onEditEvent(editingEvent.id, vals) : onAddEvent(vals); setShowEventForm(false); }, onClose: () => setShowEventForm(false) }))),
         attentionCard,
         trainingLoadCard,
-        React.createElement("div", { className: "grid lg:grid-cols-3 gap-6 items-start" },
-            React.createElement("div", { className: "lg:col-span-2" }, terminCard),
+        React.createElement("div", { className: "grid xl:grid-cols-3 gap-6 items-start" },
+            React.createElement("div", { className: "xl:col-span-2" }, terminCard),
             React.createElement("div", { className: "space-y-6" }, teamsCard))));
 }
 function polarPoint(cx, cy, r, angleDeg) {
@@ -5763,6 +5789,14 @@ const TABS = [
     { key: "feedback", label: "Feedback", icon: IconMessage },
 ];
 const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "noten", "video", "notiz", "entwicklung", "feedback"];
+// Die Reiter der Spieler-Akte sind in vier Bereiche gegliedert (obere Leiste),
+// die Unterreiter erscheinen darunter - statt zwoelf Reitern in einer Reihe.
+const TAB_GROUPS = [
+    { key: "profil", label: "Profil", icon: IconUsers, tabs: ["uebersicht", "steckbrief"] },
+    { key: "leistung", label: "Leistung", icon: IconActivity, tabs: ["statistik", "test"] },
+    { key: "betreuung", label: "Betreuung", icon: IconHeart, tabs: ["wellness", "anwesenheit", "kalender", "noten"] },
+    { key: "entwicklung", label: "Entwicklung", icon: IconTrendUp, tabs: ["entwicklung", "feedback", "notiz", "video"] },
+];
 // Feedback-Loop: Fragen/Kategorien, falls in club/meta noch nichts Eigenes
 // hinterlegt ist (ueber Verwaltung -> Feedback-Fragen anpassbar).
 const DEFAULT_FEEDBACK_QUESTIONS = {
@@ -7202,26 +7236,26 @@ function SpielerAkte() {
     }
     return (React.createElement("div", { className: "min-h-[100dvh] flex flex-col" },
         React.createElement("img", { src: LOGO_FULL_DATA_URI, alt: "", "aria-hidden": "true", className: "fixed -right-16 bottom-0 w-[560px] h-[560px] object-contain opacity-[0.1] pointer-events-none select-none -z-10" }),
-        React.createElement("header", { className: "bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white px-4 sm:px-6 py-3 sm:py-3.5 pt-safe flex items-center justify-between flex-wrap gap-3 sticky top-0 z-10 border-b border-white/10 relative" },
+        React.createElement("header", { className: "bg-gradient-to-r from-slate-900 via-slate-800 to-slate-900 text-white px-4 sm:px-6 py-3 sm:py-3.5 pt-safe flex items-center justify-between gap-2 sm:gap-3 sticky top-0 z-10 border-b border-white/10 relative" },
             React.createElement("div", { className: "absolute bottom-0 left-0 right-0 h-[3px] bg-gradient-to-r from-[#C43E0E] to-[#C43E0E]" }),
-            React.createElement("div", { className: "flex items-center gap-2 sm:gap-3" },
+            React.createElement("div", { className: "flex items-center gap-2 sm:gap-3 min-w-0" },
                 isTrainer && (React.createElement("button", { onClick: () => setMobileSidebarOpen(true), className: "md:hidden p-2 -ml-1 rounded-lg hover:bg-white/10 text-white shrink-0", "aria-label": "Menü öffnen" },
                     React.createElement(IconMenu, { size: 20 }))),
                 isTrainer ? (React.createElement("button", { onClick: goHome, className: "flex items-center gap-3 hover:opacity-80 transition text-left", title: "Zur Startseite" },
                     React.createElement("img", { src: LOGO_DATA_URI, alt: "BB-Player File", className: "h-9 w-9 object-contain shrink-0" }),
                     React.createElement("div", null,
                         React.createElement("div", { className: "flex items-center gap-2 mb-0.5" },
-                            React.createElement("span", { className: "h-[2px] w-5 bg-[#C43E0E]" }),
-                            React.createElement("h1", { className: "font-display text-xl tracking-wide leading-none text-white" }, "SPIELER-AKTE"),
-                            React.createElement("span", { className: "h-[2px] w-5 bg-[#C43E0E]" })),
-                        React.createElement("p", { className: "text-xs text-slate-400" }, "BB-Player File \u00B7 interne \u00DCbersicht")))) : (React.createElement("div", { className: "flex items-center gap-3" },
+                            React.createElement("span", { className: "hidden sm:block h-[2px] w-5 bg-[#C43E0E]" }),
+                            React.createElement("h1", { className: "font-display text-lg sm:text-xl tracking-wide whitespace-nowrap leading-none text-white" }, "SPIELER-AKTE"),
+                            React.createElement("span", { className: "hidden sm:block h-[2px] w-5 bg-[#C43E0E]" })),
+                        React.createElement("p", { className: "hidden sm:block text-xs text-slate-400" }, "BB-Player File \u00B7 interne \u00DCbersicht")))) : (React.createElement("div", { className: "flex items-center gap-3" },
                     React.createElement("img", { src: LOGO_DATA_URI, alt: "BB-Player File", className: "h-9 w-9 object-contain shrink-0" }),
                     React.createElement("div", null,
                         React.createElement("div", { className: "flex items-center gap-2 mb-0.5" },
-                            React.createElement("span", { className: "h-[2px] w-5 bg-[#C43E0E]" }),
-                            React.createElement("h1", { className: "font-display text-xl tracking-wide leading-none text-white" }, "SPIELER-AKTE"),
-                            React.createElement("span", { className: "h-[2px] w-5 bg-[#C43E0E]" })),
-                        React.createElement("p", { className: "text-xs text-slate-400" }, "BB-Player File \u00B7 interne \u00DCbersicht"))))),
+                            React.createElement("span", { className: "hidden sm:block h-[2px] w-5 bg-[#C43E0E]" }),
+                            React.createElement("h1", { className: "font-display text-lg sm:text-xl tracking-wide whitespace-nowrap leading-none text-white" }, "SPIELER-AKTE"),
+                            React.createElement("span", { className: "hidden sm:block h-[2px] w-5 bg-[#C43E0E]" })),
+                        React.createElement("p", { className: "hidden sm:block text-xs text-slate-400" }, "BB-Player File \u00B7 interne \u00DCbersicht"))))),
             React.createElement("div", { className: "flex items-center gap-2 ml-auto" },
                 saveError && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs bg-red-500/15 text-red-300 border border-red-500/30 px-3 py-1.5 rounded-full" },
                     React.createElement(IconAlert, { size: 14 }),
@@ -7236,25 +7270,30 @@ function SpielerAkte() {
                         { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
                         ...(dbbEligibleTeams.length > 0 ? [{ label: "DBB Scores importieren", icon: IconUpload, onClick: () => setModal("importDbbScores") }] : []),
                     ] })),
-                React.createElement(HeaderMenu, { label: "Verwalten", icon: IconSettings, isOpen: openHeaderMenu === "settings", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "settings" ? null : "settings"), onClose: () => setOpenHeaderMenu(null), items: isFullTrainer
-                        ? [
+                // Konto-Menue: ersetzt die fruehere gelbe "Angemeldet als"-Leiste -
+                // Anmeldename, Push-Schalter und Abmelden sitzen jetzt gesammelt hier.
+                React.createElement(HeaderMenu, { label: isFullTrainer ? "Verwalten" : (account.label || (isTrainer ? "Trainer" : "Mein Konto")), icon: isFullTrainer ? IconSettings : IconUsers, isOpen: openHeaderMenu === "settings", onToggle: () => setOpenHeaderMenu(openHeaderMenu === "settings" ? null : "settings"), onClose: () => setOpenHeaderMenu(null),
+                    header: React.createElement(React.Fragment, null,
+                        React.createElement("p", { className: "text-[11px] uppercase tracking-wide text-slate-400" }, "Angemeldet als"),
+                        React.createElement("p", { className: "text-sm font-semibold text-slate-900 truncate" }, account.label || (isTrainer ? "Trainer" : "Spieler-Zugang"))),
+                    items: [
+                        ...(isFullTrainer ? [
                             { label: "Statistik-Kategorien", icon: IconSettings, onClick: () => setModal("statFields") },
                             { label: "Test-Arten", icon: IconClipboard, onClick: () => setModal("testTypes") },
                             { label: "Development-Plan-Fragen", icon: IconClipboard, onClick: () => setModal("devPlanTemplates") },
                             { label: "Feedback-Fragen", icon: IconMessage, onClick: () => setModal("feedbackTemplates") },
                             { label: "Zugänge verwalten", icon: IconLock, onClick: () => setModal("accounts") },
-                            { label: "Abmelden", icon: IconExternal, onClick: handleLogout },
-                        ]
-                        : [{ label: "Abmelden", icon: IconExternal, onClick: handleLogout }] }))),
-        React.createElement("div", { className: "bg-amber-50 border-b border-amber-200 px-4 sm:px-6 py-2 flex items-center justify-between gap-2 text-xs text-amber-800" },
-            React.createElement("span", { className: "flex items-center gap-2 min-w-0" },
-                React.createElement(IconInfo, { size: 14, className: "shrink-0" }),
-                React.createElement("span", { className: "truncate" }, "Angemeldet als ", React.createElement("strong", { className: "font-semibold" }, account.label || (isTrainer ? "Trainer" : "Spieler-Zugang")))),
-            React.createElement("div", { className: "flex items-center gap-3 shrink-0" },
-                messaging && (React.createElement("button", { onClick: () => (notifPermission === "granted" ? disableNotifications() : enableNotifications()), disabled: notifBusy, className: "flex items-center gap-1.5 underline hover:text-amber-950 transition disabled:opacity-50", title: notifPermission === "granted" ? "Benachrichtigungen deaktivieren" : "Benachrichtigungen aktivieren" },
-                    React.createElement(notifPermission === "granted" ? IconBell : IconBellOff, { size: 13 }),
-                    notifPermission === "granted" ? "Push an" : notifPermission === "denied" ? "Push blockiert" : "Push aktivieren")),
-                React.createElement("button", { onClick: handleLogout, className: "underline hover:text-amber-950 transition" }, "Abmelden"))),
+                        ] : []),
+                        ...(messaging ? [{
+                            label: notifPermission === "granted" ? "Push-Benachrichtigungen" : notifPermission === "denied" ? "Push blockiert" : "Push aktivieren",
+                            hint: notifPermission === "granted" ? "an" : notifPermission === "denied" ? "im Browser erlauben" : "aus",
+                            icon: notifPermission === "granted" ? IconBell : IconBellOff,
+                            disabled: notifBusy,
+                            dividerBefore: isFullTrainer,
+                            onClick: () => (notifPermission === "granted" ? disableNotifications() : enableNotifications()),
+                        }] : []),
+                        { label: "Abmelden", icon: IconExternal, onClick: handleLogout, danger: true, dividerBefore: isFullTrainer && !messaging },
+                    ] }))),
         notifError && (React.createElement("div", { className: "bg-red-50 border-b border-red-200 px-4 sm:px-6 py-1.5 text-xs text-red-700" }, notifError)),
         React.createElement("div", { className: "flex flex-col md:flex-row flex-1 relative" },
             isTrainer && mobileSidebarOpen && (React.createElement("div", { className: "fixed inset-0 bg-slate-900/50 backdrop-blur-[2px] z-30 md:hidden rsk-backdrop-in", onClick: () => setMobileSidebarOpen(false) })),
@@ -7299,7 +7338,7 @@ function SpielerAkte() {
                                 React.createElement("span", { className: `block text-sm font-semibold truncate ${selectedPlayerId === p.id ? "text-slate-900" : ""}` }, p.name),
                                 React.createElement("span", { className: "block text-xs truncate text-slate-500" }, p.position)),
                             React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` }))))))))),
-            React.createElement("main", { className: "flex-1 min-w-0 p-6 lg:p-8 max-w-[1440px] mx-auto w-full" },
+            React.createElement("main", { className: "flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1440px] mx-auto w-full" },
                 breadcrumbItems.length > 1 && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs text-slate-500 mb-4 flex-wrap" }, breadcrumbItems.map((b, i) => React.createElement(React.Fragment, { key: i },
                     i > 0 && React.createElement(IconArrowDown, { size: 10, className: "-rotate-90 text-slate-300 shrink-0" }),
                     b.onClick
@@ -7380,11 +7419,11 @@ function SpielerAkte() {
                         React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-[#C43E0E] z-10" }),
                         React.createElement("div", { className: "pointer-events-none select-none absolute inset-0 overflow-hidden", "aria-hidden": "true" },
                             [0.18, 0.62].map((topFrac, i) => React.createElement("div", { key: i, className: "absolute left-0 right-0 whitespace-nowrap text-[15vw] sm:text-[90px] font-black uppercase italic tracking-tight", style: { top: `${topFrac * 100}%`, color: "transparent", WebkitTextStroke: "1px rgba(255,255,255,0.06)" } }, Array(4).fill((selectedTeam?.name || "BB PLAYER FILE") + "  ").join(" ")))),
-                        React.createElement("div", { className: "relative z-[1] p-5 sm:p-7 flex gap-5 sm:gap-7 flex-wrap sm:flex-nowrap" },
+                        React.createElement("div", { className: "relative z-[1] p-4 sm:p-7 flex gap-4 sm:gap-7" },
                             React.createElement("div", { className: "relative shrink-0" },
                                 selectedPlayer.photoUrl
-                                    ? React.createElement("img", { src: selectedPlayer.photoUrl, alt: selectedPlayer.name, className: "w-20 h-24 sm:w-24 sm:h-28 rounded-xl object-cover shadow-[0_8px_24px_rgba(0,0,0,0.35)]" })
-                                    : React.createElement("div", { className: "w-20 h-24 sm:w-24 sm:h-28 rounded-xl bg-black/25 border border-white/10 flex items-center justify-center p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]" },
+                                    ? React.createElement("img", { src: selectedPlayer.photoUrl, alt: selectedPlayer.name, className: "w-16 h-20 sm:w-24 sm:h-28 rounded-xl object-cover shadow-[0_8px_24px_rgba(0,0,0,0.35)]" })
+                                    : React.createElement("div", { className: "w-16 h-20 sm:w-24 sm:h-28 rounded-xl bg-black/25 border border-white/10 flex items-center justify-center p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]" },
                                         React.createElement("img", { src: LOGO_DATA_URI, alt: "", className: "w-full h-full object-contain opacity-70" })),
                                 React.createElement("div", { className: "absolute -bottom-2 left-2 flex gap-1" },
                                     selectedPlayer.number !== "" && selectedPlayer.number !== undefined && React.createElement("span", { className: "min-w-[28px] text-center bg-white text-slate-900 text-sm font-black rounded-lg px-1.5 py-1 shadow" }, selectedPlayer.number),
@@ -7393,16 +7432,16 @@ function SpielerAkte() {
                                 React.createElement("div", { className: "flex items-start justify-between gap-3" },
                                     React.createElement("div", { className: "min-w-0" },
                                         !isTrainer && selectedPlayer.id === account.playerId && (React.createElement("p", { className: "text-sm font-medium text-[#FF6A2B] mb-1" }, playerGreeting, ", ", splitName(selectedPlayer.name).first || selectedPlayer.name)),
-                                        React.createElement("h2", { className: "font-display italic font-black uppercase text-2xl sm:text-4xl leading-[0.95] text-white break-words" }, selectedPlayer.name),
+                                        React.createElement("h2", { className: "font-display italic font-black uppercase text-xl sm:text-4xl leading-[0.95] text-white [overflow-wrap:anywhere] [hyphens:auto]" }, selectedPlayer.name),
                                         React.createElement("div", { className: "flex items-center gap-2 mt-2 flex-wrap" },
                                             React.createElement("p", { className: "text-sm text-white/60" }, selectedTeam?.name || "Kein Team"),
                                             STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label)),
                                             getLeagueLogo(selectedTeam?.altersklasse) && React.createElement("img", { src: getLeagueLogo(selectedTeam?.altersklasse), alt: selectedTeam?.altersklasse || "", className: "h-5 w-auto rounded-[3px] opacity-90" }))),
                                     React.createElement("div", { className: "flex gap-2 shrink-0" },
                                         isTrainer && (React.createElement(React.Fragment, null,
-                                            React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-2 rounded-lg bg-black/20 hover:bg-black/35 text-white/80", "aria-label": "Bearbeiten" },
+                                            React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-black/35 text-white/80", "aria-label": "Bearbeiten" },
                                                 React.createElement(IconEdit, { size: 16 })),
-                                            React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-2 rounded-lg bg-black/20 hover:bg-red-500/40 text-white/80", "aria-label": "Löschen" },
+                                            React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-red-500/40 text-white/80", "aria-label": "Löschen" },
                                                 React.createElement(IconTrash, { size: 16 })))),
                                         !isTrainer && selectedPlayer.id === account.playerId && (React.createElement("button", { onClick: () => setModal("selfProfile"), className: "flex items-center gap-1.5 text-xs font-medium p-2 sm:px-3 sm:py-1.5 rounded-full bg-black/20 hover:bg-black/35 text-white/80 transition shrink-0", "aria-label": "Meine Daten bearbeiten" },
                                             React.createElement(IconEdit, { size: 13 }),
@@ -7449,16 +7488,62 @@ function SpielerAkte() {
                         React.createElement("div", { className: "flex gap-2" },
                             React.createElement("button", { onClick: () => setConfirmDeletePlayer(false), className: "px-3 py-1.5 text-sm rounded-lg border border-stone-300 text-slate-600 hover:bg-stone-50" }, "Abbrechen"),
                             React.createElement("button", { onClick: handleDeletePlayer, className: "px-3 py-1.5 text-sm rounded-lg bg-red-600 text-white hover:bg-red-700" }, "Endg\u00FCltig l\u00F6schen")))),
-                    React.createElement("div", { className: "flex gap-5 border-b border-stone-200 mt-6 overflow-x-auto" }, TABS.filter((t) => (isTrainer || PLAYER_ROLE_TABS.includes(t.key)) && !(isAbgespeckteAkte && t.key === "test")).map((t) => {
-                        const Icon = t.icon;
-                        const active = activeTab === t.key;
-                        return (React.createElement("button", { key: t.key, onClick: () => setActiveTab(t.key), className: `flex items-center gap-1.5 pb-2.5 px-0.5 text-sm font-semibold whitespace-nowrap border-b-2 transition-colors shrink-0 ${active ? "border-[#C43E0E] text-slate-900" : "border-transparent text-slate-400 hover:text-slate-600"}` },
-                            React.createElement(Icon, { size: 15, className: active ? "text-[#C43E0E]" : "" }),
-                            t.label));
-                    })),
+                    (() => {
+                        const visibleTabKeys = TABS.filter((t) => (isTrainer || PLAYER_ROLE_TABS.includes(t.key)) && !(isAbgespeckteAkte && t.key === "test")).map((t) => t.key);
+                        const groups = TAB_GROUPS.map((g) => ({ ...g, tabs: g.tabs.filter((k) => visibleTabKeys.includes(k)) })).filter((g) => g.tabs.length > 0);
+                        const activeGroup = groups.find((g) => g.tabs.includes(activeTab)) || groups[0];
+                        return React.createElement("div", { className: "mt-6" },
+                            React.createElement("div", { className: "grid gap-1 p-1 bg-stone-100 rounded-2xl", style: { gridTemplateColumns: `repeat(${groups.length}, minmax(0, 1fr))` } }, groups.map((g) => {
+                                const active = g.key === activeGroup.key;
+                                return React.createElement("button", { key: g.key, onClick: () => { if (!active) setActiveTab(g.tabs[0]); }, "aria-pressed": active, className: `flex flex-col sm:flex-row items-center justify-center gap-0.5 sm:gap-2 px-1 py-2 sm:py-2.5 rounded-xl text-[11px] sm:text-sm font-semibold transition min-w-0 ${active ? "bg-white text-slate-900 shadow-[0_1px_2px_rgba(0,0,0,0.06),0_2px_8px_rgba(0,0,0,0.06)]" : "text-slate-500 hover:text-slate-800"}` },
+                                    React.createElement(g.icon, { size: 16, className: active ? "text-[#C43E0E]" : "" }),
+                                    React.createElement("span", { className: "truncate max-w-full" }, g.label));
+                            })),
+                            activeGroup.tabs.length > 1 && React.createElement("div", { className: "flex gap-1.5 mt-3 overflow-x-auto -mx-1 px-1 pb-0.5" }, activeGroup.tabs.map((key) => {
+                                const t = TABS.find((x) => x.key === key);
+                                const Icon = t.icon;
+                                const active = activeTab === key;
+                                return React.createElement("button", { key: key, onClick: () => setActiveTab(key), "aria-pressed": active, className: `flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 transition border ${active ? "bg-slate-900 border-slate-900 text-white" : "bg-white border-stone-200 text-slate-500 hover:text-slate-800 hover:border-stone-300"}` },
+                                    React.createElement(Icon, { size: 13, className: active ? "text-[#FF6A2B]" : "" }),
+                                    t.label);
+                            })));
+                    })(),
                     React.createElement("div", { className: "mt-5 min-w-0" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
-                            React.createElement("div", null,
+                            // Spieler-Zugang: offene Aufgaben (Belastung/Check-in) direkt auf der
+                            // Startseite, damit niemand erst den Monitoring-Reiter suchen muss.
+                            !isTrainer && selectedPlayer.id === account.playerId && (() => {
+                                const todayKeyTasks = today();
+                                const weekAgo = new Date();
+                                weekAgo.setDate(weekAgo.getDate() - 7);
+                                const weekAgoKey = isoDate(weekAgo);
+                                const loggedIds = new Set(playerTrainingLoadEntries.map((e) => e.eventId).filter(Boolean));
+                                const openLoadCount = playerTrainingLoadEvents.filter((e) => e.date && e.date <= todayKeyTasks && e.date >= weekAgoKey && !loggedIds.has(e.id)).length;
+                                const wellnessDone = playerWellnessEntries.some((e) => e.weekKey === isoWeekKey(todayKeyTasks));
+                                const tasks = [
+                                    { key: "load", done: openLoadCount === 0, icon: IconTrendUp, title: openLoadCount === 0 ? "Belastung ist eingetragen" : `${openLoadCount} ${openLoadCount === 1 ? "Einheit" : "Einheiten"} bewerten`, sub: openLoadCount === 0 ? "Keine offenen Einheiten der letzten 7 Tage" : "Wie anstrengend war's? Dauert 10 Sekunden." },
+                                    { key: "wellness", done: wellnessDone, icon: IconHeart, title: wellnessDone ? "Wellness-Check-in erledigt" : "Wellness-Check-in ausfüllen", sub: wellnessDone ? "Für diese Woche abgegeben" : "Einmal pro Woche - Erschöpfung, Energie, Stress" },
+                                ];
+                                const openCount = tasks.filter((t) => !t.done).length;
+                                return React.createElement("div", { className: `${cardClass} p-4 sm:p-5` },
+                                    React.createElement("div", { className: "flex items-center gap-2 mb-3" },
+                                        React.createElement(SectionLabel, null, "Deine Aufgaben"),
+                                        openCount > 0 && React.createElement("span", { className: "text-[11px] font-bold rounded-full px-2 py-0.5 bg-[#C43E0E] text-white" }, openCount, " offen")),
+                                    React.createElement("div", { className: "space-y-2" }, tasks.map((t) => React.createElement("button", { key: t.key, onClick: () => setActiveTab("wellness"), className: `w-full flex items-center gap-3 rounded-xl px-3 py-3 text-left transition ${t.done ? "bg-emerald-50/70 hover:bg-emerald-50" : "bg-red-50 hover:bg-red-100/70"}` },
+                                        React.createElement("span", { className: `w-9 h-9 rounded-xl flex items-center justify-center shrink-0 ${t.done ? "bg-emerald-500 text-white" : "bg-gradient-to-br from-[#FF6A2B] to-[#C43E0E] text-white"}` },
+                                            React.createElement(t.done ? IconCheck : t.icon, { size: 16 })),
+                                        React.createElement("span", { className: "min-w-0 flex-1" },
+                                            React.createElement("span", { className: `block text-sm font-semibold ${t.done ? "text-emerald-800" : "text-slate-900"}` }, t.title),
+                                            React.createElement("span", { className: "block text-xs text-slate-500" }, t.sub)),
+                                        !t.done && React.createElement(IconArrowLeft, { size: 14, className: "text-[#C43E0E] rotate-180 shrink-0" })))));
+                            })(),
+                            playerStats.length === 0 ? React.createElement("div", { className: "bg-white rounded-2xl border border-dashed border-stone-300 p-4 sm:p-5 flex items-start gap-3 sm:gap-4" },
+                                React.createElement("span", { className: "w-10 h-10 rounded-xl bg-stone-100 text-slate-400 flex items-center justify-center shrink-0" },
+                                    React.createElement(IconActivity, { size: 18 })),
+                                React.createElement("div", { className: "min-w-0 flex-1" },
+                                    React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, "Noch keine Spiele erfasst"),
+                                    React.createElement("p", { className: "text-xs text-slate-500 mt-0.5" }, "Punkte, Rebounds & Co. erscheinen hier, sobald das erste Spiel eingetragen ist."),
+                                    isTrainer && React.createElement("button", { onClick: () => setActiveTab("statistik"), className: "mt-2 text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B]" }, "Spiel eintragen →"))) : React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Auf einen Blick"),
                                 React.createElement("div", { className: "grid grid-cols-3 gap-3 mt-1.5" }, (isAbgespeckteAkte ? [
                                     { label: "Minuten", id: "minuten", color: "from-slate-700 to-slate-900", num: "text-slate-800" },
@@ -7477,7 +7562,7 @@ function SpielerAkte() {
                                     React.createElement("span", { className: `absolute top-0 left-0 right-0 h-1 bg-gradient-to-r ${x.color}` }),
                                     React.createElement("p", { className: `text-lg font-bold mt-1 ${x.num}` }, x.id === "__ft_pct" ? totalPct("ft_m", "ft_a") : avg(x.id)),
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
-                            !isAbgespeckteAkte && React.createElement("div", null,
+                            !isAbgespeckteAkte && playerStats.length > 0 && React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Details"),
                                 React.createElement("div", { className: "space-y-2 mt-1.5" }, statCategories.filter((cat) => (isTrainer || cat.id !== "advanced") && cat.id !== "dbbScores").map((cat) => {
                                     if (cat.fields.length === 0)
