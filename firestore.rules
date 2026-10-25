@@ -118,6 +118,13 @@ service cloud.firestore {
       allow read, write: if playerBelongsToTrainerTeam(playerId) || myPlayerId() == playerId;
     }
 
+    // DBB-Spielplan/Ergebnisse/Tabelle je Team - schreibt nur die Cloud Function
+    // (syncDbbScheduled/syncDbbNow, Admin-Rechte); oeffentliche Daten vom DBB.
+    match /dbbTeams/{teamId} {
+      allow read: if isSignedIn();
+      allow write: if false;
+    }
+
     // Kalender: Team-Termine sind für Trainer und Spieler desselben Teams lesbar,
     // individuelle Termine für Trainer und ausdrücklich eingeladene Spieler -
     // inkl. team-beschraenkter Trainer, deren eigener Spieler bei einem Termin

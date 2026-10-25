@@ -95,6 +95,9 @@ function SpielerAkte() {
     const [trainingLoadData, setTrainingLoadData] = useState({}); // { [playerId]: { entries: [] } }, sRPE-Trainingsbelastung, Trainer: alle, Spieler: nur eigene
     const [gradesData, setGradesData] = useState({}); // { [playerId]: { subjects: [] } }, Trainer: alle, Spieler: nur eigene
     const [calendarEvents, setCalendarEvents] = useState([]);
+    const [dbbData, setDbbData] = useState({}); // { [teamId]: dbbTeams-Dokument } - Spielplan/Ergebnisse/Tabelle aus dem DBB-Abgleich (Cloud Function)
+    const [dbbSyncing, setDbbSyncing] = useState(false);
+    const [statsImportPreset, setStatsImportPreset] = useState(null); // { teamId, date, gegner } - aus der Dashboard-Erinnerung "Statistik fehlt"
     const [devPlanWaiting, setDevPlanWaiting] = useState([]); // Zyklen, die der Spieler freigegeben hat, der Trainer aber noch nicht (fuer Dashboard-Hinweis)
     const [feedbackWaiting, setFeedbackWaiting] = useState([]); // Offene Spieler->Trainer-Feedback-Anfragen (fuer Dashboard-Hinweis, keine Push)
     const [eventAttendance, setEventAttendance] = useState({}); // { [eventId]: { [playerId]: "present"|"absent" } } - direkt in "Alle Einheiten" markiert
@@ -388,6 +391,37 @@ function SpielerAkte() {
         loadData();
         return () => { cancelled = true; };
     }, [account]);
+    // DBB-Spielplan live mitlesen: die Cloud Function schreibt dbbTeams/{teamId}.
+    // Fehler (z. B. Firestore-Regel noch nicht eingetragen) lassen die Daten leer.
+    useEffect(() => {
+        if (!account)
+            return;
+        const unsub = db.collection("dbbTeams").onSnapshot((snap) => {
+            setDbbData(Object.fromEntries(snap.docs.map((d) => [d.id, d.data()])));
+        }, () => setDbbData({}));
+        return () => unsub();
+    }, [account]);
+    async function runDbbSync() {
+        setDbbSyncing(true);
+        try {
+            await functionsInstance.httpsCallable("syncDbbNow")({});
+            // Neu angelegte/verknuepfte Spiele direkt in den Kalender holen
+            const scopeTeamId = account?.teamId || null;
+            const evSnap = await (scopeTeamId ? db.collection("calendarEvents").where("involvedTeamIds", "array-contains", scopeTeamId) : db.collection("calendarEvents")).get();
+            setCalendarEvents(evSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+        }
+        catch (e) {
+            console.warn("DBB-Abgleich fehlgeschlagen", e);
+        }
+        finally {
+            setDbbSyncing(false);
+        }
+    }
+    function openStatsImport(preset) {
+        const team = teams.find((t) => t.id === preset.teamId);
+        setStatsImportPreset(preset);
+        setModal(team && DBB_SCORES_ALTERSKLASSEN.includes(team.altersklasse) ? "importDbbScores" : "importBoxscore");
+    }
     useEffect(() => {
         if (account?.role === "player" && account.playerId && !selectedPlayerId) {
             setSelectedPlayerId(account.playerId);
@@ -1103,8 +1137,11 @@ function SpielerAkte() {
         const newTeam = { id: uid(), ...team };
         persistMeta({ teams: [...meta.teams, newTeam] });
     }
-    function handleEditTeam(id, changes) {
-        persistMeta({ teams: meta.teams.map((t) => (t.id === id ? { ...t, ...changes } : t)) });
+    async function handleEditTeam(id, changes) {
+        const before = meta.teams.find((t) => t.id === id);
+        await persistMeta({ teams: meta.teams.map((t) => (t.id === id ? { ...t, ...changes } : t)) });
+        if ((before?.dbbTeamId || "") !== (changes.dbbTeamId || ""))
+            runDbbSync();
     }
     function handleAddPlayer(player) {
         const newId = uid();
@@ -1479,10 +1516,10 @@ function SpielerAkte() {
                         { label: "Kalender importieren (.ics)", icon: IconCalendar, onClick: () => setModal("importCalendar") },
                         { label: "Kalender aus Screenshot (Beta)", icon: IconUpload, onClick: () => setModal("importScreenshot") },
                         { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
-                        { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => setModal("importBoxscore") },
+                        { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => { setStatsImportPreset(null); setModal("importBoxscore"); } },
                         { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
                         { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
-                        ...(dbbEligibleTeams.length > 0 ? [{ label: "DBB Scores importieren", icon: IconUpload, onClick: () => setModal("importDbbScores") }] : []),
+                        ...(dbbEligibleTeams.length > 0 ? [{ label: "DBB Scores importieren", icon: IconUpload, onClick: () => { setStatsImportPreset(null); setModal("importDbbScores"); } }] : []),
                     ] })),
                 // Konto-Menue: ersetzt die fruehere gelbe "Angemeldet als"-Leiste -
                 // Anmeldename, Push-Schalter und Abmelden sitzen jetzt gesammelt hier.
@@ -1633,16 +1670,17 @@ function SpielerAkte() {
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
                 !selectedPlayer && showPlayers && isTrainer && (React.createElement(PlayersPage, { players: players, teams: visibleTeams, onSelectPlayer: selectPlayer, onOpenTeam: goTeam, onAddPlayer: () => setModal("player"), canAddPlayer: visibleTeams.length > 0 })),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits, dbbData: dbbData, dbbSyncing: dbbSyncing, onRefreshDbb: runDbbSync, onOpenStatsImport: openStatsImport, onManageTeams: isFullTrainer ? () => setModal("teams") : null })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
                     React.createElement("p", { className: "text-sm" }, "L\u00E4dt\u2026"))),
                                 selectedPlayer && (React.createElement("div", { className: "rsk-fade-in min-w-0" },
-                    React.createElement("div", { className: "rounded-2xl overflow-hidden relative bg-gradient-to-br from-slate-900 to-slate-800" },
+                    React.createElement("div", { className: "rounded-2xl overflow-hidden relative bg-gradient-to-br from-slate-950 via-slate-900 to-[#3a1407]" },
                         React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-[#C43E0E] z-10" }),
+                        // Vereinslogo gross und dezent als Wasserzeichen (statt des frueheren wiederholten Team-Schriftzugs)
                         React.createElement("div", { className: "pointer-events-none select-none absolute inset-0 overflow-hidden", "aria-hidden": "true" },
-                            [0.18, 0.62].map((topFrac, i) => React.createElement("div", { key: i, className: "absolute left-0 right-0 whitespace-nowrap text-[15vw] sm:text-[90px] font-black uppercase italic tracking-tight", style: { top: `${topFrac * 100}%`, color: "transparent", WebkitTextStroke: "1px rgba(255,255,255,0.06)" } }, Array(4).fill((selectedTeam?.name || "BB PLAYER FILE") + "  ").join(" ")))),
+                            React.createElement("img", { src: LOGO_DATA_URI, alt: "", className: "absolute -right-8 -bottom-10 sm:-right-6 sm:-bottom-16 w-52 sm:w-80 opacity-[0.08]" })),
                         React.createElement("div", { className: "relative z-[1] p-4 sm:p-7 flex gap-4 sm:gap-7" },
                             React.createElement("div", { className: "relative shrink-0" },
                                 selectedPlayer.photoUrl
@@ -2102,12 +2140,12 @@ function SpielerAkte() {
         modal === "importScreenshot" && (React.createElement(Modal, { title: "Kalender aus Screenshot importieren (Beta)", onClose: () => setModal(null), wide: true },
             React.createElement(ScreenshotImportModal, { teams: teams, allPlayers: players, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
         modal === "importBoxscore" && (React.createElement(Modal, { title: "Boxscore einf\u00FCgen", onClose: () => setModal(null), wide: true },
-            React.createElement(BoxscoreImportModal, { players: players, teams: teams, onConfirm: handleImportBoxscore, onClose: () => setModal(null) }))),
+            React.createElement(BoxscoreImportModal, { players: players, teams: teams, preset: statsImportPreset, onConfirm: handleImportBoxscore, onClose: () => setModal(null) }))),
         modal === "importAdvanced" && (React.createElement(Modal, { title: "Advanced Stats importieren", onClose: () => setModal(null), wide: true },
             React.createElement(AdvancedStatsImportModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
         modal === "advancedRechnerLive" && (React.createElement(Modal, { title: "Advanced-Rechner verbinden", onClose: () => setModal(null), wide: true },
             React.createElement(AdvancedRechnerLiveModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
         modal === "importDbbScores" && (React.createElement(Modal, { title: "DBB Scores importieren", onClose: () => setModal(null), wide: true },
-            React.createElement(DbbScoresImportModal, { teams: dbbEligibleTeams, allPlayers: players, onConfirm: handleImportDbbScores, onClose: () => setModal(null) })))));
+            React.createElement(DbbScoresImportModal, { teams: dbbEligibleTeams, allPlayers: players, preset: statsImportPreset, onConfirm: handleImportDbbScores, onClose: () => setModal(null) })))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(SpielerAkte, null));

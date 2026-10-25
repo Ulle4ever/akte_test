@@ -51,10 +51,17 @@ function getLeagueLogo(altersklasse) {
         return LOGO_WBV_DATA_URI;
     return null;
 }
+// "163337", ".../team/163337", "...teamId=163337" -> 163337 (gleiche Logik wie in functions/index.js)
+function parseDbbTeamId(value) {
+    const s = String(value || "").trim();
+    const m = s.match(/team(?:id)?[\/=](\d{4,})/i) || s.match(/^(\d{4,})$/);
+    return m ? Number(m[1]) : null;
+}
 function TeamForm({ initial, onSubmit, onClose }) {
     const [name, setName] = useState(initial?.name || "");
     const [altersklasse, setAltersklasse] = useState(initial?.altersklasse || "");
     const [trainer, setTrainer] = useState(initial?.trainer || "");
+    const [dbbTeamId, setDbbTeamId] = useState(initial?.dbbTeamId ? String(initial.dbbTeamId) : "");
     const [error, setError] = useState("");
     function handleSubmit(e) {
         e.preventDefault();
@@ -62,7 +69,12 @@ function TeamForm({ initial, onSubmit, onClose }) {
             setError("Bitte einen Teamnamen eingeben.");
             return;
         }
-        onSubmit({ name: name.trim(), altersklasse, trainer: trainer.trim() });
+        const parsedDbbId = parseDbbTeamId(dbbTeamId);
+        if (dbbTeamId.trim() && !parsedDbbId) {
+            setError("DBB-Team: bitte die Team-ID (z. B. 163337) oder einen Link von basketball-bund.net mit /team/… einfügen.");
+            return;
+        }
+        onSubmit({ name: name.trim(), altersklasse, trainer: trainer.trim(), dbbTeamId: parsedDbbId ? String(parsedDbbId) : "" });
         onClose();
     }
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
@@ -75,6 +87,9 @@ function TeamForm({ initial, onSubmit, onClose }) {
                 ALTERSKLASSE_OPTIONS.map((a) => React.createElement("option", { key: a, value: a }, a)))),
         React.createElement(Field, { label: "Cheftrainer" },
             React.createElement("input", { className: inputClass, value: trainer, onChange: (e) => setTrainer(e.target.value), placeholder: "Name" })),
+        React.createElement(Field, { label: "DBB-Spielplan (optional)" },
+            React.createElement("input", { className: inputClass, value: dbbTeamId, onChange: (e) => { setDbbTeamId(e.target.value); setError(""); }, placeholder: "Team-ID oder Link von basketball-bund.net" }),
+            React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Damit kommen Spielplan, Ergebnisse und Tabelle automatisch ins Dashboard und die Spiele in den Kalender.")),
         React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Speichern" : "Team anlegen")));
 }
 function PlayerForm({ teams, initial, onSubmit, onClose }) {
@@ -1362,14 +1377,14 @@ function AttendanceImportModal({ players, teams, onConfirm, onClose }) {
                 matchedCount,
                 " Eintr\u00E4ge importieren"))));
 }
-function BoxscoreImportModal({ players, teams, onConfirm, onClose }) {
+function BoxscoreImportModal({ players, teams, onConfirm, onClose, preset }) {
     const [stage, setStage] = useState("paste");
     const [text, setText] = useState("");
     const [parseError, setParseError] = useState("");
     const [filePlayers, setFilePlayers] = useState([]);
     const [matches, setMatches] = useState([]);
-    const [date, setDate] = useState(today());
-    const [gegner, setGegner] = useState("");
+    const [date, setDate] = useState(preset?.date || today());
+    const [gegner, setGegner] = useState(preset?.gegner || "");
     const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
     const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}${p.teamId ? " (" + teamName(p.teamId) + ")" : ""}`;
     function handleParse() {
@@ -1544,11 +1559,11 @@ function parseDbbFraction(raw) {
     const m = (raw || "").match(/(\d+)\s*\/\s*(\d+)/);
     return m ? { made: parseInt(m[1], 10), att: parseInt(m[2], 10) } : { made: null, att: null };
 }
-function DbbScoresImportModal({ teams, allPlayers, onConfirm, onClose }) {
+function DbbScoresImportModal({ teams, allPlayers, onConfirm, onClose, preset }) {
     const [stage, setStage] = useState("setup");
-    const [teamId, setTeamId] = useState(teams[0]?.id || "");
-    const [date, setDate] = useState(today());
-    const [gegner, setGegner] = useState("");
+    const [teamId, setTeamId] = useState((preset?.teamId && teams.some((t) => t.id === preset.teamId) ? preset.teamId : null) || teams[0]?.id || "");
+    const [date, setDate] = useState(preset?.date || today());
+    const [gegner, setGegner] = useState(preset?.gegner || "");
     const [progress, setProgress] = useState({ done: 0, total: 0 });
     const [parseError, setParseError] = useState("");
     const [shot1Rows, setShot1Rows] = useState([]);

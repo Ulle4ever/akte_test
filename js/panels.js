@@ -68,7 +68,7 @@ const TRAINING_LOAD_TYPE_DEFAULTS = {
 // Farbcodierung "Braucht Aufmerksamkeit": jede Art bekommt ihre eigene Farbe,
 // damit man Zeilen (aufgeklappt) und Anzahl-Badges (eingeklappt) auf einen
 // Blick unterscheiden kann.
-const ATTENTION_KIND_LABEL = { injury: "Verletzt/Reha", profile: "Profil", feedback: "Feedback", wellness: "Wellness", attendance: "Anwesenheit", devplan: "Dev-Plan", load: "Belastung" };
+const ATTENTION_KIND_LABEL = { injury: "Verletzt/Reha", stats: "Statistik", profile: "Profil", feedback: "Feedback", wellness: "Wellness", attendance: "Anwesenheit", devplan: "Dev-Plan", load: "Belastung" };
 const ATTENTION_PREVIEW_COUNT = 6; // so viele Zeilen zeigt "Braucht Aufmerksamkeit", bevor "Alle anzeigen" kommt
 const ATTENTION_KIND_STYLE = {
     injury: { icon: IconAlert, row: "bg-orange-50 hover:bg-orange-100 border-orange-500", text: "text-orange-700", badge: "bg-orange-500 text-white" },
@@ -78,9 +78,44 @@ const ATTENTION_KIND_STYLE = {
     attendance: { icon: IconActivity, row: "bg-teal-50 hover:bg-teal-100 border-teal-500", text: "text-teal-700", badge: "bg-teal-500 text-white" },
     devplan: { icon: IconClipboard, row: "bg-blue-50 hover:bg-blue-100 border-blue-500", text: "text-blue-700", badge: "bg-blue-500 text-white" },
     load: { icon: IconTrendUp, row: "bg-fuchsia-50 hover:bg-fuchsia-100 border-fuchsia-500", text: "text-fuchsia-700", badge: "bg-fuchsia-500 text-white" },
+    stats: { icon: IconClipboard, row: "bg-sky-50 hover:bg-sky-100 border-sky-500", text: "text-sky-700", badge: "bg-sky-500 text-white" },
 };
-const ATTENTION_KIND_ORDER = ["injury", "profile", "feedback", "wellness", "attendance", "devplan", "load"];
-function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits }) {
+const ATTENTION_KIND_ORDER = ["injury", "stats", "profile", "feedback", "wellness", "attendance", "devplan", "load"];
+// DBB-Spielplan (dbbTeams/{teamId}, geschrieben von der Cloud Function)
+const DBB_STATS_REMINDER_DAYS = 14; // so lange nach einem Spiel erinnert das Dashboard an fehlende Statistik
+function dbbOpponent(m) {
+    return m.isHome ? m.guest : m.home;
+}
+function dbbScore(m) {
+    const [h, g] = String(m.result || "").split(":").map((x) => parseInt(x, 10));
+    if (isNaN(h) || isNaN(g))
+        return null;
+    const us = m.isHome ? h : g, them = m.isHome ? g : h;
+    return { us, them, won: us > them };
+}
+function daysFromToday(dateStr) {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return Math.round((new Date(dateStr + "T00:00:00") - t) / 86400000);
+}
+function relativeDayLabel(dateStr) {
+    const n = daysFromToday(dateStr);
+    return n === 0 ? "Heute" : n === 1 ? "Morgen" : n === -1 ? "Gestern" : n > 1 ? `in ${n} Tagen` : `vor ${-n} Tagen`;
+}
+function shortDateLabel(dateStr) {
+    return new Date(dateStr + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" });
+}
+// Pro Team: naechstes Spiel, letztes Ergebnis, eigener Tabellenplatz
+function dbbTeamSummary(doc) {
+    const todayIso = today();
+    const matches = (doc?.matches || []).filter((m) => m.date);
+    const next = matches.find((m) => !m.cancelled && (m.date > todayIso || (m.date === todayIso && !m.result))) || null;
+    const last = [...matches].reverse().find((m) => dbbScore(m)) || null;
+    const table = (doc?.tables || [])[0] || null;
+    const us = table ? table.entries.find((e) => e.isUs) : null;
+    return { next, last, table, us };
+}
+function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits, dbbData, dbbSyncing, onRefreshDbb, onOpenStatsImport, onManageTeams }) {
     const [showEventForm, setShowEventForm] = useState(false);
     const [attentionExpanded, setAttentionExpanded] = useState(true);
     const [attentionFilter, setAttentionFilter] = useState(null);
@@ -136,24 +171,91 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         setShowEventForm(true);
     }
     const hour = new Date().getHours();
-    const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Willkommen zurück" : "Guten Abend";
-    // Vier Kennzahlen (statt fuenf), damit das Raster auf Handy (2x2) und
-    // Desktop (1x4) ohne einzelne "Waisen"-Kachel aufgeht.
-    const kpiTiles = [
-        { label: "Spieler", sub: `in ${teams.length} ${teams.length === 1 ? "Team" : "Teams"}`, value: players.length, icon: IconUsers, grad: "from-slate-900 to-[#8A2C0A]" },
-        { label: "Verletzt / Reha", sub: outPlayers.length > 0 ? "fallen aus" : "alle fit", value: outPlayers.length, icon: IconAlert, grad: outPlayers.length > 0 ? "from-amber-500 to-amber-700" : "from-emerald-500 to-emerald-700" },
-        { label: "Check-ins", sub: "diese Woche", value: `${checkedInWellness.length}/${players.length}`, icon: IconHeart, grad: "from-[#FF6A2B] to-[#C43E0E]" },
-        { label: "Belastungsalarm", sub: "ACWR ≥ " + String(ACWR_ALARM).replace(".", ","), value: loadAlarmRows.length, icon: IconTrendUp, grad: loadAlarmRows.length > 0 ? "from-fuchsia-500 to-fuchsia-700" : "from-emerald-500 to-emerald-700" },
-    ].map((k) => React.createElement("div", { key: k.label, className: "bg-white border border-stone-100 rounded-2xl p-3 sm:p-4 flex flex-col items-start sm:flex-row sm:items-center gap-2.5 sm:gap-3 shadow-[0_1px_2px_rgba(0,0,0,0.04)] min-w-0" },
-        React.createElement("span", { className: `w-9 h-9 sm:w-10 sm:h-10 rounded-xl bg-gradient-to-br ${k.grad} text-white flex items-center justify-center shrink-0` },
-            React.createElement(k.icon, { size: 16 })),
-        React.createElement("div", { className: "min-w-0 w-full" },
-            React.createElement("p", { className: "text-xl sm:text-2xl font-black text-slate-900 leading-none tabular-nums" }, k.value),
-            React.createElement("p", { className: "text-xs font-semibold text-slate-600 mt-1 truncate" }, k.label),
-            React.createElement("p", { className: "text-[11px] text-slate-400 truncate" }, k.sub))));
+    const greeting = hour < 11 ? "Guten Morgen" : hour < 18 ? "Hallo" : "Guten Abend";
+    const todayLabel = new Date().toLocaleDateString("de-DE", { weekday: "long", day: "numeric", month: "long" });
+    // Spieltag-Zentrale: pro Team naechstes Spiel + letztes Ergebnis + Tabellenplatz
+    // aus dem DBB-Abgleich; Teams ohne DBB-Verbindung fallen auf das naechste von
+    // Hand eingetragene Spiel im Kalender zurueck.
+    const gameTeams = teams.map((t, i) => {
+        const doc = (dbbData || {})[t.id];
+        const summary = doc && doc.matches ? dbbTeamSummary(doc) : null;
+        const manualNext = sortByDateDesc(events.filter((e) => e.teamId === t.id && e.type === "spiel" && e.date >= todayKeyLoad)).reverse()[0] || null;
+        return { team: t, colorIdx: i, doc, summary, manualNext, connected: !!(doc && doc.matches) };
+    });
+    const connectedGameTeams = gameTeams.filter((g) => g.connected);
+    const unconnectedTeams = gameTeams.filter((g) => !g.connected);
+    const shownGameTeams = gameTeams.filter((g) => g.connected || g.manualNext);
+    const lastDbbUpdate = connectedGameTeams.map((g) => g.doc.updatedAt?.toDate?.()).filter(Boolean).sort((a, b) => b - a)[0] || null;
+    const dbbErrors = gameTeams.filter((g) => g.doc && g.doc.error);
+    const updatedLabel = lastDbbUpdate ? (() => {
+        const mins = Math.round((Date.now() - lastDbbUpdate.getTime()) / 60000);
+        return mins < 1 ? "gerade aktualisiert" : mins < 60 ? `vor ${mins} Min. aktualisiert` : `aktualisiert ${lastDbbUpdate.toLocaleString("de-DE", { weekday: "short", hour: "2-digit", minute: "2-digit" })}`;
+    })() : null;
+    function gamePanel(g) {
+        const s = g.summary;
+        const next = s ? s.next : null;
+        const opp = next ? dbbOpponent(next) : null;
+        const last = s ? s.last : null;
+        const lastScore = last ? dbbScore(last) : null;
+        const days = next ? daysFromToday(next.date) : null;
+        return React.createElement("div", { key: g.team.id, className: "relative rounded-2xl bg-white/[0.06] border border-white/10 p-4 sm:p-5 flex flex-col gap-3 min-w-0" },
+            React.createElement("div", { className: "flex items-center gap-2 min-w-0" },
+                React.createElement("span", { className: `w-6 h-6 rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, (g.team.name || "?").charAt(0).toUpperCase()),
+                React.createElement("button", { onClick: () => onSelectTeam(g.team.id), className: "text-sm font-bold text-white hover:text-[#FF8A55] truncate" }, g.team.name),
+                s && s.us && React.createElement("span", { className: "ml-auto shrink-0 text-[11px] font-semibold text-white/70 bg-white/10 rounded-full px-2 py-0.5 tabular-nums", title: s.table.liganame }, `Platz ${s.us.rank} · ${s.us.won}–${s.us.lost}`)),
+            next ? React.createElement("div", { className: "min-w-0" },
+                React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF8A55]" }, days === 0 ? "Heute Spieltag" : "Nächstes Spiel"),
+                React.createElement("p", { className: "font-display italic font-black uppercase text-xl sm:text-2xl leading-tight text-white mt-1 [overflow-wrap:anywhere]" },
+                    React.createElement("span", { className: "text-white/50 mr-1.5" }, next.isHome ? "vs" : "@"),
+                    opp.name),
+                React.createElement("p", { className: "text-sm text-white/70 mt-1 tabular-nums" },
+                    [shortDateLabel(next.date), next.time ? next.time + " Uhr" : null, next.isHome ? "Heim" : "Auswärts"].filter(Boolean).join(" · "),
+                    React.createElement("span", { className: `ml-2 text-[11px] font-bold rounded-full px-2 py-0.5 ${days <= 1 ? "bg-[#C43E0E] text-white" : "bg-white/10 text-white/80"}` }, relativeDayLabel(next.date))),
+                next.venue && React.createElement("p", { className: "text-xs text-white/40 mt-1 truncate", title: [next.venue.name, next.venue.street, next.venue.city].filter(Boolean).join(", ") }, next.venue.name || next.venue.city))
+                : g.manualNext ? React.createElement("div", null,
+                    React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF8A55]" }, "Nächstes Spiel"),
+                    React.createElement("p", { className: "text-lg font-bold text-white mt-1 [overflow-wrap:anywhere]" }, g.manualNext.title),
+                    React.createElement("p", { className: "text-sm text-white/70 mt-0.5" }, [shortDateLabel(g.manualNext.date), g.manualNext.time ? g.manualNext.time + " Uhr" : null, relativeDayLabel(g.manualNext.date)].filter(Boolean).join(" · ")))
+                    : React.createElement("p", { className: "text-sm text-white/50" }, "Noch kein weiteres Spiel angesetzt."),
+            last && lastScore && React.createElement("div", { className: "mt-auto pt-3 border-t border-white/10 flex items-center gap-2.5 min-w-0" },
+                React.createElement("span", { className: `w-6 h-6 rounded-md text-[11px] font-black flex items-center justify-center shrink-0 ${lastScore.won ? "bg-emerald-500 text-white" : "bg-red-500/90 text-white"}`, title: lastScore.won ? "Sieg" : "Niederlage" }, lastScore.won ? "S" : "N"),
+                React.createElement("span", { className: "text-base font-black text-white tabular-nums shrink-0" }, `${lastScore.us}:${lastScore.them}`),
+                React.createElement("span", { className: "text-xs text-white/60 truncate" }, `${last.isHome ? "vs" : "@"} ${dbbOpponent(last).name} · ${shortDateLabel(last.date)}`)));
+    }
+    const gameDayHero = React.createElement("div", { className: "relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-[#3a1407] p-4 sm:p-6 shadow-[0_12px_32px_rgba(15,23,42,0.25)]" },
+        React.createElement("img", { src: LOGO_DATA_URI, alt: "", "aria-hidden": "true", className: "pointer-events-none select-none absolute -right-10 -bottom-12 w-64 sm:w-80 opacity-[0.07]" }),
+        React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-[#C43E0E]" }),
+        React.createElement("div", { className: "relative flex items-center justify-between gap-3 mb-4" },
+            React.createElement("div", { className: "min-w-0" },
+                React.createElement("p", { className: "text-[11px] font-bold uppercase tracking-[0.18em] text-white/50" }, "Spieltag"),
+                updatedLabel && React.createElement("p", { className: "text-xs text-white/40 mt-0.5" }, "DBB-Spielplan · ", updatedLabel)),
+            connectedGameTeams.length > 0 && onRefreshDbb && React.createElement("button", { onClick: onRefreshDbb, disabled: dbbSyncing, className: "flex items-center gap-1.5 text-xs font-semibold text-white/80 bg-white/10 hover:bg-white/20 disabled:opacity-60 rounded-full px-3 py-1.5 shrink-0 transition" },
+                React.createElement(IconRefresh, { size: 13, className: dbbSyncing ? "animate-spin" : "" }),
+                React.createElement("span", { className: "hidden sm:inline" }, dbbSyncing ? "Aktualisiert…" : "Jetzt aktualisieren"))),
+        shownGameTeams.length > 0
+            ? React.createElement("div", { className: `relative grid gap-3 ${shownGameTeams.length > 1 ? "md:grid-cols-2" : ""} ${shownGameTeams.length > 2 ? "2xl:grid-cols-3" : ""}` }, shownGameTeams.map(gamePanel))
+            : React.createElement("div", { className: "relative rounded-2xl bg-white/[0.06] border border-white/10 p-5" },
+                React.createElement("p", { className: "text-lg font-bold text-white" }, "Spielplan automatisch vom DBB"),
+                React.createElement("p", { className: "text-sm text-white/60 mt-1 max-w-xl" }, "Hinterlege bei einem Team die DBB-Team-ID. Dann erscheinen hier nächstes Spiel, Ergebnisse und Tabellenplatz, und die Spiele landen automatisch im Kalender."),
+                onManageTeams && React.createElement("button", { onClick: onManageTeams, className: "mt-3 text-sm font-semibold text-[#FF8A55] hover:text-white" }, "Teams verbinden →")),
+        (unconnectedTeams.length > 0 && connectedGameTeams.length > 0 && onManageTeams || dbbErrors.length > 0) && React.createElement("div", { className: "relative mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/45" },
+            dbbErrors.length > 0 && React.createElement("span", { className: "text-amber-300/90" }, `DBB-Abruf fehlgeschlagen für ${dbbErrors.map((g) => g.team.name).join(", ")}`),
+            unconnectedTeams.length > 0 && connectedGameTeams.length > 0 && onManageTeams && React.createElement("button", { onClick: onManageTeams, className: "hover:text-white/80" }, `${unconnectedTeams.map((g) => g.team.name).join(", ")} ohne DBB-Spielplan · verbinden →`)));
+    // Kennzahlen als schmale Leiste statt grosser Kacheln
+    const kpis = [
+        { label: "Spieler", value: players.length, tone: "text-slate-900", dot: "bg-slate-400" },
+        { label: "Verletzt / Reha", value: outPlayers.length, tone: outPlayers.length > 0 ? "text-amber-600" : "text-emerald-600", dot: outPlayers.length > 0 ? "bg-amber-500" : "bg-emerald-500" },
+        { label: "Check-ins diese Woche", value: `${checkedInWellness.length}/${players.length}`, tone: "text-slate-900", dot: "bg-[#FF6A2B]" },
+        { label: "Belastungsalarm", value: loadAlarmRows.length, tone: loadAlarmRows.length > 0 ? "text-fuchsia-600" : "text-emerald-600", dot: loadAlarmRows.length > 0 ? "bg-fuchsia-500" : "bg-emerald-500" },
+    ];
+    const kpiStrip = React.createElement("div", { className: `${cardClass} grid grid-cols-2 sm:grid-cols-4 divide-stone-100 sm:divide-x` }, kpis.map((k, i) => React.createElement("div", { key: k.label, className: `px-4 py-3 sm:py-3.5 min-w-0 ${i < 2 ? "border-b border-stone-100 sm:border-b-0" : ""} ${i % 2 === 0 ? "border-r border-stone-100 sm:border-r-0" : ""}` },
+        React.createElement("p", { className: `text-xl sm:text-2xl font-black leading-none tabular-nums ${k.tone}` }, k.value),
+        React.createElement("p", { className: "flex items-center gap-1.5 text-[11px] sm:text-xs font-medium text-slate-500 mt-1.5 truncate" },
+            React.createElement("span", { className: `w-1.5 h-1.5 rounded-full shrink-0 ${k.dot}` }),
+            k.label))));
     const terminCard = React.createElement("div", { className: `${cardClass} p-5` },
         React.createElement("div", { className: "flex items-center justify-between" },
-            React.createElement(SectionLabel, null, "Nächste Termine"),
+            React.createElement(SectionLabel, null, "Nächste 7 Tage"),
             React.createElement("button", { onClick: openNewEvent, className: "flex items-center gap-1 text-xs font-medium text-[#C43E0E] hover:text-[#FF6A2B]" },
                 React.createElement(IconPlus, { size: 13 }),
                 " Termin")),
@@ -165,12 +267,14 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                     return null;
                 const isToday = iso === isoDate(d0);
                 return (React.createElement("div", { key: iso },
-                    React.createElement("p", { className: `text-xs font-semibold uppercase tracking-wide mb-2 ${isToday ? "text-[#C43E0E]" : "text-slate-400"}` }, isToday ? "Heute" : d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" })),
-                    React.createElement("div", { className: "space-y-1.5" }, dayEvents.map((e) => (React.createElement("div", { key: e.id, className: "flex items-center gap-3 bg-stone-50 rounded-xl px-3 py-2.5 group" },
+                    React.createElement("p", { className: `text-[11px] font-bold uppercase tracking-wide mb-1.5 ${isToday ? "text-[#C43E0E]" : "text-slate-400"}` }, isToday ? "Heute" : d.toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" })),
+                    React.createElement("div", { className: "space-y-1" }, dayEvents.map((e) => (React.createElement("div", { key: e.id, className: "flex items-center gap-2.5 rounded-lg px-2 py-1.5 -mx-2 hover:bg-stone-50 group" },
                         React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${EVENT_TYPE_STYLES[e.type]?.dot || "bg-slate-400"}` }),
-                        React.createElement("span", { className: "text-sm font-semibold text-slate-800 shrink-0" }, e.time || "–"),
-                        React.createElement("span", { className: "text-sm text-slate-700 truncate flex-1" }, e.title),
-                        React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, teamName(e.teamId) || "Individuell"),
+                        React.createElement("span", { className: "text-xs font-semibold text-slate-500 w-10 shrink-0 tabular-nums" }, e.time || "–"),
+                        React.createElement("span", { className: "min-w-0 flex-1" },
+                            React.createElement("span", { className: "block text-sm text-slate-800 truncate" }, e.title),
+                            React.createElement("span", { className: "block text-[11px] text-slate-400 truncate" }, teamName(e.teamId) || "Individuell")),
+                        e.dbbResult && React.createElement("span", { className: "text-xs font-bold text-slate-700 tabular-nums shrink-0" }, e.dbbResult),
                         React.createElement("div", { className: "hidden group-hover:flex items-center gap-1.5 shrink-0" },
                             React.createElement("button", { onClick: () => openEditEvent(e), className: "text-slate-400 hover:text-[#C43E0E]", "aria-label": "Bearbeiten" },
                                 React.createElement(IconEdit, { size: 13 })),
@@ -178,19 +282,23 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                                 React.createElement(IconTrash, { size: 13 })))))))));
             }),
             days.every((d) => events.filter((e) => e.date === isoDate(d)).length === 0) && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-6" }, "Keine Termine in den nächsten 7 Tagen."))));
-    const teamsCard = React.createElement("div", { className: `${cardClass} p-5` },
-        React.createElement(SectionLabel, null, "Teams"),
-        React.createElement("div", { className: "mt-3 space-y-1.5" }, teams.length === 0
-            ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch kein Team angelegt.")
-            : teams.map((t, i) => {
-                const count = players.filter((p) => p.teamId === t.id).length;
-                return React.createElement("button", { key: t.id, onClick: () => onSelectTeam(t.id), className: "w-full flex items-center gap-2.5 bg-stone-50 hover:bg-stone-100 rounded-xl px-3 py-2 text-left transition group" },
-                    React.createElement("span", { className: `w-8 h-8 rounded-lg bg-gradient-to-br ${TEAM_COLORS[i % TEAM_COLORS.length]} text-white flex items-center justify-center text-xs font-black shrink-0` }, (t.name || "?").charAt(0).toUpperCase()),
-                    React.createElement("span", { className: "min-w-0 flex-1" },
-                        React.createElement("span", { className: "block text-sm font-semibold text-slate-800 break-words leading-snug" }, t.name),
-                        React.createElement("span", { className: "block text-xs text-slate-400" }, count, " Spieler")),
-                    React.createElement(IconArrowLeft, { size: 12, className: "text-slate-300 group-hover:text-[#C43E0E] rotate-180 shrink-0" }));
-            })));
+    // Tabelle: aktuelle Liga je verbundenem Team, eigenes Team hervorgehoben
+    const standingsCards = connectedGameTeams.filter((g) => g.summary && g.summary.table).map((g) => React.createElement("div", { key: g.team.id, className: `${cardClass} p-5` },
+        React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
+            React.createElement(SectionLabel, null, `Tabelle ${g.team.name}`),
+            React.createElement("span", { className: "text-[11px] text-slate-400 truncate" }, g.summary.table.liganame)),
+        React.createElement("table", { className: "w-full text-sm mt-3 tabular-nums" },
+            React.createElement("thead", null,
+                React.createElement("tr", { className: "text-[10px] uppercase tracking-wide text-slate-400" },
+                    React.createElement("th", { className: "text-left font-semibold pb-1.5 w-6" }, "#"),
+                    React.createElement("th", { className: "text-left font-semibold pb-1.5" }, "Team"),
+                    React.createElement("th", { className: "text-right font-semibold pb-1.5" }, "S–N"),
+                    React.createElement("th", { className: "text-right font-semibold pb-1.5" }, "Diff"))),
+            React.createElement("tbody", null, g.summary.table.entries.map((e) => React.createElement("tr", { key: e.id || e.rank, className: e.isUs ? "bg-[#C43E0E]/[0.07] font-bold text-slate-900" : "text-slate-600" },
+                React.createElement("td", { className: `py-1.5 pl-1.5 rounded-l-md ${e.isUs ? "text-[#C43E0E]" : "text-slate-400"}` }, e.rank),
+                React.createElement("td", { className: "py-1.5 pr-2 truncate max-w-[150px]", title: e.name }, e.name),
+                React.createElement("td", { className: "py-1.5 text-right whitespace-nowrap" }, `${e.won}–${e.lost}`),
+                React.createElement("td", { className: `py-1.5 pr-1.5 text-right rounded-r-md ${e.diff > 0 ? "text-emerald-600" : e.diff < 0 ? "text-red-500" : ""}` }, e.diff > 0 ? `+${e.diff}` : e.diff)))))));
     const incompleteProfilePlayers = players.filter((p) => p.onboardingCompleted !== true);
     // Anwesenheitsquote aus den direkt in "Alle Einheiten"/"Anwesenheit" markierten
     // Status berechnen (nur vergangene Einheiten, erst ab ein paar entschiedenen
@@ -226,7 +334,20 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
     const feedbackWaitingRows = (feedbackWaiting || [])
         .map((w) => ({ waiting: w, player: players.find((p) => p.id === w.playerId) }))
         .filter((x) => x.player);
+    // Spiele mit Ergebnis (DBB) der letzten Tage, fuer die noch kein Spieler des
+    // Teams eine Statistik mit diesem Datum hat
+    const missingStatsItems = connectedGameTeams.flatMap((g) => {
+        const teamPlayers = players.filter((p) => p.teamId === g.team.id);
+        return g.doc.matches
+            .filter((m) => dbbScore(m) && m.date <= todayKeyLoad && daysFromToday(m.date) >= -DBB_STATS_REMINDER_DAYS)
+            .filter((m) => teamPlayers.length > 0 && !teamPlayers.some((p) => (p.stats || []).some((st) => st.date === m.date)))
+            .map((m) => {
+                const sc = dbbScore(m);
+                return { id: "stats-" + m.matchId, kind: "stats", title: `${m.isHome ? "vs" : "@"} ${dbbOpponent(m).name}`, sub: `${g.team.name} · ${shortDateLabel(m.date)} · ${sc.us}:${sc.them}`, label: "Statistik fehlt", onClick: () => onOpenStatsImport && onOpenStatsImport({ teamId: g.team.id, date: m.date, gegner: dbbOpponent(m).name }) };
+            });
+    });
     const attentionItems = [
+        ...missingStatsItems,
         ...outPlayers.map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury", label: STATUS_OPTIONS.find((s) => s.value === p.status)?.label || "Verletzt/Reha" })),
         ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", label: wellnessFlagReason(entry) })),
         ...incompleteProfilePlayers.map((p) => ({ id: "profile-" + p.id, player: p, kind: "profile", label: "Profil unvollständig" })),
@@ -237,10 +358,10 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
     ];
     const attentionRows = attentionItems.map((item) => {
         const style = ATTENTION_KIND_STYLE[item.kind] || ATTENTION_KIND_STYLE.injury;
-        return React.createElement("button", { key: item.id, onClick: () => onSelectPlayer(item.player.id), className: `w-full flex items-center gap-2.5 ${style.row} border-l-2 rounded-xl px-3 py-2 text-left transition` },
+        return React.createElement("button", { key: item.id, onClick: item.onClick || (() => onSelectPlayer(item.player.id)), className: `w-full flex items-center gap-2.5 ${style.row} border-l-2 rounded-xl px-3 py-2 text-left transition` },
             React.createElement(style.icon, { size: 14, className: `${style.text} shrink-0` }),
-            React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.player.name),
-            React.createElement("span", { className: "hidden sm:inline text-xs text-slate-400 shrink-0" }, teamName(item.player.teamId)),
+            React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.title || item.player.name),
+            React.createElement("span", { className: "hidden sm:inline text-xs text-slate-400 shrink-0" }, item.sub || teamName(item.player.teamId)),
             React.createElement("span", { className: `text-xs font-medium shrink-0 max-w-[45%] truncate ${style.text}` }, item.label));
     });
     const attentionCountsByKind = attentionItems.reduce((acc, item) => { acc[item.kind] = (acc[item.kind] || 0) + 1; return acc; }, {});
@@ -312,27 +433,26 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                         React.createElement("td", { className: "px-3 py-2 text-right tabular-nums" }, r.load7 || "–"),
                         React.createElement("td", { className: "px-3 py-2 text-right tabular-nums font-semibold" }, r.acwr === null ? "–" : r.acwr),
                         React.createElement("td", { className: "px-3 py-2" }, React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${r.zone.cls}` }, r.zone.label)))))))));
-    return (React.createElement("div", { className: "space-y-6 rsk-fade-in" },
-        React.createElement("div", { className: "rounded-3xl bg-gradient-to-br from-white via-stone-50 to-white border border-stone-100 p-6 sm:p-8 relative overflow-hidden shadow-[0_1px_2px_rgba(0,0,0,0.04),0_8px_24px_rgba(0,0,0,0.06)]" },
-            React.createElement("div", { className: "pointer-events-none absolute -top-16 -right-16 w-56 h-56 rounded-full bg-[#C43E0E]/10 blur-3xl" }),
-            React.createElement("div", { className: "pointer-events-none absolute -bottom-20 -left-16 w-64 h-64 rounded-full bg-[#C43E0E]/10 blur-3xl" }),
-            React.createElement("div", { className: "relative flex items-center justify-between flex-wrap gap-4" },
-                React.createElement("div", null,
-                    React.createElement("div", { className: "flex items-center gap-2 mb-1.5" },
-                        React.createElement("span", { className: "h-5 w-1.5 rounded-full bg-gradient-to-b from-[#C43E0E] to-[#C43E0E]" }),
-                        React.createElement("h2", { className: "font-display text-2xl sm:text-3xl tracking-wide text-slate-900" }, greeting)),
-                    React.createElement("p", { className: "text-sm text-slate-500" }, "Willkommen zurück im Trainer-Cockpit")),
-                React.createElement("button", { onClick: onOpenNoteForm, className: btnPrimaryClass + " text-sm px-3.5 py-2 shrink-0" },
+    return (React.createElement("div", { className: "space-y-5 sm:space-y-6 rsk-fade-in" },
+        React.createElement("div", { className: "flex items-end justify-between gap-3 flex-wrap" },
+            React.createElement("div", { className: "min-w-0" },
+                React.createElement("p", { className: "text-xs font-semibold uppercase tracking-wide text-slate-400" }, todayLabel),
+                React.createElement("h2", { className: "font-display text-2xl sm:text-3xl tracking-wide text-slate-900 leading-tight" }, greeting)),
+            React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
+                React.createElement("button", { onClick: openNewEvent, className: "flex items-center gap-1.5 text-sm font-semibold text-slate-700 bg-white border border-stone-200 hover:border-stone-300 rounded-lg px-3 py-2 transition" },
+                    React.createElement(IconPlus, { size: 14 }),
+                    React.createElement("span", null, "Termin")),
+                React.createElement("button", { onClick: onOpenNoteForm, className: btnPrimaryClass + " text-sm px-3 py-2" },
                     React.createElement(IconPaperclip, { size: 14 }),
-                    " Notiz/Datei für Spieler")),
-            React.createElement("div", { className: "relative grid grid-cols-2 xl:grid-cols-4 gap-3 sm:gap-4 mt-6" }, kpiTiles)),
+                    React.createElement("span", { className: "hidden sm:inline" }, " Notiz/Datei für Spieler"),
+                    React.createElement("span", { className: "sm:hidden" }, " Notiz")))),
+        gameDayHero,
+        kpiStrip,
         showEventForm && (React.createElement(Modal, { title: editingEvent ? "Termin bearbeiten" : "Termin anlegen", onClose: () => setShowEventForm(false), wide: true },
             React.createElement(EventForm, { initialEvent: editingEvent, teams: teams, allPlayers: players, onSubmit: (vals) => { editingEvent ? onEditEvent(editingEvent.id, vals) : onAddEvent(vals); setShowEventForm(false); }, onClose: () => setShowEventForm(false) }))),
-        attentionCard,
-        trainingLoadCard,
-        React.createElement("div", { className: "grid xl:grid-cols-3 gap-6 items-start" },
-            React.createElement("div", { className: "xl:col-span-2" }, terminCard),
-            React.createElement("div", { className: "space-y-6" }, teamsCard))));
+        React.createElement("div", { className: "grid xl:grid-cols-3 gap-5 sm:gap-6 items-start" },
+            React.createElement("div", { className: "xl:col-span-2 space-y-5 sm:space-y-6 min-w-0" }, attentionCard, trainingLoadCard),
+            React.createElement("div", { className: "space-y-5 sm:space-y-6 min-w-0" }, terminCard, standingsCards))));
 }
 function polarPoint(cx, cy, r, angleDeg) {
     const rad = (angleDeg * Math.PI) / 180;

@@ -8,6 +8,11 @@
       alle Spieler, die diese Woche noch kein Wellness-/Monitoring-
       Check-in gemacht haben.
 
+   Dazu der DBB-Abgleich (syncDbbScheduled / syncDbbNow): holt fuer jedes
+   Team mit hinterlegter DBB-Team-ID Spielplan, Ergebnisse und Tabelle von
+   basketball-bund.net, speichert sie in dbbTeams/{teamId} und traegt die
+   Spiele in den Kalender ein.
+
    Deploy: siehe README.md im Projekt-Wurzelverzeichnis.
    ============================================================ */
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
@@ -105,6 +110,10 @@ exports.onCalendarEventCreated = onDocumentCreated("calendarEvents/{eventId}", a
     const data = event.data?.data();
     if (!data)
         return;
+    // Automatisch aus dem DBB-Spielplan angelegte Spiele werden still eingetragen
+    // (sonst kaemen beim ersten Abgleich viele Pushes auf einmal).
+    if (data.source === "dbb")
+        return;
     const allPlayers = await loadAllPlayers();
     const playerIds = getEventAttendeePlayerIds(data, allPlayers);
     if (playerIds.length === 0)
@@ -168,4 +177,198 @@ exports.dailyMonitoringReminder = onSchedule({ schedule: "0 18 * * *", timeZone:
     if (missing.length === 0)
         return;
     await sendToPlayerIds(missing, "Monitoring-Erinnerung", "Bitte trag dein Wohlbefinden für diese Woche ein.", { type: "wellnessReminder" });
+});
+
+/* ---------------- DBB-Abgleich (basketball-bund.net) ----------------
+   Die DBB-Seite erlaubt keine direkten Abrufe aus dem Browser (kein CORS),
+   deshalb laeuft der Abruf hier. Ergebnis pro App-Team in dbbTeams/{teamId}:
+   matches (ganze Saison), tables (Tabelle je Liga), updatedAt, error.
+   Kalender: jedes Spiel wird ein Termin vom Typ "spiel" (source "dbb",
+   dbbMatchId). Ein von Hand angelegtes Spiel am selben Tag fuers selbe Team
+   wird mit dem DBB-Spiel verknuepft statt doppelt angelegt. */
+const DBB_BASE = "https://www.basketball-bund.net/rest";
+const DBB_VENUE_LOOKUPS_PER_TEAM = 8;
+
+async function dbbGet(path) {
+    const res = await fetch(DBB_BASE + path, { headers: { Accept: "application/json" }, signal: AbortSignal.timeout(15000) });
+    if (!res.ok)
+        throw new Error(`DBB ${path}: HTTP ${res.status}`);
+    const json = await res.json();
+    if (json.status !== "0")
+        throw new Error(`DBB ${path}: ${json.message || "keine Daten"}`);
+    return json.data;
+}
+
+// "163312", ".../team/163312", "...teamId=163312" -> 163312
+function parseDbbTeamId(value) {
+    const s = String(value || "").trim();
+    const m = s.match(/team(?:id)?[\/=](\d{4,})/i) || s.match(/^(\d{4,})$/);
+    return m ? Number(m[1]) : null;
+}
+
+function berlinNow() {
+    const parts = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", weekday: "short", hour12: false })
+        .formatToParts(new Date()).reduce((acc, p) => ({ ...acc, [p.type]: p.value }), {});
+    return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) % 24, minute: Number(parts.minute), weekday: parts.weekday };
+}
+
+function mapDbbTeam(t) {
+    return { id: t.teamPermanentId || null, name: t.teamname || "", short: t.teamnameSmall || "" };
+}
+
+async function syncDbbTeam(team) {
+    const dbbTeamId = parseDbbTeamId(team.dbbTeamId);
+    const ref = db.collection("dbbTeams").doc(team.id);
+    if (!dbbTeamId) {
+        await ref.delete().catch(() => { });
+        return { teamId: team.id, skipped: true };
+    }
+    const prevSnap = await ref.get();
+    const prev = prevSnap.exists ? prevSnap.data() : {};
+    const prevVenues = new Map((prev.matches || []).filter((m) => m.venue).map((m) => [m.matchId, m.venue]));
+    try {
+        const data = await dbbGet(`/team/id/${dbbTeamId}/matches`);
+        const today = berlinNow().date;
+        const matches = (data.matches || []).map((m) => {
+            const isHome = m.homeTeam?.teamPermanentId === dbbTeamId;
+            return {
+                matchId: m.matchId,
+                date: m.kickoffDate || "",
+                time: m.kickoffTime || "",
+                ligaId: m.ligaData?.ligaId || null,
+                liganame: m.ligaData?.liganame || "",
+                ligaShort: m.ligaData?.skNameSmall || "",
+                home: mapDbbTeam(m.homeTeam || {}),
+                guest: mapDbbTeam(m.guestTeam || {}),
+                isHome,
+                result: m.result || "",
+                confirmed: !!m.ergebnisbestaetigt,
+                cancelled: !!(m.abgesagt || m.verzicht),
+                venue: prevVenues.get(m.matchId) || null,
+            };
+        }).sort((a, b) => (a.date + a.time).localeCompare(b.date + b.time));
+        // Halle nur fuer kommende Spiele nachschlagen (eigener Abruf pro Spiel)
+        let lookups = 0;
+        for (const m of matches) {
+            if (m.venue || m.date < today || lookups >= DBB_VENUE_LOOKUPS_PER_TEAM)
+                continue;
+            lookups++;
+            try {
+                const info = await dbbGet(`/match/id/${m.matchId}/matchInfo`);
+                const f = info.matchInfo?.spielfeld;
+                if (f)
+                    m.venue = { name: (f.bezeichnung || "").trim(), street: f.strasse || "", city: [f.plz, f.ort].filter(Boolean).join(" ") };
+            }
+            catch (e) { /* Halle ist optional */ }
+        }
+        // Tabellen der Ligen dieser Saison, neueste Liga zuerst
+        const ligaIds = [];
+        [...matches].reverse().forEach((m) => { if (m.ligaId && !ligaIds.includes(m.ligaId)) ligaIds.push(m.ligaId); });
+        const tables = [];
+        for (const ligaId of ligaIds.slice(0, 3)) {
+            try {
+                const t = await dbbGet(`/competition/table/id/${ligaId}`);
+                const entries = (t.tabelle?.entries || []).map((e) => ({
+                    rank: e.rang, ...mapDbbTeam(e.team || {}), games: e.anzspiele, won: e.s, lost: e.n,
+                    points: e.anzGewinnpunkte, scored: e.koerbe, against: e.gegenKoerbe, diff: e.korbdiff,
+                    isUs: e.team?.teamPermanentId === dbbTeamId,
+                }));
+                if (entries.length > 0)
+                    tables.push({ ligaId, liganame: t.ligaData?.liganame || "", ligaShort: t.ligaData?.skNameSmall || "", entries });
+            }
+            catch (e) { /* Liga ohne Tabelle (z.B. Pokal) */ }
+        }
+        await ref.set({
+            teamId: team.id, dbbTeamId, dbbTeamName: data.team?.teamName || "", dbbAk: data.team?.teamAkj || "",
+            matches, tables, error: null, updatedAt: FieldValue.serverTimestamp(),
+        });
+        const cal = await syncDbbCalendar(team, matches);
+        return { teamId: team.id, matches: matches.length, ...cal };
+    }
+    catch (e) {
+        await ref.set({ teamId: team.id, dbbTeamId, error: String(e.message || e), errorAt: FieldValue.serverTimestamp() }, { merge: true });
+        return { teamId: team.id, error: String(e.message || e) };
+    }
+}
+
+function dbbEventFields(m) {
+    const opponent = m.isHome ? m.guest : m.home;
+    const venue = m.venue ? [m.venue.name, m.venue.street, m.venue.city].filter(Boolean).join(", ") : "";
+    return {
+        title: `${m.cancelled ? "Abgesagt: " : ""}Spiel ${m.isHome ? "vs" : "@"} ${opponent.name}`,
+        date: m.date, time: m.time, location: venue,
+        dbbMatchId: m.matchId, dbbResult: m.result || "", dbbHome: m.isHome, dbbLiga: m.liganame,
+        dbbCancelled: m.cancelled,
+    };
+}
+
+async function syncDbbCalendar(team, matches) {
+    const snap = await db.collection("calendarEvents").where("teamId", "==", team.id).get();
+    const events = snap.docs.map((d) => ({ id: d.id, ref: d.ref, ...d.data() }));
+    const byMatch = new Map(events.filter((e) => e.dbbMatchId).map((e) => [e.dbbMatchId, e]));
+    let created = 0, updated = 0;
+    const batch = db.batch();
+    for (const m of matches) {
+        if (!m.date)
+            continue;
+        const fields = dbbEventFields(m);
+        const existing = byMatch.get(m.matchId);
+        if (existing) {
+            // Von Hand angelegte, verknuepfte Spiele behalten Titel und Ort
+            const changes = existing.source === "dbb" ? fields : { ...fields, title: existing.title, location: existing.location || fields.location };
+            if (Object.keys(changes).some((k) => existing[k] !== changes[k])) {
+                batch.set(existing.ref, changes, { merge: true });
+                updated++;
+            }
+            continue;
+        }
+        const manual = events.find((e) => e.type === "spiel" && !e.dbbMatchId && e.date === m.date);
+        if (manual) {
+            batch.set(manual.ref, { ...fields, title: manual.title, location: manual.location || fields.location, time: fields.time || manual.time || "" }, { merge: true });
+            manual.dbbMatchId = m.matchId;
+            updated++;
+            continue;
+        }
+        if (m.cancelled)
+            continue;
+        batch.set(db.collection("calendarEvents").doc(`dbb_${m.matchId}`), {
+            ...fields, endTime: "", type: "spiel", teamId: team.id, notes: m.liganame,
+            excludedPlayerIds: [], includedPlayerIds: [], involvedTeamIds: [team.id], source: "dbb",
+        });
+        created++;
+    }
+    if (created + updated > 0)
+        await batch.commit();
+    return { created, updated };
+}
+
+async function syncAllDbbTeams() {
+    const meta = await db.collection("club").doc("meta").get();
+    const teams = (meta.exists ? meta.data().teams : null) || [];
+    const results = [];
+    for (const team of teams) {
+        if (team.dbbTeamId || (await db.collection("dbbTeams").doc(team.id).get()).exists)
+            results.push(await syncDbbTeam(team));
+    }
+    return results;
+}
+
+// Alle 20 Minuten geweckt: am Wochenende (Spieltage) 10-22 Uhr jedes Mal,
+// sonst nur alle 2 Stunden zur vollen Stunde.
+exports.syncDbbScheduled = onSchedule({ schedule: "*/20 * * * *", timeZone: "Europe/Berlin", region: "europe-west1" }, async () => {
+    const now = berlinNow();
+    const gameDay = (now.weekday === "Sat" || now.weekday === "Sun") && now.hour >= 10 && now.hour <= 22;
+    if (!gameDay && !(now.minute < 20 && now.hour % 2 === 0))
+        return;
+    await syncAllDbbTeams();
+});
+
+// "Jetzt aktualisieren" in der App (nur Trainer)
+exports.syncDbbNow = onCall({ region: "europe-west1", timeoutSeconds: 120 }, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Bitte eingeloggt sein.");
+    const callerSnap = await db.collection("accounts").doc(request.auth.uid).get();
+    if (!callerSnap.exists || callerSnap.data().role !== "trainer")
+        throw new HttpsError("permission-denied", "Nur Trainer duerfen den DBB-Abgleich starten.");
+    return { results: await syncAllDbbTeams() };
 });
