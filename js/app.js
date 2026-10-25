@@ -1680,7 +1680,7 @@ function SpielerAkte() {
                         React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-[#C43E0E] z-10" }),
                         // Vereinslogo gross und dezent als Wasserzeichen (statt des frueheren wiederholten Team-Schriftzugs)
                         React.createElement("div", { className: "pointer-events-none select-none absolute inset-0 overflow-hidden", "aria-hidden": "true" },
-                            React.createElement("img", { src: LOGO_DATA_URI, alt: "", className: "absolute right-[-12%] sm:right-[-4%] top-1/2 -translate-y-1/2 w-60 sm:w-[26rem] opacity-[0.13] blur-[2px] [mask-image:radial-gradient(closest-side,black_55%,transparent)]" })),
+                            React.createElement("img", { src: selectedTeam?.logoUrl || LOGO_DATA_URI, alt: "", className: "absolute right-[-12%] sm:right-[-4%] top-1/2 -translate-y-1/2 w-60 sm:w-[26rem] opacity-[0.13] blur-[2px] [mask-image:radial-gradient(closest-side,black_55%,transparent)]" })),
                         React.createElement("div", { className: "relative z-[1] p-4 sm:p-7 flex gap-4 sm:gap-7" },
                             React.createElement("div", { className: "relative shrink-0" },
                                 selectedPlayer.photoUrl

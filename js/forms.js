@@ -62,8 +62,16 @@ function TeamForm({ initial, onSubmit, onClose }) {
     const [altersklasse, setAltersklasse] = useState(initial?.altersklasse || "");
     const [trainer, setTrainer] = useState(initial?.trainer || "");
     const [dbbTeamId, setDbbTeamId] = useState(initial?.dbbTeamId ? String(initial.dbbTeamId) : "");
+    const [logoUrl, setLogoUrl] = useState(initial?.logoUrl || "");
+    const [logoFile, setLogoFile] = useState(null);
+    const [logoPreview, setLogoPreview] = useState("");
+    const [saving, setSaving] = useState(false);
     const [error, setError] = useState("");
-    function handleSubmit(e) {
+    function pickLogo(file) {
+        setLogoFile(file || null);
+        setLogoPreview(file ? URL.createObjectURL(file) : "");
+    }
+    async function handleSubmit(e) {
         e.preventDefault();
         if (!name.trim()) {
             setError("Bitte einen Teamnamen eingeben.");
@@ -74,9 +82,23 @@ function TeamForm({ initial, onSubmit, onClose }) {
             setError("DBB-Team: bitte die Team-ID (z. B. 163337) oder einen Link von basketball-bund.net mit /team/… einfügen.");
             return;
         }
-        onSubmit({ name: name.trim(), altersklasse, trainer: trainer.trim(), dbbTeamId: parsedDbbId ? String(parsedDbbId) : "" });
+        let finalLogoUrl = logoUrl;
+        if (logoFile) {
+            setSaving(true);
+            try {
+                finalLogoUrl = (await uploadToCloudinary(logoFile)).url;
+            }
+            catch (err) {
+                setSaving(false);
+                setError("Logo-Upload fehlgeschlagen. Bitte nochmal versuchen (oder ohne neues Logo speichern).");
+                return;
+            }
+            setSaving(false);
+        }
+        onSubmit({ name: name.trim(), altersklasse, trainer: trainer.trim(), dbbTeamId: parsedDbbId ? String(parsedDbbId) : "", logoUrl: finalLogoUrl });
         onClose();
     }
+    const shownLogo = logoPreview || logoUrl;
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
         React.createElement(Field, { label: "Teamname" },
             React.createElement("input", { className: inputClass, value: name, onChange: (e) => { setName(e.target.value); setError(""); }, placeholder: "z. B. U16 Herren", autoFocus: true }),
@@ -90,7 +112,13 @@ function TeamForm({ initial, onSubmit, onClose }) {
         React.createElement(Field, { label: "DBB-Spielplan (optional)" },
             React.createElement("input", { className: inputClass, value: dbbTeamId, onChange: (e) => { setDbbTeamId(e.target.value); setError(""); }, placeholder: "Team-ID oder Link von basketball-bund.net" }),
             React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Damit kommen Spielplan, Ergebnisse und Tabelle automatisch ins Dashboard und die Spiele in den Kalender.")),
-        React.createElement("button", { type: "submit", className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition" }, initial ? "Speichern" : "Team anlegen")));
+        React.createElement(Field, { label: "Teamlogo (optional)" },
+            React.createElement("div", { className: "flex items-center gap-3" },
+                shownLogo && React.createElement("img", { src: shownLogo, alt: "", className: "w-12 h-12 rounded-lg object-contain bg-slate-900 p-1.5 shrink-0" }),
+                React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => pickLogo(e.target.files[0]), className: "block w-full min-w-0 text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }),
+                shownLogo && React.createElement("button", { type: "button", onClick: () => { pickLogo(null); setLogoUrl(""); }, className: "text-xs text-slate-400 hover:text-red-500 shrink-0" }, "Entfernen")),
+            React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Erscheint weich im Hintergrund der Spielerakte und im Spieltag-Banner. Am besten PNG mit transparentem Hintergrund.")),
+        React.createElement("button", { type: "submit", disabled: saving, className: "w-full bg-slate-900 text-white rounded-lg py-2.5 text-sm font-semibold hover:bg-slate-800 transition disabled:opacity-60" }, saving ? "Logo wird hochgeladen…" : initial ? "Speichern" : "Team anlegen")));
 }
 function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [name, setName] = useState(initial?.name || "");

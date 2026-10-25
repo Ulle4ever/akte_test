@@ -230,7 +230,9 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         const days = next ? daysFromToday(next.date) : null;
         return React.createElement("div", { key: g.team.id, className: "relative rounded-2xl bg-white/[0.06] border border-white/10 p-4 sm:p-5 flex flex-col gap-3 min-w-0" },
             React.createElement("div", { className: "flex items-center gap-2 min-w-0" },
-                React.createElement("span", { className: `w-6 h-6 rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, (g.team.name || "?").charAt(0).toUpperCase()),
+                g.team.logoUrl
+                    ? React.createElement("img", { src: g.team.logoUrl, alt: "", className: "w-7 h-7 object-contain shrink-0" })
+                    : React.createElement("span", { className: `w-6 h-6 rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, (g.team.name || "?").charAt(0).toUpperCase()),
                 React.createElement("button", { onClick: () => onSelectTeam(g.team.id), className: "text-sm font-bold text-white hover:text-[#FF8A55] truncate" }, g.team.name),
                 s && s.us && React.createElement("span", { className: "ml-auto shrink-0 text-[11px] font-semibold text-white/70 bg-white/10 rounded-full px-2 py-0.5 tabular-nums", title: s.table.liganame }, `Platz ${s.us.rank} · ${s.us.won}–${s.us.lost}`)),
             next ? React.createElement("div", { className: "min-w-0" },
