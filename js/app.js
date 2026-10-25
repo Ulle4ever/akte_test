@@ -16,6 +16,7 @@ const TABS = [
     { key: "entwicklung", label: "Development Plan", icon: IconClipboard },
     { key: "feedback", label: "Feedback", icon: IconMessage },
 ];
+const SIDEBAR_SEARCH_LIMIT = 8; // so viele Treffer zeigt die Schnellsuche in der Seitenleiste
 const PLAYER_ROLE_TABS = ["uebersicht", "kalender", "wellness", "noten", "video", "notiz", "entwicklung", "feedback"];
 // Die Reiter der Spieler-Akte sind in vier Bereiche gegliedert (obere Leiste),
 // die Unterreiter erscheinen darunter - statt zwoelf Reitern in einer Reihe.
@@ -42,7 +43,7 @@ function SpielerAkte() {
     const [loading, setLoading] = useState(true);
     const [saveError, setSaveError] = useState(false);
     const [selectedTeamId, setSelectedTeamId] = useState("all");
-    const [showPlayerList, setShowPlayerList] = useState(false);
+    const [showPlayers, setShowPlayers] = useState(false); // eigene Spieler-Seite (Karten-Raster)
     const [showTeamCalendar, setShowTeamCalendar] = useState(false);
     const [showGlobalCalendar, setShowGlobalCalendar] = useState(false);
     const [showVerwaltung, setShowVerwaltung] = useState(false);
@@ -919,6 +920,9 @@ function SpielerAkte() {
         .filter((p) => selectedTeamId === "all" || p.teamId === selectedTeamId)
         .filter((p) => p.name.toLowerCase().includes(search.toLowerCase()))
         .sort((a, b) => a.name.localeCompare(b.name));
+    const searchResults = search.trim() === "" ? [] : players
+        .filter((p) => p.name.toLowerCase().includes(search.trim().toLowerCase()))
+        .sort((a, b) => a.name.localeCompare(b.name));
     const selectedPlayer = players.find((p) => p.id === selectedPlayerId) || null;
     /* Erstes Login eines Spieler-Zugangs: Profil-Pflichtfenster, solange die
        eigenen Daten (Kontakt/Notfallkontakt/Wohnort etc.) noch nicht einmal
@@ -951,6 +955,9 @@ function SpielerAkte() {
         }
         else if (showAttendance) {
             breadcrumbItems.push({ label: "Anwesenheit", onClick: null });
+        }
+        else if (showPlayers) {
+            breadcrumbItems.push({ label: "Spieler", onClick: null });
         }
         else if (selectedPlayer) {
             if (selectedTeam)
@@ -1011,6 +1018,7 @@ function SpielerAkte() {
         setShowVerwaltung(false);
         setShowAllUnits(false);
         setShowAttendance(false);
+        setShowPlayers(false);
         setMobileSidebarOpen(false);
     }
     function goHome() {
@@ -1021,8 +1029,17 @@ function SpielerAkte() {
         setShowVerwaltung(false);
         setShowAllUnits(false);
         setShowAttendance(false);
+        setShowPlayers(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
+    }
+    function goPlayers() {
+        goHome();
+        setShowPlayers(true);
+    }
+    function goTeam(teamId) {
+        goHome();
+        setSelectedTeamId(teamId);
     }
     function goToTeamCalendar(teamId) {
         setSelectedPlayerId(null);
@@ -1032,6 +1049,7 @@ function SpielerAkte() {
         setShowVerwaltung(false);
         setShowAllUnits(false);
         setShowAttendance(false);
+        setShowPlayers(false);
         setMobileSidebarOpen(false);
     }
     function goVerwaltung() {
@@ -1042,6 +1060,7 @@ function SpielerAkte() {
         setShowVerwaltung(true);
         setShowAllUnits(false);
         setShowAttendance(false);
+        setShowPlayers(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -1053,6 +1072,7 @@ function SpielerAkte() {
         setShowGlobalCalendar(true);
         setShowAllUnits(false);
         setShowAttendance(false);
+        setShowPlayers(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -1064,6 +1084,7 @@ function SpielerAkte() {
         setShowVerwaltung(false);
         setShowAllUnits(true);
         setShowAttendance(false);
+        setShowPlayers(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
     }
@@ -1495,42 +1516,51 @@ function SpielerAkte() {
                     React.createElement("span", { className: "text-sm font-bold text-slate-900" }, "Menü"),
                     React.createElement("button", { onClick: () => setMobileSidebarOpen(false), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Schließen" },
                         React.createElement(IconX, { size: 18 }))),
-                React.createElement("div", { className: "flex flex-col gap-1 pb-3 mb-1 border-b border-stone-200" }, [
-                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !selectedPlayerId && selectedTeamId === "all" },
+                React.createElement("div", { className: "flex flex-col gap-1" }, [
+                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && !selectedPlayerId && selectedTeamId === "all" },
+                    { key: "players", label: "Spieler", icon: IconUsers, onClick: goPlayers, active: showPlayers, count: players.length },
                     { key: "calendar", label: "Kalender", icon: IconCalendar, onClick: goGlobalCalendar, active: showGlobalCalendar },
                     { key: "allunits", label: "Alle Einheiten", icon: IconClipboard, onClick: goAllUnits, active: showAllUnits },
-                    { key: "attendance", label: "Anwesenheit", icon: IconUsers, onClick: goAttendance, active: showAttendance },
+                    { key: "attendance", label: "Anwesenheit", icon: IconCheck, onClick: goAttendance, active: showAttendance },
                     { key: "verwaltung", label: "Verwaltung", icon: IconSettings, onClick: goVerwaltung, active: showVerwaltung },
                 ].filter((item) => item.key !== "verwaltung" || isFullTrainer).map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#C43E0E]/10 to-[#C43E0E]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
                     React.createElement(item.icon, { size: 16, className: item.active ? "text-[#C43E0E]" : "text-slate-400" }),
-                    item.label))),
-                React.createElement("div", { className: "flex gap-2" },
-                    React.createElement("select", { className: inputClass + " flex-1", value: selectedTeamId, onChange: (e) => { setSelectedTeamId(e.target.value); setShowTeamCalendar(false); setShowGlobalCalendar(false); setShowVerwaltung(false); setShowAllUnits(false); setShowAttendance(false); } },
-                        React.createElement("option", { value: "all" }, "Alle Teams"),
-                        visibleTeams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name))),
-                    isFullTrainer && React.createElement("button", { onClick: () => setModal("team"), className: "shrink-0 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-xl px-3 text-sm font-medium", title: "Team anlegen" },
-                        React.createElement(IconPlus, { size: 16 }))),
-                React.createElement("div", { className: "relative" },
-                    React.createElement(IconSearch, { size: 15, className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" }),
-                    React.createElement("input", { className: inputClass + " pl-8", placeholder: "Spieler suchen...", value: search, onChange: (e) => setSearch(e.target.value) })),
-                React.createElement("button", { onClick: () => setModal("player"), disabled: teams.length === 0, className: "w-full flex items-center justify-center gap-1.5 bg-gradient-to-r from-[#C43E0E] to-[#A8350C] hover:from-[#FF6A2B] hover:to-[#8A2C0A] disabled:bg-none disabled:bg-stone-200 disabled:text-slate-400 text-white rounded-xl py-2.5 text-sm font-semibold transition shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)]" },
-                    React.createElement(IconPlus, { size: 16 }),
-                    " Spieler anlegen"),
-                teams.length === 0 && React.createElement("p", { className: "text-xs text-slate-400" }, "Legt zuerst ein Team an."),
-                search.trim() === "" && !showPlayerList ? (React.createElement("button", { onClick: () => setShowPlayerList(true), className: "flex items-center justify-center gap-1.5 text-sm font-medium text-slate-500 hover:text-slate-700 py-2" },
-                    React.createElement(IconArrowDown, { size: 14 }),
-                    " Spielerliste anzeigen")) : (React.createElement(React.Fragment, null,
-                    search.trim() === "" && (React.createElement("button", { onClick: () => setShowPlayerList(false), className: "flex items-center justify-center gap-1.5 text-xs font-medium text-slate-400 hover:text-slate-600 -mb-1" },
-                        React.createElement(IconArrowUp, { size: 12 }),
-                        " Einklappen")),
-                    React.createElement("div", { className: "flex-1 overflow-y-auto -mx-1 px-1 space-y-1.5" },
-                        visiblePlayers.length === 0 && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-6" }, "Keine Spieler gefunden.")),
-                        visiblePlayers.map((p) => (React.createElement("button", { key: p.id, onClick: () => selectPlayer(p.id), className: `w-full flex items-center gap-3 p-2.5 rounded-xl text-left transition ${selectedPlayerId === p.id ? "bg-red-50 border-l-[3px] border-[#C43E0E] pl-[9px]" : "hover:bg-stone-50 text-slate-900 border-l-[3px] border-transparent pl-[9px]"}` },
-                            React.createElement("span", { className: `w-8 h-8 rounded-full flex items-center justify-center text-xs font-bold shrink-0 ${selectedPlayerId === p.id ? "bg-gradient-to-br from-[#C43E0E] to-[#A8350C] text-white" : "bg-stone-100 text-slate-600"}` }, p.number !== "" && p.number !== undefined ? p.number : "–"),
+                    React.createElement("span", { className: "flex-1 text-left" }, item.label),
+                    item.count !== undefined && React.createElement("span", { className: "text-xs font-medium text-slate-400 tabular-nums" }, item.count)))),
+                // Schnellsuche: Treffer erscheinen direkt beim Tippen - ersetzt die
+                // fruehere, lange ausklappbare Spielerliste.
+                React.createElement("div", { className: "pt-3 border-t border-stone-200" },
+                    React.createElement("div", { className: "relative" },
+                        React.createElement(IconSearch, { size: 15, className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" }),
+                        React.createElement("input", { className: inputClass + " pl-8", placeholder: "Spieler suchen…", value: search, onChange: (e) => setSearch(e.target.value), onKeyDown: (e) => {
+                                if (e.key === "Enter" && searchResults.length > 0) {
+                                    selectPlayer(searchResults[0].id);
+                                    setSearch("");
+                                }
+                                else if (e.key === "Escape")
+                                    setSearch("");
+                            } })),
+                    search.trim() !== "" && React.createElement("div", { className: "mt-1.5 space-y-0.5" },
+                        searchResults.length === 0 && React.createElement("p", { className: "text-xs text-slate-400 text-center py-3" }, "Keine Spieler gefunden."),
+                        searchResults.slice(0, SIDEBAR_SEARCH_LIMIT).map((p) => React.createElement("button", { key: p.id, onClick: () => { selectPlayer(p.id); setSearch(""); }, className: `w-full flex items-center gap-2.5 px-2.5 py-2 rounded-lg text-left transition ${selectedPlayerId === p.id ? "bg-red-50" : "hover:bg-stone-100"}` },
+                            React.createElement("span", { className: `w-1.5 h-1.5 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` }),
                             React.createElement("span", { className: "min-w-0 flex-1" },
-                                React.createElement("span", { className: `block text-sm font-semibold truncate ${selectedPlayerId === p.id ? "text-slate-900" : ""}` }, p.name),
-                                React.createElement("span", { className: "block text-xs truncate text-slate-500" }, p.position)),
-                            React.createElement("span", { className: `w-2 h-2 rounded-full shrink-0 ${STATUS_STYLES[p.status]?.dot || "bg-slate-300"}` }))))))))),
+                                React.createElement("span", { className: "block text-sm font-semibold text-slate-800 truncate" }, p.name),
+                                React.createElement("span", { className: "block text-[11px] text-slate-400 truncate" }, [teams.find((t) => t.id === p.teamId)?.name, POSITION_ABBR[p.position] || p.position].filter(Boolean).join(" · "))))),
+                        searchResults.length > SIDEBAR_SEARCH_LIMIT && React.createElement("button", { onClick: () => goPlayers(), className: "w-full text-center text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B] py-1.5" }, `Alle ${searchResults.length} Treffer anzeigen`))),
+                React.createElement("div", { className: "pt-3 border-t border-stone-200" },
+                    React.createElement("div", { className: "flex items-center justify-between px-3 mb-1.5" },
+                        React.createElement("span", { className: "text-[11px] font-bold uppercase tracking-wider text-slate-400" }, "Teams"),
+                        isFullTrainer && React.createElement("button", { onClick: () => setModal("team"), className: "p-1 -mr-1 rounded-md text-slate-400 hover:text-[#C43E0E] hover:bg-stone-100", title: "Team anlegen", "aria-label": "Team anlegen" },
+                            React.createElement(IconPlus, { size: 14 }))),
+                    visibleTeams.length === 0 && React.createElement("p", { className: "text-xs text-slate-400 px-3" }, "Noch kein Team angelegt."),
+                    React.createElement("div", { className: "flex flex-col gap-0.5" }, visibleTeams.map((t, i) => {
+                        const active = !selectedPlayerId && !showPlayers && selectedTeamId === t.id;
+                        return React.createElement("button", { key: t.id, onClick: () => goTeam(t.id), className: `flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-sm font-medium transition ${active ? "bg-gradient-to-r from-[#C43E0E]/10 to-[#C43E0E]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
+                            React.createElement("span", { className: `w-5 h-5 rounded-md bg-gradient-to-br ${TEAM_COLORS[i % TEAM_COLORS.length]} text-white flex items-center justify-center text-[10px] font-black shrink-0` }, (t.name || "?").charAt(0).toUpperCase()),
+                            React.createElement("span", { className: "flex-1 text-left truncate" }, t.name),
+                            React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, players.filter((p) => p.teamId === t.id).length));
+                    }))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1440px] mx-auto w-full" },
                 breadcrumbItems.length > 1 && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs text-slate-500 mb-4 flex-wrap" }, breadcrumbItems.map((b, i) => React.createElement(React.Fragment, { key: i },
                     i > 0 && React.createElement(IconArrowDown, { size: 10, className: "-rotate-90 text-slate-300 shrink-0" }),
@@ -1602,7 +1632,8 @@ function SpielerAkte() {
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
+                !selectedPlayer && showPlayers && isTrainer && (React.createElement(PlayersPage, { players: players, teams: visibleTeams, onSelectPlayer: selectPlayer, onOpenTeam: goTeam, onAddPlayer: () => setModal("player"), canAddPlayer: visibleTeams.length > 0 })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),

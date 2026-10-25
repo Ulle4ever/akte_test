@@ -817,6 +817,65 @@ function FeedbackTemplatesEditor({ questions, categories, onSaveQuestions, onAdd
                 React.createElement(SimpleListManager, { items: categories, onAdd: onAddCategory, onRename: onRenameCategory, onDelete: onDeleteCategory, onMove: onMoveCategory, addPlaceholder: "z. B. Kommunikation" }))),
         React.createElement("button", { onClick: onClose, className: btnSecondaryClass + " w-full py-2.5" }, "Fertig"));
 }
+// Eigene Spieler-Seite (ersetzt die lange Spielerliste in der Seitenleiste):
+// Karten-Raster nach Team gruppiert, mit Filtern nach Team, Status und Name.
+function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, canAddPlayer }) {
+    const [teamFilter, setTeamFilter] = useState("all");
+    const [statusFilter, setStatusFilter] = useState("all");
+    const [query, setQuery] = useState("");
+    const q = query.trim().toLowerCase();
+    const filtered = players
+        .filter((p) => teamFilter === "all" || p.teamId === teamFilter)
+        .filter((p) => statusFilter === "all" || (p.status || "aktiv") === statusFilter)
+        .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.position || "").toLowerCase().includes(q));
+    const groups = [
+        ...teams.map((t, i) => ({ team: t, colorIdx: i, players: filtered.filter((p) => p.teamId === t.id) })),
+        { team: null, colorIdx: teams.length, players: filtered.filter((p) => !teams.some((t) => t.id === p.teamId)) },
+    ].filter((g) => g.players.length > 0)
+        .map((g) => ({ ...g, players: [...g.players].sort((a, b) => a.name.localeCompare(b.name)) }));
+    const statusCount = (s) => players.filter((p) => (teamFilter === "all" || p.teamId === teamFilter) && (s === "all" || (p.status || "aktiv") === s)).length;
+    const chip = (active) => `px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 transition border ${active ? "bg-slate-900 border-slate-900 text-white" : "bg-white border-stone-200 text-slate-500 hover:text-slate-800 hover:border-stone-300"}`;
+    return React.createElement("div", { className: "space-y-5 rsk-fade-in" },
+        React.createElement("div", { className: "flex items-center justify-between gap-3 flex-wrap" },
+            React.createElement("div", null,
+                React.createElement("h2", { className: "font-display text-2xl sm:text-3xl tracking-wide text-slate-900" }, "Spieler"),
+                React.createElement("p", { className: "text-sm text-slate-500" }, `${players.length} Spieler in ${teams.length} ${teams.length === 1 ? "Team" : "Teams"}`)),
+            canAddPlayer && React.createElement("button", { onClick: onAddPlayer, className: btnPrimaryClass + " text-sm px-3.5 py-2 shrink-0" },
+                React.createElement(IconPlus, { size: 15 }),
+                " Spieler anlegen")),
+        React.createElement("div", { className: "space-y-2.5" },
+            React.createElement("div", { className: "relative max-w-md" },
+                React.createElement(IconSearch, { size: 15, className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" }),
+                React.createElement("input", { className: inputClass + " pl-8", placeholder: "Name oder Position…", value: query, onChange: (e) => setQuery(e.target.value) })),
+            teams.length > 1 && React.createElement("div", { className: "flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5" },
+                React.createElement("button", { onClick: () => setTeamFilter("all"), className: chip(teamFilter === "all") }, "Alle Teams"),
+                teams.map((t) => React.createElement("button", { key: t.id, onClick: () => setTeamFilter(t.id), className: chip(teamFilter === t.id) }, t.name))),
+            React.createElement("div", { className: "flex gap-1.5 overflow-x-auto -mx-1 px-1 pb-0.5" },
+                [{ value: "all", label: "Alle" }, ...STATUS_OPTIONS].map((s) => React.createElement("button", { key: s.value, onClick: () => setStatusFilter(s.value), className: chip(statusFilter === s.value) + " inline-flex items-center gap-1.5" },
+                    s.value !== "all" && React.createElement("span", { className: `w-2 h-2 rounded-full ${STATUS_STYLES[s.value]?.dot || "bg-slate-300"}` }),
+                    s.label,
+                    React.createElement("span", { className: "tabular-nums opacity-60" }, statusCount(s.value)))))),
+        groups.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-10" }, players.length === 0 ? "Noch keine Spieler angelegt." : "Keine Spieler für diese Filter."),
+        groups.map((g) => React.createElement("section", { key: g.team ? g.team.id : "none" },
+            React.createElement("div", { className: "flex items-center gap-2.5 mb-2.5" },
+                React.createElement("span", { className: `w-6 h-6 rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, ((g.team && g.team.name) || "?").charAt(0).toUpperCase()),
+                React.createElement("h3", { className: "text-sm font-bold text-slate-800" }, g.team ? g.team.name : "Ohne Team"),
+                React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, g.players.length),
+                g.team && React.createElement("button", { onClick: () => onOpenTeam(g.team.id), className: "ml-auto text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B] shrink-0" }, "Team-Übersicht →")),
+            React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-2.5 sm:gap-3" }, g.players.map((p) => {
+                const st = STATUS_STYLES[p.status || "aktiv"];
+                const hasNumber = p.number !== "" && p.number !== undefined && p.number !== null;
+                return React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "group bg-white rounded-2xl border border-stone-100 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3 text-left min-w-0" },
+                    p.photoUrl
+                        ? React.createElement("img", { src: p.photoUrl, alt: "", className: "w-9 h-9 sm:w-11 sm:h-11 rounded-xl object-cover shrink-0" })
+                        : React.createElement("span", { className: "w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 text-white flex items-center justify-center text-sm font-black shrink-0" }, hasNumber ? p.number : (splitName(p.name).first || p.name).charAt(0).toUpperCase()),
+                    React.createElement("span", { className: "min-w-0 flex-1" },
+                        React.createElement("span", { className: "block text-sm font-semibold text-slate-900 leading-snug line-clamp-2 [hyphens:auto] break-words group-hover:text-[#C43E0E] transition-colors", title: p.name }, p.name),
+                        React.createElement("span", { className: "flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 min-w-0" },
+                            React.createElement("span", { className: `w-1.5 h-1.5 rounded-full shrink-0 ${st?.dot || "bg-slate-300"}` }),
+                            React.createElement("span", { className: "truncate" }, [hasNumber && p.photoUrl ? "#" + p.number : null, POSITION_ABBR[p.position] || p.position].filter(Boolean).join(" · ") || "–"))));
+            })))));
+}
 function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
     const normalFields = normalCat ? normalCat.fields.filter((f) => f.kind !== "shooting") : [];
