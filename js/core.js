@@ -119,6 +119,9 @@ const CATEGORY_STYLES = {
 };
 const GRADE_OPTIONS = ["1+", "1", "1-", "2+", "2", "2-", "3+", "3", "3-", "4+", "4", "4-", "5+", "5", "5-", "6"];
 const GRADE_CRITICAL_INDEX = GRADE_OPTIONS.indexOf("3-");
+// Bewusst entfernte Statistik-Kategorien - werden beim Laden/Speichern immer
+// herausgefiltert, auch wenn eine alte App-Version sie zurueckschreibt.
+const REMOVED_STAT_CATEGORY_IDS = ["hustle"];
 const DEFAULT_STAT_CATEGORIES = [
     {
         id: "normal", label: "Normale Statistiken",

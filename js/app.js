@@ -191,8 +191,18 @@ function SpielerAkte() {
             try {
                 const metaSnap = await db.collection("club").doc("meta").get();
                 const metaDefaults = { teams: [], statCategories: DEFAULT_STAT_CATEGORIES, testTypes: DEFAULT_TEST_TYPES, feedbackQuestions: DEFAULT_FEEDBACK_QUESTIONS, feedbackCategories: DEFAULT_FEEDBACK_CATEGORIES };
+                const loadedMeta = metaSnap.exists ? { ...metaDefaults, ...metaSnap.data() } : metaDefaults;
+                // Entfernte Statistik-Kategorien (z. B. "Habbit Stats") herausfiltern und -
+                // falls eine noch offene alte App-Version sie zurueckgeschrieben hat -
+                // gleich wieder aus den Daten loeschen.
+                const cleanedStatCategories = (loadedMeta.statCategories || []).filter((c) => !REMOVED_STAT_CATEGORY_IDS.includes(c.id));
+                if (cleanedStatCategories.length !== (loadedMeta.statCategories || []).length) {
+                    loadedMeta.statCategories = cleanedStatCategories;
+                    if (account.role === "trainer")
+                        db.collection("club").doc("meta").set({ statCategories: cleanedStatCategories }, { merge: true }).catch(() => { });
+                }
                 if (!cancelled)
-                    setMeta(metaSnap.exists ? { ...metaDefaults, ...metaSnap.data() } : metaDefaults);
+                    setMeta(loadedMeta);
                 let loadedPlayerTeamId = null;
                 if (account.role === "trainer") {
                     // Team-beschraenkter Trainer-Zugang (account.teamId gesetzt): alle
@@ -536,6 +546,8 @@ function SpielerAkte() {
         persistGrades(playerId, cur.map((s) => (s.id === subjectId ? { ...s, trainerComment } : s)));
     }
     async function persistMeta(changes) {
+        if (changes.statCategories)
+            changes = { ...changes, statCategories: changes.statCategories.filter((c) => !REMOVED_STAT_CATEGORY_IDS.includes(c.id)) };
         setMeta((prev) => ({ ...prev, ...changes }));
         try {
             await db.collection("club").doc("meta").set(changes, { merge: true });
