@@ -112,6 +112,8 @@ const IconArrowUp = (p) => React.createElement(Icon, { ...p },
 const IconArrowDown = (p) => React.createElement(Icon, { ...p },
     React.createElement("line", { x1: "12", y1: "5", x2: "12", y2: "19" }),
     React.createElement("polyline", { points: "19 12 12 19 5 12" }));
+const IconChevronDown = (p) => React.createElement(Icon, { ...p },
+    React.createElement("polyline", { points: "6 9 12 15 18 9" }));
 const IconArrowLeft = (p) => React.createElement(Icon, { ...p },
     React.createElement("line", { x1: "19", y1: "12", x2: "5", y2: "12" }),
     React.createElement("polyline", { points: "12 19 5 12 12 5" }));

@@ -819,10 +819,19 @@ function FeedbackTemplatesEditor({ questions, categories, onSaveQuestions, onAdd
 }
 // Eigene Spieler-Seite (ersetzt die lange Spielerliste in der Seitenleiste):
 // Karten-Raster nach Team gruppiert, mit Filtern nach Team, Status und Name.
+const PLAYERS_COLLAPSED_KEY = "rsk.playersCollapsed";
 function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, canAddPlayer }) {
     const [teamFilter, setTeamFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState("all");
     const [query, setQuery] = useState("");
+    // Eingeklappte Teams merkt sich jeder Browser selbst; Standard: alle eingeklappt
+    const [collapsed, setCollapsed] = useState(() => {
+        try {
+            const saved = JSON.parse(localStorage.getItem(PLAYERS_COLLAPSED_KEY));
+            if (saved && typeof saved === "object") return saved;
+        } catch (e) { }
+        return null;
+    });
     const q = query.trim().toLowerCase();
     const filtered = players
         .filter((p) => teamFilter === "all" || p.teamId === teamFilter)
@@ -833,6 +842,20 @@ function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, 
         { team: null, colorIdx: teams.length, players: filtered.filter((p) => !teams.some((t) => t.id === p.teamId)) },
     ].filter((g) => g.players.length > 0)
         .map((g) => ({ ...g, players: [...g.players].sort((a, b) => a.name.localeCompare(b.name)) }));
+    // Bei Suche, Status- oder Teamfilter alles offen zeigen, damit Treffer sichtbar sind
+    const forceOpen = !!q || statusFilter !== "all" || teamFilter !== "all";
+    const groupKey = (g) => g.team ? g.team.id : "none";
+    const isOpen = (g) => forceOpen || (collapsed ? !collapsed[groupKey(g)] : groups.length === 1);
+    function saveCollapsed(next) {
+        setCollapsed(next);
+        try { localStorage.setItem(PLAYERS_COLLAPSED_KEY, JSON.stringify(next)); } catch (e) { }
+    }
+    function toggleGroup(g) {
+        const base = collapsed || Object.fromEntries(groups.map((x) => [groupKey(x), groups.length !== 1]));
+        saveCollapsed({ ...base, [groupKey(g)]: isOpen(g) });
+    }
+    const allOpen = groups.length > 0 && groups.every(isOpen);
+    function setAll(open) { saveCollapsed(Object.fromEntries(groups.map((g) => [groupKey(g), !open]))); }
     const statusCount = (s) => players.filter((p) => (teamFilter === "all" || p.teamId === teamFilter) && (s === "all" || (p.status || "aktiv") === s)).length;
     const chip = (active) => `px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 transition border ${active ? "bg-slate-900 border-slate-900 text-white" : "bg-white border-stone-200 text-slate-500 hover:text-slate-800 hover:border-stone-300"}`;
     return React.createElement("div", { className: "space-y-5 rsk-fade-in" },
@@ -855,14 +878,18 @@ function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, 
                     s.value !== "all" && React.createElement("span", { className: `w-2 h-2 rounded-full ${STATUS_STYLES[s.value]?.dot || "bg-slate-300"}` }),
                     s.label,
                     React.createElement("span", { className: "tabular-nums opacity-60" }, statusCount(s.value)))))),
+        !forceOpen && groups.length > 1 && React.createElement("div", { className: "flex justify-end -mb-2" },
+            React.createElement("button", { onClick: () => setAll(!allOpen), className: "text-xs font-semibold text-slate-500 hover:text-slate-800" }, allOpen ? "Alle einklappen" : "Alle ausklappen")),
         groups.length === 0 && React.createElement("p", { className: "text-sm text-slate-400 text-center py-10" }, players.length === 0 ? "Noch keine Spieler angelegt." : "Keine Spieler für diese Filter."),
-        groups.map((g) => React.createElement("section", { key: g.team ? g.team.id : "none" },
-            React.createElement("div", { className: "flex items-center gap-2.5 mb-2.5" },
+        groups.map((g) => React.createElement("section", { key: groupKey(g), className: isOpen(g) ? "" : `${cardClass} !p-0` },
+            React.createElement("div", { className: `flex items-center gap-2.5 px-3 sm:px-4 ${isOpen(g) ? "pt-1 mb-2.5" : "py-2.5"}` },
+                React.createElement("button", { onClick: () => toggleGroup(g), disabled: forceOpen, "aria-expanded": isOpen(g), className: "flex items-center gap-2.5 min-w-0 flex-1 text-left group/head disabled:cursor-default" },
+                !forceOpen && React.createElement(IconChevronDown, { size: 16, className: `text-slate-400 shrink-0 transition-transform ${isOpen(g) ? "" : "-rotate-90"}` }),
                 React.createElement("span", { className: `w-6 h-6 rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, ((g.team && g.team.name) || "?").charAt(0).toUpperCase()),
                 React.createElement("h3", { className: "text-sm font-bold text-slate-800" }, g.team ? g.team.name : "Ohne Team"),
-                React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, g.players.length),
+                React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, g.players.length)),
                 g.team && React.createElement("button", { onClick: () => onOpenTeam(g.team.id), className: "ml-auto text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B] shrink-0" }, "Team-Übersicht →")),
-            React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-2.5 sm:gap-3" }, g.players.map((p) => {
+            isOpen(g) && React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-5 gap-2.5 sm:gap-3" }, g.players.map((p) => {
                 const st = STATUS_STYLES[p.status || "aktiv"];
                 const hasNumber = p.number !== "" && p.number !== undefined && p.number !== null;
                 return React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "group bg-white rounded-2xl border border-stone-100 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3 text-left min-w-0" },
