@@ -115,6 +115,36 @@ function dbbTeamSummary(doc) {
     const us = table ? table.entries.find((e) => e.isUs) : null;
     return { next, last, table, us };
 }
+// Kompakte Spiel-Karte fuer die Spielerakte: naechstes Spiel + letztes Ergebnis
+// + Tabellenplatz des Teams (fuer Spieler und Trainer gleich)
+function TeamGameCard({ doc, teamName }) {
+    if (!doc || !doc.matches)
+        return null;
+    const { next, last, table, us } = dbbTeamSummary(doc);
+    const lastScore = last ? dbbScore(last) : null;
+    if (!next && !lastScore)
+        return null;
+    return React.createElement("div", { className: `${cardClass} p-4 sm:p-5` },
+        React.createElement("div", { className: "flex items-center justify-between gap-2 mb-3" },
+            React.createElement(SectionLabel, null, `Spielplan ${teamName || ""}`.trim()),
+            us && React.createElement("span", { className: "text-[11px] font-semibold text-slate-500 bg-stone-100 rounded-full px-2 py-0.5 tabular-nums shrink-0", title: table.liganame }, `Platz ${us.rank} · ${us.won}–${us.lost}`)),
+        React.createElement("div", { className: "grid sm:grid-cols-2 gap-3" },
+            React.createElement("div", { className: "rounded-xl bg-slate-900 text-white p-3.5 min-w-0" },
+                React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF8A55]" }, next && daysFromToday(next.date) === 0 ? "Heute Spieltag" : "Nächstes Spiel"),
+                next ? React.createElement(React.Fragment, null,
+                    React.createElement("p", { className: "font-display italic font-black uppercase text-lg leading-tight mt-1 [overflow-wrap:anywhere]" },
+                        React.createElement("span", { className: "text-white/50 mr-1.5" }, next.isHome ? "vs" : "@"),
+                        dbbOpponent(next).name),
+                    React.createElement("p", { className: "text-xs text-white/70 mt-1" }, [shortDateLabel(next.date), next.time ? next.time + " Uhr" : null, next.isHome ? "Heim" : "Auswärts", relativeDayLabel(next.date)].filter(Boolean).join(" · ")),
+                    next.venue && React.createElement("p", { className: "text-[11px] text-white/45 mt-0.5 truncate", title: [next.venue.name, next.venue.street, next.venue.city].filter(Boolean).join(", ") }, [next.venue.name, next.venue.city].filter(Boolean).join(", ")))
+                    : React.createElement("p", { className: "text-sm text-white/60 mt-1" }, "Noch kein weiteres Spiel angesetzt.")),
+            lastScore && React.createElement("div", { className: "rounded-xl bg-stone-50 p-3.5 min-w-0 flex items-center gap-3" },
+                React.createElement("span", { className: `w-9 h-9 rounded-lg text-sm font-black flex items-center justify-center shrink-0 text-white ${lastScore.won ? "bg-emerald-500" : "bg-red-500"}` }, lastScore.won ? "S" : "N"),
+                React.createElement("div", { className: "min-w-0" },
+                    React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-[0.14em] text-slate-400" }, "Letztes Ergebnis"),
+                    React.createElement("p", { className: "text-xl font-black text-slate-900 tabular-nums leading-tight" }, `${lastScore.us}:${lastScore.them}`),
+                    React.createElement("p", { className: "text-xs text-slate-500 truncate" }, `${last.isHome ? "vs" : "@"} ${dbbOpponent(last).name} · ${shortDateLabel(last.date)}`)))));
+}
 function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits, dbbData, dbbSyncing, onRefreshDbb, onOpenStatsImport, onManageTeams }) {
     const [showEventForm, setShowEventForm] = useState(false);
     const [attentionExpanded, setAttentionExpanded] = useState(true);
@@ -343,7 +373,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
             .filter((m) => teamPlayers.length > 0 && !teamPlayers.some((p) => (p.stats || []).some((st) => st.date === m.date)))
             .map((m) => {
                 const sc = dbbScore(m);
-                return { id: "stats-" + m.matchId, kind: "stats", title: `${m.isHome ? "vs" : "@"} ${dbbOpponent(m).name}`, sub: `${g.team.name} · ${shortDateLabel(m.date)} · ${sc.us}:${sc.them}`, label: "Statistik fehlt", onClick: () => onOpenStatsImport && onOpenStatsImport({ teamId: g.team.id, date: m.date, gegner: dbbOpponent(m).name }) };
+                return { id: "stats-" + m.matchId, kind: "stats", title: `${m.isHome ? "vs" : "@"} ${dbbOpponent(m).name}`, sub: `${g.team.name} · ${shortDateLabel(m.date)} · ${sc.us}:${sc.them}`, label: DBB_SCORES_ALTERSKLASSEN.includes(g.team.altersklasse) ? "DBB Scores fehlen" : "Statistik fehlt", onClick: () => onOpenStatsImport && onOpenStatsImport({ teamId: g.team.id, date: m.date, gegner: dbbOpponent(m).name }) };
             });
     });
     const attentionItems = [

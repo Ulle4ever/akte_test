@@ -1771,6 +1771,7 @@ function SpielerAkte() {
                     })(),
                     React.createElement("div", { className: "mt-5 min-w-0" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
+                            React.createElement(TeamGameCard, { doc: dbbData[selectedPlayer.teamId], teamName: selectedTeam?.name }),
                             // Spieler-Zugang: offene Aufgaben (Belastung/Check-in) direkt auf der
                             // Startseite, damit niemand erst den Monitoring-Reiter suchen muss.
                             !isTrainer && selectedPlayer.id === account.playerId && (() => {
