@@ -1024,13 +1024,29 @@ function AttendanceView({ events, teams, allPlayers, eventAttendance, onSetAtten
         weekCard,
         statsCard);
 }
-function AccountManagerModal({ accounts, accountsLoaded, players, teams, currentUid, onLoad, onCreate, onDelete, onClose }) {
+// Team-Auswahl fuer Trainer-Zugaenge: keine Auswahl = Main Account (alles sehen)
+function TrainerTeamPicker({ teams, value, onChange }) {
+    const full = value.length === 0;
+    const chip = (on) => `text-xs font-semibold rounded-lg px-2.5 py-1.5 border transition ${on ? "bg-slate-900 border-slate-900 text-white" : "bg-white border-stone-300 text-slate-600 hover:border-stone-400"}`;
+    return React.createElement("div", { className: "space-y-1.5" },
+        React.createElement("div", { className: "flex flex-wrap gap-1.5" },
+            React.createElement("button", { type: "button", "aria-pressed": full, onClick: () => onChange([]), className: chip(full) }, "Main Account · alle Teams"),
+            sortTeams(teams).map((t) => {
+                const on = value.includes(t.id);
+                const blocked = !on && value.length >= MAX_TRAINER_TEAMS;
+                return React.createElement("button", { key: t.id, type: "button", "aria-pressed": on, disabled: blocked, onClick: () => onChange(on ? value.filter((x) => x !== t.id) : [...value, t.id]), className: chip(on) + " disabled:opacity-40" }, t.name);
+            })),
+        React.createElement("p", { className: "text-[11px] text-slate-400" }, full ? "Sieht und verwaltet alles, inkl. Zugänge und Teams." : `Sieht nur ${value.length === 1 ? "dieses Team" : "diese Teams"} (max. ${MAX_TRAINER_TEAMS}).`));
+}
+function AccountManagerModal({ accounts, accountsLoaded, players, teams, currentUid, onLoad, onCreate, onUpdateTeams, onDelete, onClose }) {
     const [showForm, setShowForm] = useState(false);
     const [label, setLabel] = useState("");
     const [code, setCode] = useState(() => generateCode());
     const [role, setRole] = useState("player");
     const [playerId, setPlayerId] = useState("");
-    const [trainerTeamId, setTrainerTeamId] = useState("");
+    const [trainerTeamIds, setTrainerTeamIds] = useState([]);
+    const [editingUid, setEditingUid] = useState(null);
+    const [editTeamIds, setEditTeamIds] = useState([]);
     const [busy, setBusy] = useState(false);
     const [error, setError] = useState("");
     useEffect(() => { if (!accountsLoaded)
@@ -1052,11 +1068,11 @@ function AccountManagerModal({ accounts, accountsLoaded, players, teams, current
         }
         setBusy(true);
         try {
-            await onCreate({ label: label.trim(), code: code.trim(), role, playerId, teamId: role === "trainer" ? (trainerTeamId || null) : null });
+            await onCreate({ label: label.trim(), code: code.trim(), role, playerId, teamIds: role === "trainer" ? trainerTeamIds : null });
             setLabel("");
             setCode(generateCode());
             setPlayerId("");
-            setTrainerTeamId("");
+            setTrainerTeamIds([]);
             setShowForm(false);
         }
         catch (err) {
@@ -1072,24 +1088,36 @@ function AccountManagerModal({ accounts, accountsLoaded, players, teams, current
     function teamName(id) {
         return teams.find((t) => t.id === id)?.name || "(gelöschtes Team)";
     }
+    async function saveEditTeams(uid) {
+        try {
+            await onUpdateTeams(uid, editTeamIds);
+            setEditingUid(null);
+        }
+        catch (err) {
+            setError("Speichern fehlgeschlagen: " + (err?.message || err));
+        }
+    }
+    // Trainer zuerst (Main Accounts oben), dann Spieler-Zugaenge
+    const sortedAccounts = [...accounts].sort((a, b) => {
+        const rank = (x) => x.role === "trainer" ? (accountTeamIds(x) ? 1 : 0) : 2;
+        return rank(a) - rank(b) || (a.label || "").localeCompare(b.label || "");
+    });
     return (React.createElement("div", { className: "space-y-4" },
-        React.createElement("p", { className: "text-xs text-slate-500" }, "Trainer-Zugänge mit Vollzugriff sehen und bearbeiten alles. Ein Trainer-Zugang kann stattdessen auf ein einzelnes Team eingeschränkt werden - der sieht dann nur Spieler, Termine, Statistiken etc. dieses Teams und kann keine Zugänge oder club-weiten Vorlagen verwalten. Spieler/Eltern-Zugänge sehen nur Kalender, Videos und Basic-Stats des verknüpften Spielers. Jeder Zugang bekommt einen eigenen Code zum Anmelden – kein Passwort, keine E-Mail nötig."),
+        React.createElement("p", { className: "text-xs text-slate-500" }, "Main Accounts (Trainer ohne Team-Auswahl) sehen und bearbeiten alles - gedacht für die Verantwortlichen der Entwicklung. Team-Trainer bekommen ein oder mehrere Teams und sehen dann nur Spieler, Termine, Statistiken etc. dieser Teams, ohne Zugänge oder club-weite Vorlagen verwalten zu können. Spieler/Eltern-Zugänge sehen nur Kalender, Videos und Basic-Stats des verknüpften Spielers. Jeder Zugang bekommt einen eigenen Code zum Anmelden – kein Passwort, keine E-Mail nötig."),
         !showForm ? (React.createElement("button", { onClick: () => setShowForm(true), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800" },
             React.createElement(IconPlus, { size: 15 }),
             " Neuen Zugang anlegen")) : (React.createElement("form", { onSubmit: handleCreate, className: "space-y-3 bg-stone-50 rounded-xl p-4" },
             React.createElement("div", { className: "grid grid-cols-2 gap-3" },
                 React.createElement(Field, { label: "Rolle" },
-                    React.createElement("select", { className: inputClass, value: role, onChange: (e) => { setRole(e.target.value); setPlayerId(""); setTrainerTeamId(""); } },
+                    React.createElement("select", { className: inputClass, value: role, onChange: (e) => { setRole(e.target.value); setPlayerId(""); setTrainerTeamIds([]); } },
                         React.createElement("option", { value: "player" }, "Spieler / Eltern"),
                         React.createElement("option", { value: "trainer" }, "Trainer"))),
                 role === "player" && (React.createElement(Field, { label: "Verknüpfter Spieler" },
                     React.createElement("select", { className: inputClass, value: playerId, onChange: (e) => setPlayerId(e.target.value) },
                         React.createElement("option", { value: "" }, "– auswählen –"),
-                        players.map((p) => React.createElement("option", { key: p.id, value: p.id }, p.name))))),
-                role === "trainer" && (React.createElement(Field, { label: "Zugriff" },
-                    React.createElement("select", { className: inputClass, value: trainerTeamId, onChange: (e) => setTrainerTeamId(e.target.value) },
-                        React.createElement("option", { value: "" }, "Vollzugriff (alle Teams)"),
-                        teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, "Nur " + t.name)))))),
+                        [...players].sort((a, b) => a.name.localeCompare(b.name)).map((p) => React.createElement("option", { key: p.id, value: p.id }, p.name)))))),
+            role === "trainer" && (React.createElement(Field, { label: "Zugriff" },
+                React.createElement(TrainerTeamPicker, { teams, value: trainerTeamIds, onChange: setTrainerTeamIds }))),
             React.createElement(Field, { label: "Name / Bezeichnung (nur zur eigenen Übersicht)" },
                 React.createElement("input", { type: "text", className: inputClass, value: label, onChange: (e) => setLabel(e.target.value), placeholder: role === "trainer" ? "z. B. Max Trainer" : "z. B. Eltern von Marko Cuvalo" })),
             React.createElement(Field, { label: "Code (wird zum Anmelden benötigt)" },
@@ -1100,15 +1128,28 @@ function AccountManagerModal({ accounts, accountsLoaded, players, teams, current
             React.createElement("div", { className: "flex gap-2" },
                 React.createElement("button", { type: "button", onClick: () => setShowForm(false), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2 text-sm font-semibold" }, "Abbrechen"),
                 React.createElement("button", { type: "submit", disabled: busy, className: "flex-1 bg-[#C43E0E] hover:bg-[#A8350C] disabled:opacity-60 text-white rounded-lg py-2 text-sm font-semibold" }, busy ? "Wird angelegt…" : "Zugang anlegen")))),
-        React.createElement("div", { className: "space-y-2" }, !accountsLoaded ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Lädt…")) : accounts.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Zugänge angelegt.")) : (accounts.map((a) => (React.createElement("div", { key: a.uid, className: "flex items-center justify-between gap-3 bg-white rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
-            React.createElement("div", { className: "min-w-0" },
-                React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, a.label || a.email),
-                React.createElement("p", { className: "text-xs text-slate-400" },
-                    a.role === "trainer" ? (a.teamId ? `Trainer · nur ${teamName(a.teamId)}` : "Trainer · Vollzugriff") : `Spieler-Zugang · ${playerName(a.playerId)}`,
-                    " · Code: ",
-                    React.createElement("span", { className: "font-mono" }, a.code))),
-            a.uid !== currentUid && (React.createElement("button", { onClick: () => onDelete(a.uid), className: "text-slate-300 hover:text-red-500 shrink-0", "aria-label": "Zugang entfernen" },
-                React.createElement(IconTrash, { size: 15 }))))))))));
+        React.createElement("div", { className: "space-y-2" }, !accountsLoaded ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Lädt…")) : accounts.length === 0 ? (React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Noch keine Zugänge angelegt.")) : (sortedAccounts.map((a) => {
+            const ids = accountTeamIds(a);
+            const editing = editingUid === a.uid;
+            return React.createElement("div", { key: a.uid, className: "bg-white rounded-xl shadow-[0_1px_2px_rgba(0,0,0,0.04),0_4px_12px_rgba(0,0,0,0.06)] p-3" },
+                React.createElement("div", { className: "flex items-center justify-between gap-3" },
+                    React.createElement("div", { className: "min-w-0" },
+                        React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, a.label || a.email),
+                        React.createElement("p", { className: "text-xs text-slate-400" },
+                            a.role === "trainer" ? (ids ? `Trainer · ${ids.map(teamName).join(", ")}` : "Main Account · alle Teams") : `Spieler-Zugang · ${playerName(a.playerId)}`,
+                            " · Code: ",
+                            React.createElement("span", { className: "font-mono" }, a.code))),
+                    React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
+                        a.role === "trainer" && a.uid !== currentUid && onUpdateTeams && !editing && React.createElement("button", { onClick: () => { setEditingUid(a.uid); setEditTeamIds(ids || []); }, className: "text-slate-300 hover:text-[#C43E0E]", "aria-label": "Teams ändern" },
+                            React.createElement(IconEdit, { size: 15 })),
+                        a.uid !== currentUid && (React.createElement("button", { onClick: () => onDelete(a.uid), className: "text-slate-300 hover:text-red-500", "aria-label": "Zugang entfernen" },
+                            React.createElement(IconTrash, { size: 15 }))))),
+                editing && React.createElement("div", { className: "mt-3 pt-3 border-t border-stone-100 space-y-2" },
+                    React.createElement(TrainerTeamPicker, { teams, value: editTeamIds, onChange: setEditTeamIds }),
+                    React.createElement("div", { className: "flex gap-2" },
+                        React.createElement("button", { type: "button", onClick: () => setEditingUid(null), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-1.5 text-sm font-semibold" }, "Abbrechen"),
+                        React.createElement("button", { type: "button", onClick: () => saveEditTeams(a.uid), className: "flex-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg py-1.5 text-sm font-semibold" }, "Speichern"))));
+        })))));
 }
 function AdvancedRechnerLiveModal({ players, teams, onConfirm, onClose }) {
     const [stage, setStage] = useState("open");

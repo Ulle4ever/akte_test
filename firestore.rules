@@ -9,17 +9,35 @@ service cloud.firestore {
     function isTrainer() {
       return isSignedIn() && account().role == 'trainer';
     }
-    // Team-beschraenkter Trainer-Zugang: account().teamId gesetzt -> darf nur sein
-    // eigenes Team sehen/verwalten. Kein teamId-Feld (oder null) -> Vollzugriff.
+    // Team-beschraenkter Trainer-Zugang: account().teamIds (Liste, max. 4 Teams)
+    // oder das alte Einzelfeld account().teamId -> darf nur diese Teams sehen/
+    // verwalten. Keins von beiden (oder null) -> Vollzugriff ("Main Account").
     // Wichtig: erst mit 'in' pruefen, ob das Feld ueberhaupt existiert - direkter
     // Zugriff auf ein fehlendes Map-Feld wirft in Firestore-Regeln einen Fehler
     // (nicht einfach null), was sonst JEDE Anfrage bestehender Trainer-Zugaenge
     // ohne teamId-Feld mit "Missing or insufficient permissions" abgelehnt haette.
-    function trainerTeamId() {
-      return isTrainer() && ('teamId' in account()) ? account().teamId : null;
+    function trainerTeamIds() {
+      return !isTrainer() ? null
+        : ('teamIds' in account()) && account().teamIds != null && account().teamIds.size() > 0 ? account().teamIds
+        : ('teamId' in account()) && account().teamId != null ? [account().teamId]
+        : null;
     }
     function isFullTrainer() {
-      return isTrainer() && trainerTeamId() == null;
+      return isTrainer() && trainerTeamIds() == null;
+    }
+    function trainerHasTeam(teamId) {
+      return isTrainer() && trainerTeamIds() != null && teamId in trainerTeamIds();
+    }
+    // Ist eines der eigenen Teams in der Liste? Bewusst Index fuer Index statt
+    // hasAny(): so kann Firestore auch Abfragen mit array-contains (ein Team pro
+    // Abfrage) gegen diese Regel pruefen.
+    function trainerTeamInList(ids) {
+      let mine = trainerTeamIds();
+      return mine != null && (
+        (mine.size() > 0 && mine[0] in ids)
+        || (mine.size() > 1 && mine[1] in ids)
+        || (mine.size() > 2 && mine[2] in ids)
+        || (mine.size() > 3 && mine[3] in ids));
     }
     function myPlayerId() {
       return isSignedIn() && ('playerId' in account()) ? account().playerId : null;
@@ -36,7 +54,7 @@ service cloud.firestore {
       return isFullTrainer()
         || (isTrainer()
             && exists(/databases/$(database)/documents/players/$(playerId))
-            && get(/databases/$(database)/documents/players/$(playerId)).data.teamId == trainerTeamId());
+            && trainerHasTeam(get(/databases/$(database)/documents/players/$(playerId)).data.teamId));
     }
     // Welche Teams ein Termin betrifft (eigenes Team + Teams einzeln eingeladener
     // Spieler), gepflegt vom Client im Feld involvedTeamIds. Fehlt das Feld (z.B.
@@ -47,7 +65,7 @@ service cloud.firestore {
       return isFullTrainer()
         || (isTrainer()
             && 'involvedTeamIds' in eventData
-            && trainerTeamId() in eventData.involvedTeamIds);
+            && trainerTeamInList(eventData.involvedTeamIds));
     }
 
     match /club/meta {
@@ -74,12 +92,12 @@ service cloud.firestore {
     // eigenen Profil ausschließlich die Onboarding-/Kontaktfelder schreiben.
     match /players/{playerId} {
       allow read: if isFullTrainer()
-        || (isTrainer() && resource.data.teamId == trainerTeamId())
+        || trainerHasTeam(resource.data.teamId)
         || myPlayerId() == playerId;
       allow create: if isFullTrainer()
-        || (isTrainer() && request.resource.data.teamId == trainerTeamId());
+        || trainerHasTeam(request.resource.data.teamId);
       allow update: if isFullTrainer()
-        || (isTrainer() && resource.data.teamId == trainerTeamId() && request.resource.data.teamId == trainerTeamId())
+        || (trainerHasTeam(resource.data.teamId) && trainerHasTeam(request.resource.data.teamId))
         || (myPlayerId() == playerId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'birthdate', 'city', 'district', 'school', 'height', 'weight',
@@ -87,7 +105,7 @@ service cloud.firestore {
               'emergencyContactName', 'emergencyContactPhone', 'onboardingCompleted'
             ]));
       allow delete: if isFullTrainer()
-        || (isTrainer() && resource.data.teamId == trainerTeamId());
+        || trainerHasTeam(resource.data.teamId);
     }
 
     // Private Trainer-Daten pro Spieler: Notizen, Tests, Anwesenheit.
@@ -137,12 +155,12 @@ service cloud.firestore {
         || resource.data.teamId == playerTeamId()
         || myPlayerId() in resource.data.includedPlayerIds;
       allow create: if isFullTrainer()
-        || (isTrainer() && request.resource.data.teamId == trainerTeamId())
+        || trainerHasTeam(request.resource.data.teamId)
         || (isTrainer() && request.resource.data.teamId == null
             && 'involvedTeamIds' in request.resource.data
-            && trainerTeamId() in request.resource.data.involvedTeamIds);
+            && trainerTeamInList(request.resource.data.involvedTeamIds));
       allow update, delete: if isFullTrainer()
-        || (isTrainer() && resource.data.teamId == trainerTeamId())
+        || trainerHasTeam(resource.data.teamId)
         || (isTrainer() && resource.data.teamId == null && eventInvolvesTrainerTeam(resource.data));
     }
 
@@ -152,13 +170,13 @@ service cloud.firestore {
     // verwalten die Notizen ihres Teams.
     match /teamNotes/{noteId} {
       allow read: if isFullTrainer()
-        || (isTrainer() && resource.data.teamId == trainerTeamId())
+        || trainerHasTeam(resource.data.teamId)
         || myPlayerId() in resource.data.sharedWithPlayerIds
         || (resource.data.sharedWithAll == true && resource.data.teamId == playerTeamId());
       allow create: if isFullTrainer()
-        || (isTrainer() && request.resource.data.teamId == trainerTeamId());
+        || trainerHasTeam(request.resource.data.teamId);
       allow update, delete: if isFullTrainer()
-        || (isTrainer() && resource.data.teamId == trainerTeamId());
+        || trainerHasTeam(resource.data.teamId);
     }
 
     // Rotationspläne: reines (aktuell ungenutztes) Vorbereitungs-Werkzeug, bleibt

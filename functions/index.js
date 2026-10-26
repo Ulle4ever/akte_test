@@ -8,7 +8,7 @@
       alle Spieler, die diese Woche noch kein Wellness-/Monitoring-
       Check-in gemacht haben.
 
-   Dazu der DBB-Abgleich (syncDbbScheduled / syncDbbNow): holt fuer jedes
+   Dazu der DBB-Abgleich (syncDbbScheduled Fr 7 Uhr + So 22 Uhr / syncDbbNow per Klick): holt fuer jedes
    Team mit hinterlegter DBB-Team-ID Spielplan, Ergebnisse und Tabelle von
    basketball-bund.net, speichert sie in dbbTeams/{teamId} und traegt die
    Spiele in den Kalender ein.
@@ -342,33 +342,41 @@ async function syncDbbCalendar(team, matches) {
     return { created, updated };
 }
 
-async function syncAllDbbTeams() {
+const DBB_SYNC_CONCURRENCY = 4; // so viele Teams gleichzeitig (bei ~15 Teams sonst zu langsam)
+async function syncAllDbbTeams(onlyTeamIds) {
     const meta = await db.collection("club").doc("meta").get();
-    const teams = (meta.exists ? meta.data().teams : null) || [];
-    const results = [];
-    for (const team of teams) {
+    const allTeams = (meta.exists ? meta.data().teams : null) || [];
+    const teams = [];
+    for (const team of allTeams) {
+        if (onlyTeamIds && !onlyTeamIds.includes(team.id))
+            continue;
         if (team.dbbTeamId || (await db.collection("dbbTeams").doc(team.id).get()).exists)
-            results.push(await syncDbbTeam(team));
+            teams.push(team);
     }
+    const results = [];
+    for (let i = 0; i < teams.length; i += DBB_SYNC_CONCURRENCY)
+        results.push(...await Promise.all(teams.slice(i, i + DBB_SYNC_CONCURRENCY).map(syncDbbTeam)));
     return results;
 }
 
-// Alle 20 Minuten geweckt: am Wochenende (Spieltage) 10-22 Uhr jedes Mal,
-// sonst nur alle 2 Stunden zur vollen Stunde.
-exports.syncDbbScheduled = onSchedule({ schedule: "*/20 * * * *", timeZone: "Europe/Berlin", region: "europe-west1" }, async () => {
+// Automatisch nur zweimal pro Woche: Freitag 7 Uhr (Ansetzungen fuers
+// Wochenende) und Sonntag 22 Uhr (Ergebnisse/Tabelle). Sonst per Klick in der App.
+exports.syncDbbScheduled = onSchedule({ schedule: "0 7,22 * * 0,5", timeZone: "Europe/Berlin", region: "europe-west1", timeoutSeconds: 540 }, async () => {
     const now = berlinNow();
-    const gameDay = (now.weekday === "Sat" || now.weekday === "Sun") && now.hour >= 10 && now.hour <= 22;
-    if (!gameDay && !(now.minute < 20 && now.hour % 2 === 0))
+    if (!((now.weekday === "Fri" && now.hour === 7) || (now.weekday === "Sun" && now.hour === 22)))
         return;
     await syncAllDbbTeams();
 });
 
 // "Jetzt aktualisieren" in der App (nur Trainer)
-exports.syncDbbNow = onCall({ region: "europe-west1", timeoutSeconds: 120 }, async (request) => {
+exports.syncDbbNow = onCall({ region: "europe-west1", timeoutSeconds: 300 }, async (request) => {
     if (!request.auth)
         throw new HttpsError("unauthenticated", "Bitte eingeloggt sein.");
     const callerSnap = await db.collection("accounts").doc(request.auth.uid).get();
     if (!callerSnap.exists || callerSnap.data().role !== "trainer")
         throw new HttpsError("permission-denied", "Nur Trainer duerfen den DBB-Abgleich starten.");
-    return { results: await syncAllDbbTeams() };
+    // Team-Trainer: nur die eigenen Teams abgleichen (geht schneller)
+    const acc = callerSnap.data();
+    const ownTeamIds = Array.isArray(acc.teamIds) && acc.teamIds.length ? acc.teamIds : (acc.teamId ? [acc.teamId] : null);
+    return { results: await syncAllDbbTeams(ownTeamIds) };
 });

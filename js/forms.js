@@ -28,18 +28,65 @@ function Field({ label, children }) {
 function TeamsManager({ teams, onEdit, onClose }) {
     return (React.createElement("div", { className: "space-y-2" },
         teams.length === 0 && React.createElement("p", { className: "text-sm text-slate-400" }, "Noch keine Teams angelegt."),
-        teams.map((t) => (React.createElement("div", { key: t.id, className: "flex items-center justify-between gap-3 bg-stone-50 rounded-xl px-3 py-2.5" },
+        sortTeams(teams).map((t) => (React.createElement("div", { key: t.id, className: "flex items-center justify-between gap-3 bg-stone-50 rounded-xl px-3 py-2.5" },
             React.createElement("div", { className: "min-w-0" },
                 React.createElement("p", { className: "text-sm font-semibold text-slate-800 truncate" }, t.name),
-                React.createElement("p", { className: "text-xs text-slate-400" }, t.altersklasse || "Keine Altersklasse hinterlegt", t.trainer && ` · ${t.trainer}`)),
+                React.createElement("p", { className: "text-xs text-slate-400" }, t.altersklasse || "Keine Altersklasse hinterlegt", isDoppellizenzTeam(t) ? " · Doppellizenz" : "", t.dbbTeamId ? " · DBB verbunden" : "", t.trainer && ` · ${t.trainer}`)),
             React.createElement("button", { onClick: () => onEdit(t), className: "shrink-0 p-2 rounded-lg hover:bg-stone-200 text-slate-500", "aria-label": "Bearbeiten" },
                 React.createElement(IconEdit, { size: 15 }))))),
         React.createElement("button", { onClick: onClose, className: "w-full text-sm text-slate-500 hover:text-slate-700 pt-2" }, "Schließen")));
 }
-const ALTERSKLASSE_OPTIONS = ["U12", "U14", "U16", "U18", "JBBL", "NBBL"];
+const ALTERSKLASSE_OPTIONS = ["U10", "U12", "U14", "U16", "U18", "JBBL", "NBBL", "ProA", "1. Regionalliga"];
 // Altersklassen, fuer die der DBB-Scores-Statistik-Import angeboten wird (JBBL/NBBL
 // haben eigene, ausfuehrlichere Statistiken und brauchen den Import nicht).
-const DBB_SCORES_ALTERSKLASSEN = ["U12", "U14", "U16", "U18"];
+const DBB_SCORES_ALTERSKLASSEN = ["U10", "U12", "U14", "U16", "U18"];
+// Doppellizenz-Teams (Herren): kein eigener Kader - Spieler bleiben in ihrem
+// Hauptteam (NBBL/JBBL) und werden dort per player.dlTeamIds zugeordnet.
+const DOPPELLIZENZ_ALTERSKLASSEN = ["ProA", "1. Regionalliga"];
+function isDoppellizenzTeam(team) {
+    return !!team && DOPPELLIZENZ_ALTERSKLASSEN.includes(team.altersklasse);
+}
+// Feste Reihenfolge ueberall (Seitenleiste, Dashboard, Auswahllisten): Herren,
+// dann Nachwuchs-Bundesligen, dann die U-Teams absteigend, innerhalb nach Name.
+const TEAM_SORT_ORDER = ["ProA", "1. Regionalliga", "NBBL", "JBBL", "U18", "U16", "U14", "U12", "U10"];
+function sortTeams(teams) {
+    const rank = (t) => {
+        const i = TEAM_SORT_ORDER.indexOf(t.altersklasse);
+        return i === -1 ? TEAM_SORT_ORDER.length : i;
+    };
+    return [...(teams || [])].sort((a, b) => rank(a) - rank(b) || (a.name || "").localeCompare(b.name || "", "de", { numeric: true }));
+}
+// Trainer-Zugang: teamIds (Liste, max. MAX_TRAINER_TEAMS) oder altes Einzelfeld
+// teamId; null = Vollzugriff ("Main Account"). Die Firestore-Regeln pruefen die
+// Liste Index fuer Index, deshalb die feste Obergrenze.
+const MAX_TRAINER_TEAMS = 4;
+function accountTeamIds(account) {
+    if (!account || account.role !== "trainer")
+        return null;
+    if (Array.isArray(account.teamIds) && account.teamIds.length > 0)
+        return account.teamIds;
+    return account.teamId ? [account.teamId] : null;
+}
+// teamId bleibt als erstes Team mit drin: aeltere Regeln kennen nur das
+// Einzelfeld und schraenken so wenigstens auf das erste Team ein, statt
+// faelschlich Vollzugriff zu geben.
+function accountTeamFields(teamIds) {
+    const ids = (teamIds || []).filter(Boolean).slice(0, MAX_TRAINER_TEAMS);
+    return { teamIds: ids.length ? ids : null, teamId: ids[0] || null };
+}
+// Spieler eines Teams inkl. Doppellizenzler (fuer ProA-/Regio-Teams)
+function playersOfTeam(players, teamId) {
+    return players.filter((p) => p.teamId === teamId || (p.dlTeamIds || []).includes(teamId));
+}
+// Cloudinary liefert sonst das Original (Handyfotos ~4000x6000 px), das der
+// Browser auf 100 px herunterrechnet - das sieht pixelig/zackig aus und laedt
+// langsam. Stattdessen passend skaliert + aufs Gesicht zugeschnitten abrufen.
+function cloudinaryImage(url, w, h) {
+    if (!url || !/res\.cloudinary\.com\/[^/]+\/image\/upload\//.test(url))
+        return url;
+    const t = ["c_fill", "g_face", `w_${w}`, h ? `h_${h}` : null, "q_auto", "f_auto", "dpr_3.0"].filter(Boolean).join(",");
+    return url.replace("/image/upload/", `/image/upload/${t}/`);
+}
 // Liga-/Verbandslogo fuer die Spieler-Uebersicht: JBBL/NBBL zeigen ihr eigenes
 // Liga-Logo, die U-Mannschaften (ohne eigene Liga) zeigen stattdessen das WBV-Logo.
 function getLeagueLogo(altersklasse) {
@@ -122,7 +169,10 @@ function TeamForm({ initial, onSubmit, onClose }) {
 }
 function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [name, setName] = useState(initial?.name || "");
-    const [teamId, setTeamId] = useState(initial?.teamId || teams[0]?.id || "");
+    const rosterTeams = sortTeams(teams.filter((t) => !isDoppellizenzTeam(t)));
+    const dlTeams = sortTeams(teams.filter(isDoppellizenzTeam));
+    const [teamId, setTeamId] = useState(initial?.teamId || rosterTeams[0]?.id || "");
+    const [dlTeamIds, setDlTeamIds] = useState(initial?.dlTeamIds || []);
     const [position, setPosition] = useState(initial?.position || POSITIONS[0]);
     const [number, setNumber] = useState(initial?.number ?? "");
     const [birthdate, setBirthdate] = useState(initial?.birthdate || "");
@@ -178,6 +228,7 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             city: city.trim(),
             district: district.trim(),
             photoUrl,
+            dlTeamIds: dlTeamIds.filter((id) => dlTeams.some((t) => t.id === id)),
         });
         onClose();
     }
@@ -186,8 +237,14 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             React.createElement("input", { className: inputClass, value: name, onChange: (e) => { setName(e.target.value); setError(""); }, placeholder: "Vor- und Nachname", autoFocus: true })),
         React.createElement(Field, { label: "Team" },
             React.createElement("select", { className: inputClass, value: teamId, onChange: (e) => setTeamId(e.target.value) },
-                teams.length === 0 && React.createElement("option", { value: "" }, "Kein Team vorhanden"),
-                teams.map((t) => (React.createElement("option", { key: t.id, value: t.id }, t.name))))),
+                rosterTeams.length === 0 && React.createElement("option", { value: "" }, "Kein Team vorhanden"),
+                rosterTeams.map((t) => (React.createElement("option", { key: t.id, value: t.id }, t.name))))),
+        dlTeams.length > 0 && React.createElement(Field, { label: "Doppellizenz (optional)" },
+            React.createElement("div", { className: "flex flex-wrap gap-2" }, dlTeams.map((t) => {
+                const on = dlTeamIds.includes(t.id);
+                return React.createElement("button", { key: t.id, type: "button", "aria-pressed": on, onClick: () => setDlTeamIds((prev) => on ? prev.filter((x) => x !== t.id) : [...prev, t.id]), className: `text-sm font-semibold rounded-lg px-3 py-1.5 border transition ${on ? "bg-slate-900 border-slate-900 text-white" : "bg-white border-stone-300 text-slate-600 hover:border-stone-400"}` }, (on ? "✓ " : "") + t.name);
+            })),
+            React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Spieler bleibt im Hauptteam, sieht aber zusätzlich den Spielplan dieser Mannschaft, und du kannst Stats aus deren Spielen für ihn importieren.")),
         React.createElement(Field, { label: "Portraitfoto (optional)" },
             React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => setPhotoFile(e.target.files[0] || null), className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }),
             initial?.photoUrl && !photoFile && React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Aktuell ist schon ein Foto hinterlegt - neue Datei wählen, um es zu ersetzen."),
@@ -1398,23 +1455,92 @@ function AttendanceImportModal({ players, teams, onConfirm, onClose }) {
                     React.createElement("td", { className: "px-2.5 py-1.5" },
                         React.createElement("select", { className: `w-full rounded border px-1.5 py-1 text-xs ${matches[i] ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`, value: matches[i], onChange: (e) => setMatchAt(i, e.target.value) },
                             React.createElement("option", { value: "" }, "\u2013 \u00DCberspringen \u2013"),
-                            players.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))))))))),
+                            orderedPlayers.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))))))))),
         React.createElement("div", { className: "flex gap-2" },
             React.createElement("button", { onClick: () => setStage("upload"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Andere Datei"),
             React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
                 matchedCount,
                 " Eintr\u00E4ge importieren"))));
 }
-function BoxscoreImportModal({ players, teams, onConfirm, onClose, preset }) {
+// Statistik-Import am Spielplan: gespielte DBB-Spiele der passenden Teams zur
+// Auswahl (neueste zuerst), Datum/Gegner/Team kommen dann aus dem Spiel. Nur
+// wenn ein Spiel nicht im DBB-Spielplan steht, Datum und Gegner von Hand.
+function playedDbbGames(teams, dbbData) {
+    const todayIso = today();
+    return sortTeams(teams).flatMap((t) => ((dbbData || {})[t.id]?.matches || [])
+        .filter((m) => m.date && !m.cancelled && (m.result || m.date <= todayIso))
+        .map((m) => ({ team: t, m })))
+        .sort((a, b) => b.m.date.localeCompare(a.m.date));
+}
+function statsExistForGame(players, teamId, m) {
+    return playersOfTeam(players, teamId).some((p) => (p.stats || []).some((st) => st.dbbMatchId ? st.dbbMatchId === m.matchId : st.date === m.date));
+}
+function dbbGameLabel(m) {
+    const opp = m.isHome ? m.guest : m.home;
+    const sc = dbbScore(m);
+    return [shortDateLabel(m.date), `${m.isHome ? "vs" : "@"} ${opp?.name || "?"}`, sc ? `${sc.us}:${sc.them}` : null].filter(Boolean).join(" · ");
+}
+function GameSelectFields({ teams, dbbData, players, game, onChange }) {
+    const games = playedDbbGames(teams, dbbData);
+    const manual = games.length === 0 || !!game.manual;
+    const setManual = (on) => onChange({ ...game, matchId: on ? null : game.matchId, manual: on });
+    const byTeam = sortTeams(teams).map((t) => ({ team: t, list: games.filter((g) => g.team.id === t.id) })).filter((x) => x.list.length > 0);
+    function pick(value) {
+        if (value === "__manual") {
+            setManual(true);
+            return;
+        }
+        const hit = games.find((g) => String(g.m.matchId) === value);
+        if (hit)
+            onChange({ teamId: hit.team.id, matchId: hit.m.matchId, date: hit.m.date, gegner: (hit.m.isHome ? hit.m.guest : hit.m.home)?.name || "" });
+        else
+            onChange({ ...game, matchId: null });
+    }
+    if (manual) {
+        return React.createElement("div", { className: "space-y-2" },
+            React.createElement("div", { className: "flex items-center gap-3 flex-wrap" },
+                React.createElement(Field, { label: "Datum des Spiels" },
+                    React.createElement("input", { type: "date", className: inputClass, value: game.date || "", onChange: (e) => onChange({ ...game, date: e.target.value }) })),
+                React.createElement(Field, { label: "Gegner (optional)" },
+                    React.createElement("input", { className: inputClass, value: game.gegner || "", onChange: (e) => onChange({ ...game, gegner: e.target.value }), placeholder: "z. B. TSV Nord" }))),
+            games.length > 0 && React.createElement("button", { type: "button", onClick: () => setManual(false), className: "text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B]" }, "← Spiel aus dem Spielplan wählen"));
+    }
+    const selected = games.find((g) => g.m.matchId === game.matchId);
+    const selectedHasStats = selected && statsExistForGame(players, selected.team.id, selected.m);
+    return React.createElement(Field, { label: "Spiel aus dem Spielplan" },
+        React.createElement("select", { className: inputClass, value: game.matchId ? String(game.matchId) : "", onChange: (e) => pick(e.target.value) },
+            React.createElement("option", { value: "" }, "– Spiel wählen –"),
+            byTeam.map(({ team, list }) => React.createElement("optgroup", { key: team.id, label: team.name }, list.map(({ m }) => React.createElement("option", { key: m.matchId, value: String(m.matchId) }, dbbGameLabel(m) + (statsExistForGame(players, team.id, m) ? "  ✓ Stats da" : ""))))),
+            React.createElement("option", { value: "__manual" }, "Spiel nicht im Spielplan – Datum von Hand")),
+        selected
+            ? React.createElement("p", { className: `text-xs mt-1 ${selectedHasStats ? "text-amber-600" : "text-slate-400"}` }, selectedHasStats
+                ? "Für dieses Spiel gibt es schon Stats - neue Werte werden in die bestehenden Einträge übernommen."
+                : [selected.team.name, selected.m.liganame].filter(Boolean).join(" · "))
+            : React.createElement("p", { className: "text-xs text-amber-600 mt-1" }, "Bitte zuerst das Spiel auswählen."));
+}
+// Ist im Import ein Spiel gewaehlt (oder bewusst von Hand eingetragen)?
+function gameChosen(game, teams, dbbData) {
+    return !!game.matchId || playedDbbGames(teams, dbbData).length === 0 || !!game.manual;
+}
+// Spieler fuer die Zuordnungs-Auswahl: Team des Spiels zuerst
+function playersForGame(players, teamId) {
+    if (!teamId)
+        return players;
+    const own = playersOfTeam(players, teamId);
+    return [...own, ...players.filter((p) => !own.includes(p))];
+}
+function BoxscoreImportModal({ players, teams, dbbData, onConfirm, onClose, preset }) {
     const [stage, setStage] = useState("paste");
     const [text, setText] = useState("");
     const [parseError, setParseError] = useState("");
     const [filePlayers, setFilePlayers] = useState([]);
     const [matches, setMatches] = useState([]);
-    const [date, setDate] = useState(preset?.date || today());
-    const [gegner, setGegner] = useState(preset?.gegner || "");
+    const statTeams = teams.filter((t) => !DBB_SCORES_ALTERSKLASSEN.includes(t.altersklasse));
+    const [game, setGame] = useState({ teamId: preset?.teamId || null, matchId: preset?.matchId || null, date: preset?.date || today(), gegner: preset?.gegner || "" });
+    const date = game.date, gegner = game.gegner || "";
     const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
     const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}${p.teamId ? " (" + teamName(p.teamId) + ")" : ""}`;
+    const orderedPlayers = playersForGame(players, game.teamId);
     function handleParse() {
         const { players: fp, error } = parseBoxscoreText(text);
         if (error) {
@@ -1422,8 +1548,9 @@ function BoxscoreImportModal({ players, teams, onConfirm, onClose, preset }) {
             return;
         }
         setFilePlayers(fp);
+        const pool = game.teamId ? playersOfTeam(players, game.teamId) : players;
         setMatches(fp.map((row) => {
-            const byNumber = players.filter((p) => Number(p.number) === row.number);
+            const byNumber = pool.filter((p) => Number(p.number) === row.number);
             if (byNumber.length === 1)
                 return byNumber[0].id;
             const norm = normalizeName(row.name);
@@ -1441,23 +1568,20 @@ function BoxscoreImportModal({ players, teams, onConfirm, onClose, preset }) {
             .map((row, i) => ({ row, playerId: matches[i] }))
             .filter((x) => x.playerId)
             .map((x) => ({ playerId: x.playerId, stats: x.row }));
-        onConfirm(entries, date, gegner.trim());
+        onConfirm(entries, date, gegner.trim(), { matchId: game.matchId || null, teamId: game.teamId || null });
         onClose();
     }
     const matchedCount = matches.filter(Boolean).length;
     if (stage === "paste") {
         return (React.createElement("div", { className: "space-y-4" },
+            React.createElement(GameSelectFields, { teams: statTeams, dbbData, players, game, onChange: setGame }),
             React.createElement("p", { className: "text-xs text-slate-500" }, "Die Boxscore-Tabelle von der Statistik-Seite (z. B. NBBL) markieren, kopieren und hier einf\u00FCgen. \u00DCberschriften/Team-Zeile k\u00F6nnen mit drin sein, die App findet die richtige Stelle selbst."),
             React.createElement("textarea", { className: inputClass + " font-mono text-xs", rows: 10, value: text, onChange: (e) => { setText(e.target.value); setParseError(""); }, placeholder: "Hier den kopierten Boxscore-Text einf\u00FCgen\u2026" }),
             parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError),
-            React.createElement("button", { onClick: handleParse, disabled: !text.trim(), className: "w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, "Text auswerten")));
+            React.createElement("button", { onClick: handleParse, disabled: !text.trim() || !gameChosen(game, statTeams, dbbData), className: "w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, "Text auswerten")));
     }
     return (React.createElement("div", { className: "space-y-4" },
-        React.createElement("div", { className: "flex items-center gap-3 flex-wrap" },
-            React.createElement(Field, { label: "Datum des Spiels" },
-                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
-            React.createElement(Field, { label: "Gegner (optional)" },
-                React.createElement("input", { className: inputClass, value: gegner, onChange: (e) => setGegner(e.target.value), placeholder: "z. B. TSV Nord" }))),
+        React.createElement(GameSelectFields, { teams: statTeams, dbbData, players, game, onChange: setGame }),
         React.createElement("p", { className: "text-xs text-slate-500" },
             filePlayers.length,
             " Spielerzeilen erkannt. Werte flie\u00DFen in einen bestehenden Statistik-Eintrag vom selben Datum ein, oder es wird ein neuer angelegt. \"Fouls\", \"Rebounds Offensiv/Defensiv\" und \"Effizienz\" werden bei Bedarf automatisch als neue Felder angelegt."),
@@ -1479,20 +1603,22 @@ function BoxscoreImportModal({ players, teams, onConfirm, onClose, preset }) {
                     React.createElement("td", { className: "px-2.5 py-1.5" },
                         React.createElement("select", { className: `w-full rounded border px-1.5 py-1 text-xs ${matches[i] ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`, value: matches[i], onChange: (e) => setMatchAt(i, e.target.value) },
                             React.createElement("option", { value: "" }, "\u2013 \u00DCberspringen \u2013"),
-                            players.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))))))))),
+                            orderedPlayers.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))))))))),
         React.createElement("div", { className: "flex gap-2" },
             React.createElement("button", { onClick: () => setStage("paste"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Anderer Text"),
-            React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0 || !date, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
+            React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0 || !date || !gameChosen(game, statTeams, dbbData), className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
                 matchedCount,
                 " Spieler importieren"))));
 }
-function AdvancedStatsImportModal({ players, teams, onConfirm, onClose }) {
+function AdvancedStatsImportModal({ players, teams, dbbData, onConfirm, onClose }) {
     const [stage, setStage] = useState("upload");
     const [parseError, setParseError] = useState("");
     const [rows, setRows] = useState([]);
     const [matches, setMatches] = useState([]);
-    const [date, setDate] = useState(today());
-    const [gegner, setGegner] = useState("");
+    const statTeams = teams.filter((t) => !DBB_SCORES_ALTERSKLASSEN.includes(t.altersklasse));
+    const [game, setGame] = useState({ teamId: null, matchId: null, date: today(), gegner: "" });
+    const date = game.date, gegner = game.gegner || "";
+    const orderedPlayers = playersForGame(players, game.teamId);
     const [fileName, setFileName] = useState("");
     const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
     const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}${p.teamId ? " (" + teamName(p.teamId) + ")" : ""}`;
@@ -1528,7 +1654,7 @@ function AdvancedStatsImportModal({ players, teams, onConfirm, onClose }) {
             .map((row, i) => ({ row, playerId: matches[i] }))
             .filter((x) => x.playerId)
             .map((x) => ({ playerId: x.playerId, values: x.row.values }));
-        onConfirm(entries, date, gegner.trim());
+        onConfirm(entries, date, gegner.trim(), { matchId: game.matchId || null, teamId: game.teamId || null });
         onClose();
     }
     const matchedCount = matches.filter(Boolean).length;
@@ -1545,11 +1671,7 @@ function AdvancedStatsImportModal({ players, teams, onConfirm, onClose }) {
             parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError)));
     }
     return (React.createElement("div", { className: "space-y-4" },
-        React.createElement("div", { className: "flex items-center gap-3 flex-wrap" },
-            React.createElement(Field, { label: "Datum des Spiels" },
-                React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) })),
-            React.createElement(Field, { label: "Gegner (optional)" },
-                React.createElement("input", { className: inputClass, value: gegner, onChange: (e) => setGegner(e.target.value), placeholder: "z. B. TSV Nord" }))),
+        React.createElement(GameSelectFields, { teams: statTeams, dbbData, players, game, onChange: setGame }),
         React.createElement("p", { className: "text-xs text-slate-500" },
             rows.length,
             " Spielerzeilen erkannt, ohne Trikotnummer wird nur nach Name abgeglichen \u2013 bitte unklare Zuordnungen pr\u00FCfen. Neue Kennzahlen werden automatisch als Felder unter \"Advanced\" angelegt."),
@@ -1568,7 +1690,7 @@ function AdvancedStatsImportModal({ players, teams, onConfirm, onClose }) {
                             players.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p))))))))))),
         React.createElement("div", { className: "flex gap-2" },
             React.createElement("button", { onClick: () => setStage("upload"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Andere Datei"),
-            React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0 || !date, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
+            React.createElement("button", { onClick: handleConfirm, disabled: matchedCount === 0 || !date || !gameChosen(game, statTeams, dbbData), className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
                 matchedCount,
                 " Spieler importieren"))));
 }
@@ -1587,17 +1709,17 @@ function parseDbbFraction(raw) {
     const m = (raw || "").match(/(\d+)\s*\/\s*(\d+)/);
     return m ? { made: parseInt(m[1], 10), att: parseInt(m[2], 10) } : { made: null, att: null };
 }
-function DbbScoresImportModal({ teams, allPlayers, onConfirm, onClose, preset }) {
+function DbbScoresImportModal({ teams, allPlayers, dbbData, onConfirm, onClose, preset }) {
     const [stage, setStage] = useState("setup");
-    const [teamId, setTeamId] = useState((preset?.teamId && teams.some((t) => t.id === preset.teamId) ? preset.teamId : null) || teams[0]?.id || "");
-    const [date, setDate] = useState(preset?.date || today());
-    const [gegner, setGegner] = useState(preset?.gegner || "");
+    const [game, setGame] = useState({ teamId: (preset?.teamId && teams.some((t) => t.id === preset.teamId) ? preset.teamId : null) || sortTeams(teams)[0]?.id || "", matchId: preset?.matchId || null, date: preset?.date || today(), gegner: preset?.gegner || "" });
+    const teamId = game.teamId, date = game.date, gegner = game.gegner || "";
+    const setTeamId = (id) => setGame((g) => ({ ...g, teamId: id, matchId: null }));
     const [progress, setProgress] = useState({ done: 0, total: 0 });
     const [parseError, setParseError] = useState("");
     const [shot1Rows, setShot1Rows] = useState([]);
     const [rows, setRows] = useState([]);
     const [matches, setMatches] = useState([]);
-    const teamPlayers = allPlayers.filter((p) => p.teamId === teamId);
+    const teamPlayers = playersOfTeam(allPlayers, teamId);
     const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}`;
     function loadImage(file) {
         return new Promise((resolve, reject) => {
@@ -1686,28 +1808,24 @@ function DbbScoresImportModal({ teams, allPlayers, onConfirm, onClose, preset })
                 };
             })
             .filter((x) => x.playerId);
-        onConfirm(entries, date, gegner.trim());
+        onConfirm(entries, date, gegner.trim(), { matchId: game.matchId || null, teamId });
         onClose();
     }
     const matchedCount = matches.filter(Boolean).length;
     if (stage === "setup" || stage === "processing1") {
         return (React.createElement("div", { className: "space-y-4" },
             React.createElement("p", { className: "text-xs text-slate-500" }, "Für U12/U14/U16/U18 gibt es keine ausführlichen Statistiken, sondern nur die Werte aus der DBB-Scores-App. Da die App selbst keine Gesamtansicht anbietet, braucht es zwei Screenshots pro Spiel: einmal die Spalten Minuten/Punkte/Feldwürfe/FW%, einmal 2Pkt/3Pkt/Fouls/Plus-Minus."),
-            React.createElement("div", { className: "grid grid-cols-2 gap-3" },
-                React.createElement(Field, { label: "Team" },
-                    React.createElement("select", { className: inputClass, value: teamId, onChange: (e) => setTeamId(e.target.value) },
-                        teams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
-                React.createElement(Field, { label: "Datum des Spiels" },
-                    React.createElement("input", { type: "date", className: inputClass, value: date, onChange: (e) => setDate(e.target.value) }))),
-            React.createElement(Field, { label: "Gegner (optional)" },
-                React.createElement("input", { className: inputClass, value: gegner, onChange: (e) => setGegner(e.target.value), placeholder: "z. B. TSV Nord" })),
+            React.createElement(Field, { label: "Team" },
+                React.createElement("select", { className: inputClass, value: teamId, onChange: (e) => setTeamId(e.target.value) },
+                    sortTeams(teams).map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
+            React.createElement(GameSelectFields, { key: teamId, teams: teams.filter((t) => t.id === teamId), dbbData, players: allPlayers, game, onChange: (g) => setGame({ ...g, teamId }) }),
             parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError),
             stage === "processing1"
                 ? React.createElement("div", { className: "text-center py-6 text-sm text-slate-500" },
                     React.createElement(IconLoader, { className: "animate-spin mx-auto mb-2 text-[#C43E0E]", size: 22 }),
                     progress.total ? `Zeile ${progress.done} von ${progress.total} wird gelesen…` : "Bild wird geladen…")
                 : React.createElement(Field, { label: "Screenshot 1: Minuten / Punkte / Feldwürfe / FW%" },
-                    React.createElement("input", { type: "file", accept: "image/*", onChange: handleShot1, disabled: !teamId || !date, className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }))));
+                    React.createElement("input", { type: "file", accept: "image/*", onChange: handleShot1, disabled: !teamId || !date || !gameChosen(game, teams.filter((t) => t.id === teamId), dbbData), className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }))));
     }
     if (stage === "upload2" || stage === "processing2") {
         return (React.createElement("div", { className: "space-y-4" },

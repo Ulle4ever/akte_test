@@ -212,10 +212,19 @@ function SpielerAkte() {
                     // Team-beschraenkter Trainer-Zugang (account.teamId gesetzt): alle
                     // Abfragen werden auf das eigene Team eingeschraenkt - passend zu den
                     // Firestore-Regeln, die serverseitig genau das Gleiche durchsetzen.
-                    const scopeTeamId = account.teamId || null;
-                    const playersQuery = scopeTeamId ? db.collection("players").where("teamId", "==", scopeTeamId) : db.collection("players");
-                    const playersSnap = await playersQuery.get();
-                    const loadedPlayers = playersSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                    // Mehrere Teams moeglich (account.teamIds): je Team eine Abfrage,
+                    // damit jede einzeln zu den Firestore-Regeln passt.
+                    const scopeTeamIds = accountTeamIds(account);
+                    const scopeTeamId = scopeTeamIds ? scopeTeamIds[0] : null;
+                    async function queryPerTeam(coll, field, op) {
+                        if (!scopeTeamIds)
+                            return (await db.collection(coll).get()).docs;
+                        const snaps = await Promise.all(scopeTeamIds.map((t) => db.collection(coll).where(field, op, t).get()));
+                        const byId = new Map();
+                        snaps.forEach((sn) => sn.docs.forEach((d) => byId.set(d.id, d)));
+                        return [...byId.values()];
+                    }
+                    const loadedPlayers = (await queryPerTeam("players", "teamId", "==")).map((d) => ({ id: d.id, ...d.data() }));
                     if (!cancelled)
                         setPlayers(loadedPlayers);
                     const privDefaults = { notes: [], tests: [], attendance: [], grades: [] };
@@ -261,15 +270,12 @@ function SpielerAkte() {
                     }
                     // Termine des eigenen Teams PLUS Termine anderer Teams, bei denen ein
                     // eigener Spieler einzeln eingeladen ist (involvedTeamIds deckt beides ab).
-                    const eventsQuery = scopeTeamId ? db.collection("calendarEvents").where("involvedTeamIds", "array-contains", scopeTeamId) : db.collection("calendarEvents");
-                    const evSnap = await eventsQuery.get();
-                    const loadedEvents = evSnap.docs.map((d) => ({ id: d.id, ...d.data() }));
+                    const loadedEvents = (await queryPerTeam("calendarEvents", "involvedTeamIds", "array-contains")).map((d) => ({ id: d.id, ...d.data() }));
                     if (!cancelled)
                         setCalendarEvents(loadedEvents);
-                    const teamNotesQuery = scopeTeamId ? db.collection("teamNotes").where("teamId", "==", scopeTeamId) : db.collection("teamNotes");
-                    const tnSnap = await teamNotesQuery.get();
+                    const tnDocs = await queryPerTeam("teamNotes", "teamId", "==");
                     if (!cancelled)
-                        setTeamNotes(tnSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+                        setTeamNotes(tnDocs.map((d) => ({ id: d.id, ...d.data() })));
                     async function fetchByPlayerIdChunks(collName) {
                         if (!scopeTeamId)
                             return (await db.collection(collName).get()).docs;
@@ -404,11 +410,15 @@ function SpielerAkte() {
     async function runDbbSync() {
         setDbbSyncing(true);
         try {
-            await functionsInstance.httpsCallable("syncDbbNow")({});
+            await functionsInstance.httpsCallable("syncDbbNow", { timeout: 300000 })({});
             // Neu angelegte/verknuepfte Spiele direkt in den Kalender holen
-            const scopeTeamId = account?.teamId || null;
-            const evSnap = await (scopeTeamId ? db.collection("calendarEvents").where("involvedTeamIds", "array-contains", scopeTeamId) : db.collection("calendarEvents")).get();
-            setCalendarEvents(evSnap.docs.map((d) => ({ id: d.id, ...d.data() })));
+            const scopeTeamIds = accountTeamIds(account);
+            const snaps = await Promise.all(scopeTeamIds
+                ? scopeTeamIds.map((t) => db.collection("calendarEvents").where("involvedTeamIds", "array-contains", t).get())
+                : [db.collection("calendarEvents").get()]);
+            const byId = new Map();
+            snaps.forEach((sn) => sn.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() })));
+            setCalendarEvents([...byId.values()]);
         }
         catch (e) {
             console.warn("DBB-Abgleich fehlgeschlagen", e);
@@ -427,6 +437,71 @@ function SpielerAkte() {
             setSelectedPlayerId(account.playerId);
         }
     }, [account, selectedPlayerId]);
+    // Browser-Zurueck/-Vor: jeder Seitenwechsel (Dashboard, Team, Spieler, Reiter,
+    // Kalender ...) landet als Eintrag in der Browser-Historie, die Pfeile im Tab
+    // (und die Wisch-Geste am Handy) springen so zur vorherigen Seite zurueck.
+    const navState = { p: selectedPlayerId, t: selectedTeamId, tc: showTeamCalendar, gc: showGlobalCalendar, v: showVerwaltung, au: showAllUnits, at: showAttendance, pl: showPlayers, tab: activeTab };
+    const navKey = JSON.stringify(navState);
+    const restoringNavRef = useRef(false);
+    const navInitRef = useRef(false);
+    const [navDepth, setNavDepth] = useState(0);
+    useEffect(() => {
+        if (!account)
+            return;
+        const cur = window.history.state;
+        if (restoringNavRef.current) {
+            restoringNavRef.current = false;
+            return;
+        }
+        if (cur && cur.rskNav === navKey) {
+            navInitRef.current = true;
+            setNavDepth(cur.depth || 0);
+            return;
+        }
+        // Erster Aufruf (auch nach Neuladen): aktuellen Eintrag ersetzen statt
+        // einen neuen anzulegen
+        if (!cur || !cur.rskNav || !navInitRef.current) {
+            navInitRef.current = true;
+            window.history.replaceState({ rskNav: navKey, depth: cur?.depth || 0 }, "");
+            setNavDepth(cur?.depth || 0);
+        }
+        else {
+            const depth = (cur.depth || 0) + 1;
+            window.history.pushState({ rskNav: navKey, depth }, "");
+            setNavDepth(depth);
+            // Neue Seite beginnt oben (nicht beim Reiterwechsel in der Akte)
+            const prev = JSON.parse(cur.rskNav);
+            if (prev.p !== navState.p || prev.t !== navState.t || prev.pl !== navState.pl || prev.gc !== navState.gc || prev.v !== navState.v || prev.au !== navState.au || prev.at !== navState.at)
+                window.scrollTo(0, 0);
+        }
+    }, [navKey, account]);
+    useEffect(() => {
+        function onPop(e) {
+            const st = e.state;
+            if (!st || !st.rskNav)
+                return;
+            const n = JSON.parse(st.rskNav);
+            restoringNavRef.current = st.rskNav !== navKeyRef.current;
+            setSelectedPlayerId(n.p);
+            setSelectedTeamId(n.t);
+            setShowTeamCalendar(n.tc);
+            setShowGlobalCalendar(n.gc);
+            setShowVerwaltung(n.v);
+            setShowAllUnits(n.au);
+            setShowAttendance(n.at);
+            setShowPlayers(n.pl);
+            setActiveTab(n.tab);
+            setModal(null);
+            setOpenHeaderMenu(null);
+            setMobileSidebarOpen(false);
+            setNavDepth(st.depth || 0);
+            window.scrollTo(0, 0);
+        }
+        window.addEventListener("popstate", onPop);
+        return () => window.removeEventListener("popstate", onPop);
+    }, []);
+    const navKeyRef = useRef(navKey);
+    navKeyRef.current = navKey;
     async function handleLogin(e) {
         e.preventDefault();
         setLoginError("");
@@ -623,13 +698,18 @@ function SpielerAkte() {
         setAccounts(snap.docs.map((d) => ({ uid: d.id, ...d.data() })));
         setAccountsLoaded(true);
     }
-    async function createAccount({ label, code, role, playerId, teamId }) {
+    async function createAccount({ label, code, role, playerId, teamIds }) {
         const cred = await secondaryAuth.createUserWithEmailAndPassword(codeToEmail(code), codeToPassword(code));
         const newUid = cred.user.uid;
-        const accountDoc = { label, code, role, playerId: role === "player" ? playerId : null, teamId: role === "trainer" ? (teamId || null) : null };
+        const accountDoc = { label, code, role, playerId: role === "player" ? playerId : null, ...accountTeamFields(role === "trainer" ? teamIds : null) };
         await db.collection("accounts").doc(newUid).set(accountDoc);
         await secondaryAuth.signOut();
         setAccounts((prev) => [...prev, { uid: newUid, ...accountDoc }]);
+    }
+    async function updateAccountTeams(uid, teamIds) {
+        const fields = accountTeamFields(teamIds);
+        await db.collection("accounts").doc(uid).update(fields);
+        setAccounts((prev) => prev.map((a) => (a.uid === uid ? { ...a, ...fields } : a)));
     }
     async function deleteAccount(uid) {
         // Erst das eigentliche Login-Konto bei Firebase Auth entfernen (geht vom
@@ -945,10 +1025,10 @@ function SpielerAkte() {
     // nur sein eigenes Team (players/calendarEvents/etc. sind bereits beim Laden
     // entsprechend eingeschraenkt, hier nur fuer UI-Sichtbarkeit von Verwaltung/
     // Team-Auswahl etc.). Ohne teamId: Vollzugriff-Trainer wie bisher.
-    const trainerTeamId = isTrainer ? (account.teamId || null) : null;
-    const isFullTrainer = isTrainer && !trainerTeamId;
-    const teams = meta.teams;
-    const visibleTeams = trainerTeamId ? teams.filter((t) => t.id === trainerTeamId) : teams;
+    const trainerTeamIds = isTrainer ? accountTeamIds(account) : null;
+    const isFullTrainer = isTrainer && !trainerTeamIds;
+    const teams = sortTeams(meta.teams);
+    const visibleTeams = trainerTeamIds ? teams.filter((t) => trainerTeamIds.includes(t.id)) : teams;
     const dbbEligibleTeams = visibleTeams.filter((t) => DBB_SCORES_ALTERSKLASSEN.includes(t.altersklasse));
     const visiblePlayers = players
         .filter((p) => selectedTeamId === "all" || p.teamId === selectedTeamId)
@@ -1205,7 +1285,20 @@ function SpielerAkte() {
             persistPrivateFields(playerId, { attendance: [...cur, ...newRecords] });
         });
     }
-    function handleImportBoxscore(entries, date, gegner) {
+    // Statistik-Eintrag eines Spiels: mit DBB-Spiel (matchId) wird genau dieses
+    // Spiel getroffen, sonst wie bisher ueber das Datum.
+    function mergeGameStats(stats, date, gegner, game, fieldValues, newDefaults) {
+        const next = [...(stats || [])];
+        const matchId = game?.matchId || null;
+        const idx = next.findIndex((s) => matchId ? (s.dbbMatchId === matchId || (!s.dbbMatchId && s.date === date)) : s.date === date);
+        const link = matchId ? { dbbMatchId: matchId, statTeamId: game.teamId || null } : {};
+        if (idx !== -1)
+            next[idx] = { ...next[idx], ...link, ...fieldValues };
+        else
+            next.push({ id: uid(), date, gegner: gegner || "", ...(newDefaults || {}), ...link, ...fieldValues });
+        return next;
+    }
+    function handleImportBoxscore(entries, date, gegner, game) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
         let normalCat = cats.find((c) => c.id === "normal") || cats[0];
         function findOrCreateField(label, altLabels = []) {
@@ -1261,18 +1354,10 @@ function SpielerAkte() {
             const player = players.find((p) => p.id === playerId);
             if (!player)
                 return;
-            const newStats = [...(player.stats || [])];
-            const existingIdx = newStats.findIndex((s) => s.date === date);
-            if (existingIdx !== -1) {
-                newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
-            }
-            else {
-                newStats.push({ id: uid(), date, gegner: gegner || "", ...fieldValues });
-            }
-            persistPlayerFields(playerId, { stats: newStats });
+            persistPlayerFields(playerId, { stats: mergeGameStats(player.stats, date, gegner, game, fieldValues) });
         });
     }
-    function handleImportDbbScores(entries, date, gegner) {
+    function handleImportDbbScores(entries, date, gegner, game) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
         let normalCat = cats.find((c) => c.id === "normal") || cats[0];
         let dbbCat = cats.find((c) => c.id === "dbbScores");
@@ -1317,18 +1402,10 @@ function SpielerAkte() {
             const player = players.find((p) => p.id === playerId);
             if (!player)
                 return;
-            const newStats = [...(player.stats || [])];
-            const existingIdx = newStats.findIndex((s) => s.date === date);
-            if (existingIdx !== -1) {
-                newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
-            }
-            else {
-                newStats.push({ id: uid(), date, gegner: gegner || "", minuten: row.minuten ?? 0, ...fieldValues });
-            }
-            persistPlayerFields(playerId, { stats: newStats });
+            persistPlayerFields(playerId, { stats: mergeGameStats(player.stats, date, gegner, game, fieldValues, { minuten: row.minuten ?? 0 }) });
         });
     }
-    function handleImportAdvancedStats(entries, date, gegner) {
+    function handleImportAdvancedStats(entries, date, gegner, game) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
         let advancedCat = cats.find((c) => c.id === "advanced");
         if (!advancedCat) {
@@ -1363,15 +1440,7 @@ function SpielerAkte() {
             const player = players.find((p) => p.id === playerId);
             if (!player)
                 return;
-            const newStats = [...(player.stats || [])];
-            const existingIdx = newStats.findIndex((s) => s.date === date);
-            if (existingIdx !== -1) {
-                newStats[existingIdx] = { ...newStats[existingIdx], ...fieldValues };
-            }
-            else {
-                newStats.push({ id: uid(), date, gegner: gegner || "", ...fieldValues });
-            }
-            persistPlayerFields(playerId, { stats: newStats });
+            persistPlayerFields(playerId, { stats: mergeGameStats(player.stats, date, gegner, game, fieldValues) });
         });
     }
     function deleteItem(collection, id) {
@@ -1596,10 +1665,14 @@ function SpielerAkte() {
                         return React.createElement("button", { key: t.id, onClick: () => goTeam(t.id), className: `flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-sm font-medium transition ${active ? "bg-gradient-to-r from-[#C43E0E]/10 to-[#C43E0E]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
                             React.createElement("span", { className: `w-5 h-5 rounded-md bg-gradient-to-br ${TEAM_COLORS[i % TEAM_COLORS.length]} text-white flex items-center justify-center text-[10px] font-black shrink-0` }, (t.name || "?").charAt(0).toUpperCase()),
                             React.createElement("span", { className: "flex-1 text-left truncate" }, t.name),
-                            React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, players.filter((p) => p.teamId === t.id).length));
+                            React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, playersOfTeam(players, t.id).length));
                     }))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1440px] mx-auto w-full" },
-                breadcrumbItems.length > 1 && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs text-slate-500 mb-4 flex-wrap" }, breadcrumbItems.map((b, i) => React.createElement(React.Fragment, { key: i },
+                (breadcrumbItems.length > 1 || navDepth > 0) && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs text-slate-500 mb-4 flex-wrap" },
+                    navDepth > 0 && React.createElement("button", { onClick: () => window.history.back(), className: "flex items-center gap-1 font-semibold text-slate-600 hover:text-[#C43E0E] bg-white border border-stone-200 hover:border-stone-300 rounded-full pl-1.5 pr-2.5 py-1 mr-1.5 transition", "aria-label": "Zurück zur vorherigen Seite" },
+                        React.createElement(IconArrowDown, { size: 12, className: "rotate-90" }),
+                        "Zurück"),
+                    breadcrumbItems.length > 1 && breadcrumbItems.map((b, i) => React.createElement(React.Fragment, { key: i },
                     i > 0 && React.createElement(IconArrowDown, { size: 10, className: "-rotate-90 text-slate-300 shrink-0" }),
                     b.onClick
                         ? React.createElement("button", { onClick: b.onClick, className: "hover:text-[#C43E0E] transition font-medium" }, b.label)
@@ -1643,7 +1716,8 @@ function SpielerAkte() {
                         React.createElement("button", { onClick: () => setShowTeamCalendar(true), className: "flex items-center gap-1.5 text-sm font-medium text-[#C43E0E] hover:text-[#FF6A2B] bg-sky-50 hover:bg-sky-100 rounded-lg px-3 py-1.5" },
                             React.createElement(IconCalendar, { size: 14 }),
                             " Team-Kalender")),
-                    React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: players.filter((p) => p.teamId === selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer }))),
+                    React.createElement(TeamSchedule, { team: teams.find((t) => t.id === selectedTeamId) || { id: selectedTeamId }, doc: dbbData[selectedTeamId], players: players, onImportStats: openStatsImport }),
+                    React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: playersOfTeam(players, selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer }))),
                 !selectedPlayer && showGlobalCalendar && (React.createElement("div", null,
                     React.createElement("div", { className: "flex items-center justify-between mb-3" },
                         React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, "Kalender – alle Teams"),
@@ -1670,7 +1744,7 @@ function SpielerAkte() {
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
                 !selectedPlayer && showPlayers && isTrainer && (React.createElement(PlayersPage, { players: players, teams: visibleTeams, onSelectPlayer: selectPlayer, onOpenTeam: goTeam, onAddPlayer: () => setModal("player"), canAddPlayer: visibleTeams.length > 0 })),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits, dbbData: dbbData, dbbSyncing: dbbSyncing, onRefreshDbb: runDbbSync, onOpenStatsImport: openStatsImport, onManageTeams: isFullTrainer ? () => setModal("teams") : null })),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onOpenTeam: goTeam, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits, dbbData: dbbData, dbbSyncing: dbbSyncing, onRefreshDbb: runDbbSync, onOpenStatsImport: openStatsImport, onManageTeams: isFullTrainer ? () => setModal("teams") : null })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
@@ -1684,7 +1758,7 @@ function SpielerAkte() {
                         React.createElement("div", { className: "relative z-[1] p-4 sm:p-7 flex gap-4 sm:gap-7" },
                             React.createElement("div", { className: "relative shrink-0" },
                                 selectedPlayer.photoUrl
-                                    ? React.createElement("img", { src: selectedPlayer.photoUrl, alt: selectedPlayer.name, className: "w-16 h-20 sm:w-24 sm:h-28 rounded-xl object-cover shadow-[0_8px_24px_rgba(0,0,0,0.35)]" })
+                                    ? React.createElement("img", { src: cloudinaryImage(selectedPlayer.photoUrl, 96, 112), alt: selectedPlayer.name, className: "w-16 h-20 sm:w-24 sm:h-28 rounded-xl object-cover shadow-[0_8px_24px_rgba(0,0,0,0.35)]" })
                                     : React.createElement("div", { className: "w-16 h-20 sm:w-24 sm:h-28 rounded-xl bg-black/25 border border-white/10 flex items-center justify-center p-3 shadow-[0_8px_24px_rgba(0,0,0,0.35)]" },
                                         React.createElement("img", { src: LOGO_DATA_URI, alt: "", className: "w-full h-full object-contain opacity-70" })),
                                 React.createElement("div", { className: "absolute -bottom-2 left-2 flex gap-1" },
@@ -1772,6 +1846,7 @@ function SpielerAkte() {
                     React.createElement("div", { className: "mt-5 min-w-0" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
                             React.createElement(TeamGameCard, { doc: dbbData[selectedPlayer.teamId], teamName: selectedTeam?.name }),
+                            (selectedPlayer.dlTeamIds || []).map((id) => React.createElement(TeamGameCard, { key: id, doc: dbbData[id], teamName: (teams.find((t) => t.id === id)?.name || "") + " · Doppellizenz" })),
                             // Spieler-Zugang: offene Aufgaben (Belastung/Check-in) direkt auf der
                             // Startseite, damit niemand erst den Monitoring-Reiter suchen muss.
                             !isTrainer && selectedPlayer.id === account.playerId && (() => {
@@ -2122,7 +2197,7 @@ function SpielerAkte() {
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(NoteForm, { onSubmit: handleAddNote, onClose: () => setModal(null) }))),
         modal === "accounts" && (React.createElement(Modal, { title: "Zug\u00E4nge verwalten", onClose: () => setModal(null), wide: true },
-            React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, teams: teams, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onDelete: deleteAccount, onClose: () => setModal(null) }))),
+            React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, teams: teams, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onUpdateTeams: updateAccountTeams, onDelete: deleteAccount, onClose: () => setModal(null) }))),
         modal === "devPlanTemplates" && (React.createElement(Modal, { title: "Development-Plan-Fragen verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(DevPlanTemplateEditor, { templates: devPlanTemplates, onSave: saveDevPlanTemplates, onClose: () => setModal(null) }))),
         modal === "feedbackTemplates" && (React.createElement(Modal, { title: "Feedback-Fragen verwalten", onClose: () => setModal(null), wide: true },
@@ -2140,12 +2215,12 @@ function SpielerAkte() {
         modal === "importScreenshot" && (React.createElement(Modal, { title: "Kalender aus Screenshot importieren (Beta)", onClose: () => setModal(null), wide: true },
             React.createElement(ScreenshotImportModal, { teams: teams, allPlayers: players, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
         modal === "importBoxscore" && (React.createElement(Modal, { title: "Boxscore einf\u00FCgen", onClose: () => setModal(null), wide: true },
-            React.createElement(BoxscoreImportModal, { players: players, teams: teams, preset: statsImportPreset, onConfirm: handleImportBoxscore, onClose: () => setModal(null) }))),
+            React.createElement(BoxscoreImportModal, { players: players, teams: visibleTeams, dbbData: dbbData, preset: statsImportPreset, onConfirm: handleImportBoxscore, onClose: () => setModal(null) }))),
         modal === "importAdvanced" && (React.createElement(Modal, { title: "Advanced Stats importieren", onClose: () => setModal(null), wide: true },
-            React.createElement(AdvancedStatsImportModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
+            React.createElement(AdvancedStatsImportModal, { players: players, teams: visibleTeams, dbbData: dbbData, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
         modal === "advancedRechnerLive" && (React.createElement(Modal, { title: "Advanced-Rechner verbinden", onClose: () => setModal(null), wide: true },
             React.createElement(AdvancedRechnerLiveModal, { players: players, teams: teams, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
         modal === "importDbbScores" && (React.createElement(Modal, { title: "DBB Scores importieren", onClose: () => setModal(null), wide: true },
-            React.createElement(DbbScoresImportModal, { teams: dbbEligibleTeams, allPlayers: players, preset: statsImportPreset, onConfirm: handleImportDbbScores, onClose: () => setModal(null) })))));
+            React.createElement(DbbScoresImportModal, { teams: dbbEligibleTeams, allPlayers: players, dbbData: dbbData, preset: statsImportPreset, onConfirm: handleImportDbbScores, onClose: () => setModal(null) })))));
 }
 ReactDOM.createRoot(document.getElementById("root")).render(React.createElement(SpielerAkte, null));

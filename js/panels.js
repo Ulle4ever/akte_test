@@ -145,12 +145,89 @@ function TeamGameCard({ doc, teamName }) {
                     React.createElement("p", { className: "text-xl font-black text-slate-900 tabular-nums leading-tight" }, `${lastScore.us}:${lastScore.them}`),
                     React.createElement("p", { className: "text-xs text-slate-500 truncate" }, `${last.isHome ? "vs" : "@"} ${dbbOpponent(last).name} · ${shortDateLabel(last.date)}`)))));
 }
-function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits, dbbData, dbbSyncing, onRefreshDbb, onOpenStatsImport, onManageTeams }) {
+// Liga-Tabelle eines Teams (eigenes Team hervorgehoben)
+function StandingsTable({ table }) {
+    return React.createElement("table", { className: "w-full text-sm tabular-nums" },
+        React.createElement("thead", null,
+            React.createElement("tr", { className: "text-[10px] uppercase tracking-wide text-slate-400" },
+                React.createElement("th", { className: "text-left font-semibold pb-1.5 w-6" }, "#"),
+                React.createElement("th", { className: "text-left font-semibold pb-1.5" }, "Team"),
+                React.createElement("th", { className: "text-right font-semibold pb-1.5" }, "S–N"),
+                React.createElement("th", { className: "text-right font-semibold pb-1.5" }, "Diff"))),
+        React.createElement("tbody", null, table.entries.map((e) => React.createElement("tr", { key: e.id || e.rank, className: e.isUs ? "bg-[#C43E0E]/[0.07] font-bold text-slate-900" : "text-slate-600" },
+            React.createElement("td", { className: `py-1.5 pl-1.5 rounded-l-md ${e.isUs ? "text-[#C43E0E]" : "text-slate-400"}` }, e.rank),
+            React.createElement("td", { className: "py-1.5 pr-2 truncate max-w-[180px]", title: e.name }, e.name),
+            React.createElement("td", { className: "py-1.5 text-right whitespace-nowrap" }, `${e.won}–${e.lost}`),
+            React.createElement("td", { className: `py-1.5 pr-1.5 text-right rounded-r-md ${e.diff > 0 ? "text-emerald-600" : e.diff < 0 ? "text-red-500" : ""}` }, e.diff > 0 ? `+${e.diff}` : e.diff)))));
+}
+function ResultChip({ score }) {
+    return React.createElement("span", { className: `w-6 h-6 rounded-md text-[11px] font-black flex items-center justify-center shrink-0 text-white ${score.won ? "bg-emerald-500" : "bg-red-500"}`, title: score.won ? "Sieg" : "Niederlage" }, score.won ? "S" : "N");
+}
+// Team-Seite: kompletter Spielplan der Saison. Bei gespielten Spielen direkt
+// "Stats hochladen" (Import ist dann schon auf genau dieses Spiel eingestellt).
+const TEAM_SCHEDULE_UPCOMING_PREVIEW = 6;
+function TeamSchedule({ team, doc, players, onImportStats }) {
+    const [allUpcoming, setAllUpcoming] = useState(false);
+    if (!doc || !doc.matches || doc.matches.length === 0)
+        return null;
+    const todayIso = today();
+    const matches = doc.matches.filter((m) => m.date);
+    const played = matches.filter((m) => dbbScore(m) || (m.date < todayIso && !m.cancelled)).sort((a, b) => b.date.localeCompare(a.date));
+    const upcoming = matches.filter((m) => !played.includes(m)).sort((a, b) => (a.date + (a.time || "")).localeCompare(b.date + (b.time || "")));
+    const table = (doc.tables || [])[0] || null;
+    const teamPlayers = playersOfTeam(players, team.id);
+    const statsLabel = DBB_SCORES_ALTERSKLASSEN.includes(team.altersklasse) ? "DBB Scores" : "Stats";
+    const gameRow = (m, isPlayed) => {
+        const sc = dbbScore(m);
+        const hasStats = isPlayed && statsExistForGame(players, team.id, m);
+        return React.createElement("div", { key: m.matchId, className: "flex items-center gap-2.5 py-2 border-b border-stone-100 last:border-0 min-w-0" },
+            isPlayed && sc ? React.createElement(ResultChip, { score: sc }) : React.createElement("span", { className: "w-6 text-center text-[10px] font-bold text-slate-400 shrink-0" }, m.isHome ? "H" : "A"),
+            React.createElement("div", { className: "min-w-0 flex-1" },
+                React.createElement("p", { className: `text-sm font-semibold truncate ${m.cancelled ? "text-slate-400 line-through" : "text-slate-800"}` }, `${m.isHome ? "vs" : "@"} ${dbbOpponent(m).name}`),
+                React.createElement("p", { className: "text-[11px] text-slate-400 truncate tabular-nums" }, [shortDateLabel(m.date), m.time && !isPlayed ? m.time + " Uhr" : null, !isPlayed && m.venue ? (m.venue.name || m.venue.city) : null, m.cancelled ? "abgesagt" : null].filter(Boolean).join(" · "))),
+            isPlayed && sc && React.createElement("span", { className: "text-sm font-black text-slate-900 tabular-nums shrink-0" }, `${sc.us}:${sc.them}`),
+            isPlayed && teamPlayers.length > 0 && (hasStats
+                ? React.createElement("span", { className: "text-[11px] font-semibold text-emerald-700 bg-emerald-50 rounded-full px-2 py-0.5 shrink-0" }, "✓ " + statsLabel)
+                : onImportStats && React.createElement("button", { onClick: () => onImportStats({ teamId: team.id, matchId: m.matchId, date: m.date, gegner: dbbOpponent(m).name }), className: "text-[11px] font-bold text-white bg-[#C43E0E] hover:bg-[#A8350C] rounded-full px-2.5 py-1 shrink-0 transition" }, statsLabel + " hochladen")));
+    };
+    return React.createElement("div", { className: "grid lg:grid-cols-3 gap-4 mb-4" },
+        React.createElement("div", { className: `${cardClass} p-5 min-w-0` },
+            React.createElement(SectionLabel, null, "Nächste Spiele"),
+            React.createElement("div", { className: "mt-2" }, upcoming.length ? (allUpcoming ? upcoming : upcoming.slice(0, TEAM_SCHEDULE_UPCOMING_PREVIEW)).map((m) => gameRow(m, false)) : React.createElement("p", { className: "text-sm text-slate-400 py-3" }, "Kein weiteres Spiel angesetzt.")),
+            upcoming.length > TEAM_SCHEDULE_UPCOMING_PREVIEW && React.createElement("button", { type: "button", onClick: () => setAllUpcoming((v) => !v), className: "w-full text-center text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B] pt-3" }, allUpcoming ? "Weniger anzeigen" : `Ganze Saison (${upcoming.length} Spiele)`)),
+        React.createElement("div", { className: `${cardClass} p-5 min-w-0` },
+            React.createElement(SectionLabel, null, "Ergebnisse & Statistik"),
+            React.createElement("div", { className: "mt-2" }, played.length ? played.map((m) => gameRow(m, true)) : React.createElement("p", { className: "text-sm text-slate-400 py-3" }, "Noch keine Spiele gespielt."))),
+        table && React.createElement("div", { className: `${cardClass} p-5 min-w-0` },
+            React.createElement("div", { className: "flex items-baseline justify-between gap-2 mb-3" },
+                React.createElement(SectionLabel, null, "Tabelle"),
+                React.createElement("span", { className: "text-[11px] text-slate-400 truncate" }, table.liganame)),
+            React.createElement(StandingsTable, { table })));
+}
+const DASHBOARD_TEAM_KEY = "rsk.dashboardTeam";
+const DASHBOARD_LIST_PREVIEW = 8; // so viele Zeilen zeigen Belastung/Spiel-Listen, bevor "Alle anzeigen" kommt
+function TrainerDashboard({ events, teams: allTeams, players: allPlayers, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, onSelectTeam, onOpenTeam, onSelectPlayer, onAddEvent, onEditEvent, onDeleteEvent, onOpenNoteForm, onGoToAllUnits, dbbData, dbbSyncing, onRefreshDbb, onOpenStatsImport, onManageTeams }) {
+    // Team-Filter statt Aufklapp-Bereichen: "Alle" zeigt die Vereinsuebersicht,
+    // ein Team blendet alles andere aus. Wird im Browser gemerkt.
+    const [teamFilter, setTeamFilterState] = useState(() => {
+        try { return localStorage.getItem(DASHBOARD_TEAM_KEY) || "all"; }
+        catch (e) { return "all"; }
+    });
+    function setTeamFilter(id) {
+        setTeamFilterState(id);
+        setAttentionFilter(null);
+        setAttentionShowAll(false);
+        setLoadShowAll(false);
+        try { localStorage.setItem(DASHBOARD_TEAM_KEY, id); }
+        catch (e) { }
+    }
+    const activeFilter = teamFilter !== "all" && allTeams.some((t) => t.id === teamFilter) ? teamFilter : "all";
+    const teams = activeFilter === "all" ? allTeams : allTeams.filter((t) => t.id === activeFilter);
+    const players = activeFilter === "all" ? allPlayers : playersOfTeam(allPlayers, activeFilter);
+    const [loadShowAll, setLoadShowAll] = useState(false);
     const [showEventForm, setShowEventForm] = useState(false);
-    const [attentionExpanded, setAttentionExpanded] = useState(true);
     const [attentionFilter, setAttentionFilter] = useState(null);
     const [attentionShowAll, setAttentionShowAll] = useState(false);
-    const [loadExpanded, setLoadExpanded] = useState(false);
     const [editingEvent, setEditingEvent] = useState(null);
     const days = [];
     const d0 = new Date();
@@ -160,7 +237,8 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         d.setDate(d0.getDate() + i);
         days.push(d);
     }
-    const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
+    const teamName = (id) => allTeams.find((t) => t.id === id)?.name || "";
+    const teamEvents = activeFilter === "all" ? events : events.filter((e) => e.teamId === activeFilter || (e.involvedTeamIds || []).includes(activeFilter));
     const outPlayers = players.filter((p) => p.status === "verletzt" || p.status === "reha");
     const currentWeekKey = isoWeekKey(today());
     const wellnessThisWeek = players.map((p) => ({ player: p, entry: (wellnessData[p.id]?.entries || []).find((e) => e.weekKey === currentWeekKey) || null }));
@@ -206,7 +284,8 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
     // Spieltag-Zentrale: pro Team naechstes Spiel + letztes Ergebnis + Tabellenplatz
     // aus dem DBB-Abgleich; Teams ohne DBB-Verbindung fallen auf das naechste von
     // Hand eingetragene Spiel im Kalender zurueck.
-    const gameTeams = teams.map((t, i) => {
+    const gameTeams = teams.map((t) => {
+        const i = allTeams.indexOf(t);
         const doc = (dbbData || {})[t.id];
         const summary = doc && doc.matches ? dbbTeamSummary(doc) : null;
         const manualNext = summary ? null : sortByDateDesc(events.filter((e) => e.teamId === t.id && e.type === "spiel" && e.date >= todayKeyLoad && !e.dbbResult)).reverse()[0] || null;
@@ -233,7 +312,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                 g.team.logoUrl
                     ? React.createElement("img", { src: g.team.logoUrl, alt: "", className: "w-7 h-7 object-contain shrink-0" })
                     : React.createElement("span", { className: `w-6 h-6 rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, (g.team.name || "?").charAt(0).toUpperCase()),
-                React.createElement("button", { onClick: () => onSelectTeam(g.team.id), className: "text-sm font-bold text-white hover:text-[#FF8A55] truncate" }, g.team.name),
+                React.createElement("button", { onClick: () => openTeam(g.team.id), className: "text-sm font-bold text-white hover:text-[#FF8A55] truncate" }, g.team.name),
                 s && s.us && React.createElement("span", { className: "ml-auto shrink-0 text-[11px] font-semibold text-white/70 bg-white/10 rounded-full px-2 py-0.5 tabular-nums", title: s.table.liganame }, `Platz ${s.us.rank} · ${s.us.won}–${s.us.lost}`)),
             next ? React.createElement("div", { className: "min-w-0" },
                 React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF8A55]" }, days === 0 ? "Heute Spieltag" : "Nächstes Spiel"),
@@ -254,6 +333,57 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                 React.createElement("span", { className: "text-base font-black text-white tabular-nums shrink-0" }, `${lastScore.us}:${lastScore.them}`),
                 React.createElement("span", { className: "text-xs text-white/60 truncate" }, `${last.isHome ? "vs" : "@"} ${dbbOpponent(last).name} · ${shortDateLabel(last.date)}`)));
     }
+    // Viele Teams (Main Accounts): statt einer Kachel je Team eine nach Datum
+    // sortierte Spielliste ueber alle Teams + die letzten Ergebnisse.
+    const compactBoard = shownGameTeams.length > 3;
+    const teamBadge = (g, small) => g.team.logoUrl
+        ? React.createElement("img", { src: g.team.logoUrl, alt: "", className: `${small ? "w-5 h-5" : "w-7 h-7"} object-contain shrink-0` })
+        : React.createElement("span", { className: `${small ? "w-5 h-5 text-[10px]" : "w-6 h-6 text-[11px]"} rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center font-black shrink-0` }, (g.team.name || "?").charAt(0).toUpperCase());
+    const upcomingGames = connectedGameTeams.flatMap((g) => g.doc.matches
+        .filter((m) => m.date && !m.cancelled && !dbbScore(m) && m.date >= todayKeyLoad && daysFromToday(m.date) <= 7)
+        .map((m) => ({ g, m })));
+    // Keine Spiele in den naechsten 7 Tagen: je Team das naechste Spiel
+    const boardUpcoming = (upcomingGames.length ? upcomingGames : connectedGameTeams.filter((g) => g.summary.next).map((g) => ({ g, m: g.summary.next })))
+        .sort((a, b) => (a.m.date + (a.m.time || "")).localeCompare(b.m.date + (b.m.time || "")));
+    const boardResults = connectedGameTeams.filter((g) => g.summary.last && daysFromToday(g.summary.last.date) >= -10)
+        .map((g) => ({ g, m: g.summary.last }))
+        .sort((a, b) => b.m.date.localeCompare(a.m.date) || a.g.colorIdx - b.g.colorIdx);
+    const openTeam = (id) => (onOpenTeam || onSelectTeam)(id);
+    const boardDayGroups = [];
+    boardUpcoming.forEach((x) => {
+        const last = boardDayGroups[boardDayGroups.length - 1];
+        if (last && last.date === x.m.date)
+            last.items.push(x);
+        else
+            boardDayGroups.push({ date: x.m.date, items: [x] });
+    });
+    const compactBoardEl = React.createElement("div", { className: "relative grid lg:grid-cols-5 gap-3" },
+        React.createElement("div", { className: "lg:col-span-3 rounded-2xl bg-white/[0.06] border border-white/10 p-4 min-w-0" },
+            React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF8A55] mb-2" }, upcomingGames.length ? "Spiele der nächsten 7 Tage" : "Nächste Spiele"),
+            boardDayGroups.length === 0
+                ? React.createElement("p", { className: "text-sm text-white/50" }, "Noch keine weiteren Spiele angesetzt.")
+                : React.createElement("div", { className: "space-y-3" }, boardDayGroups.map((day) => React.createElement("div", { key: day.date },
+                    React.createElement("p", { className: `text-[11px] font-bold mb-1 ${daysFromToday(day.date) <= 1 ? "text-white" : "text-white/50"}` }, new Date(day.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "long", day: "2-digit", month: "2-digit" }), " · ", relativeDayLabel(day.date)),
+                    day.items.map(({ g, m }) => React.createElement("button", { key: m.matchId, onClick: () => openTeam(g.team.id), className: "w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 -mx-2 hover:bg-white/[0.06] text-left min-w-0 transition" },
+                        React.createElement("span", { className: "text-xs font-bold text-white/70 w-11 shrink-0 tabular-nums" }, m.time || "–"),
+                        teamBadge(g, true),
+                        React.createElement("span", { className: "min-w-0 flex-1" },
+                            React.createElement("span", { className: "block text-[11px] font-bold text-white/60 truncate" }, g.team.name),
+                            React.createElement("span", { className: "block text-sm font-semibold text-white truncate" }, React.createElement("span", { className: "text-white/45 mr-1" }, m.isHome ? "vs" : "@"), dbbOpponent(m).name)),
+                        React.createElement("span", { className: `text-[10px] font-bold rounded px-1.5 py-0.5 shrink-0 ${m.isHome ? "bg-[#C43E0E] text-white" : "bg-white/10 text-white/70"}` }, m.isHome ? "HEIM" : "AUSW."))))))),
+        React.createElement("div", { className: "lg:col-span-2 rounded-2xl bg-white/[0.06] border border-white/10 p-4 min-w-0" },
+            React.createElement("p", { className: "text-[10px] font-bold uppercase tracking-[0.14em] text-[#FF8A55] mb-2" }, "Letzte Ergebnisse"),
+            boardResults.length === 0
+                ? React.createElement("p", { className: "text-sm text-white/50" }, "Keine Ergebnisse in den letzten Tagen.")
+                : React.createElement("div", { className: "space-y-0.5" }, boardResults.map(({ g, m }) => {
+                    const sc = dbbScore(m);
+                    return React.createElement("button", { key: m.matchId, onClick: () => openTeam(g.team.id), className: "w-full flex items-center gap-2.5 rounded-lg px-2 py-1.5 -mx-2 hover:bg-white/[0.06] text-left min-w-0 transition" },
+                        React.createElement(ResultChip, { score: sc }),
+                        React.createElement("span", { className: "text-sm font-black text-white tabular-nums w-14 shrink-0" }, `${sc.us}:${sc.them}`),
+                        React.createElement("span", { className: "min-w-0 flex-1" },
+                            React.createElement("span", { className: "block text-xs font-bold text-white/85 truncate" }, g.team.name),
+                            React.createElement("span", { className: "block text-[11px] text-white/50 truncate" }, `${m.isHome ? "vs" : "@"} ${dbbOpponent(m).name} · ${shortDateLabel(m.date)}`)));
+                }))));
     const gameDayHero = React.createElement("div", { className: "relative rounded-3xl overflow-hidden bg-gradient-to-br from-slate-950 via-slate-900 to-[#3a1407] p-4 sm:p-6 shadow-[0_12px_32px_rgba(15,23,42,0.25)]" },
         React.createElement("img", { src: LOGO_DATA_URI, alt: "", "aria-hidden": "true", className: "pointer-events-none select-none absolute -right-10 -bottom-12 w-64 sm:w-80 opacity-[0.07]" }),
         React.createElement("span", { className: "absolute top-0 left-0 right-0 h-1 bg-[#C43E0E]" }),
@@ -265,14 +395,14 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                 React.createElement(IconRefresh, { size: 13, className: dbbSyncing ? "animate-spin" : "" }),
                 React.createElement("span", { className: "hidden sm:inline" }, dbbSyncing ? "Aktualisiert…" : "Jetzt aktualisieren"))),
         shownGameTeams.length > 0
-            ? React.createElement("div", { className: `relative grid gap-3 ${shownGameTeams.length > 1 ? "md:grid-cols-2" : ""} ${shownGameTeams.length === 3 ? "lg:grid-cols-3" : shownGameTeams.length > 3 ? "2xl:grid-cols-3" : ""}` }, shownGameTeams.map(gamePanel))
+            ? (compactBoard ? compactBoardEl : React.createElement("div", { className: `relative grid gap-3 ${shownGameTeams.length > 1 ? "md:grid-cols-2" : ""} ${shownGameTeams.length === 3 ? "lg:grid-cols-3" : ""}` }, shownGameTeams.map(gamePanel)))
             : React.createElement("div", { className: "relative rounded-2xl bg-white/[0.06] border border-white/10 p-5" },
                 React.createElement("p", { className: "text-lg font-bold text-white" }, "Spielplan automatisch vom DBB"),
                 React.createElement("p", { className: "text-sm text-white/60 mt-1 max-w-xl" }, "Hinterlege bei einem Team die DBB-Team-ID. Dann erscheinen hier nächstes Spiel, Ergebnisse und Tabellenplatz, und die Spiele landen automatisch im Kalender."),
                 onManageTeams && React.createElement("button", { onClick: onManageTeams, className: "mt-3 text-sm font-semibold text-[#FF8A55] hover:text-white" }, "Teams verbinden →")),
         (unconnectedTeams.length > 0 && connectedGameTeams.length > 0 && onManageTeams || dbbErrors.length > 0) && React.createElement("div", { className: "relative mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-white/45" },
             dbbErrors.length > 0 && React.createElement("span", { className: "text-amber-300/90" }, `DBB-Abruf fehlgeschlagen für ${dbbErrors.map((g) => g.team.name).join(", ")}`),
-            unconnectedTeams.length > 0 && connectedGameTeams.length > 0 && onManageTeams && React.createElement("button", { onClick: onManageTeams, className: "hover:text-white/80" }, `${unconnectedTeams.map((g) => g.team.name).join(", ")} ohne DBB-Spielplan · verbinden →`)));
+            unconnectedTeams.length > 0 && connectedGameTeams.length > 0 && onManageTeams && React.createElement("button", { onClick: onManageTeams, className: "hover:text-white/80" }, unconnectedTeams.length > 3 ? `${unconnectedTeams.length} Teams ohne DBB-Spielplan · verbinden →` : `${unconnectedTeams.map((g) => g.team.name).join(", ")} ohne DBB-Spielplan · verbinden →`)));
     // Kennzahlen als schmale Leiste statt grosser Kacheln
     const kpis = [
         { label: "Spieler", value: players.length, tone: "text-slate-900", dot: "bg-slate-400" },
@@ -294,7 +424,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         React.createElement("div", { className: "mt-3 space-y-4" },
             days.map((d) => {
                 const iso = isoDate(d);
-                const dayEvents = sortByDateDesc(events.filter((e) => e.date === iso)).reverse();
+                const dayEvents = sortByDateDesc(teamEvents.filter((e) => e.date === iso)).reverse();
                 if (dayEvents.length === 0)
                     return null;
                 const isToday = iso === isoDate(d0);
@@ -313,31 +443,37 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                             React.createElement("button", { onClick: () => onDeleteEvent(e.id), className: "text-slate-400 hover:text-red-500", "aria-label": "Löschen" },
                                 React.createElement(IconTrash, { size: 13 })))))))));
             }),
-            days.every((d) => events.filter((e) => e.date === isoDate(d)).length === 0) && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-6" }, "Keine Termine in den nächsten 7 Tagen."))));
-    // Tabelle: aktuelle Liga je verbundenem Team, eigenes Team hervorgehoben
-    const standingsCards = connectedGameTeams.filter((g) => g.summary && g.summary.table).map((g) => React.createElement("div", { key: g.team.id, className: `${cardClass} p-5` },
-        React.createElement("div", { className: "flex items-baseline justify-between gap-2" },
-            React.createElement(SectionLabel, null, `Tabelle ${g.team.name}`),
-            React.createElement("span", { className: "text-[11px] text-slate-400 truncate" }, g.summary.table.liganame)),
-        React.createElement("table", { className: "w-full text-sm mt-3 tabular-nums" },
-            React.createElement("thead", null,
-                React.createElement("tr", { className: "text-[10px] uppercase tracking-wide text-slate-400" },
-                    React.createElement("th", { className: "text-left font-semibold pb-1.5 w-6" }, "#"),
-                    React.createElement("th", { className: "text-left font-semibold pb-1.5" }, "Team"),
-                    React.createElement("th", { className: "text-right font-semibold pb-1.5" }, "S–N"),
-                    React.createElement("th", { className: "text-right font-semibold pb-1.5" }, "Diff"))),
-            React.createElement("tbody", null, g.summary.table.entries.map((e) => React.createElement("tr", { key: e.id || e.rank, className: e.isUs ? "bg-[#C43E0E]/[0.07] font-bold text-slate-900" : "text-slate-600" },
-                React.createElement("td", { className: `py-1.5 pl-1.5 rounded-l-md ${e.isUs ? "text-[#C43E0E]" : "text-slate-400"}` }, e.rank),
-                React.createElement("td", { className: "py-1.5 pr-2 truncate max-w-[150px]", title: e.name }, e.name),
-                React.createElement("td", { className: "py-1.5 text-right whitespace-nowrap" }, `${e.won}–${e.lost}`),
-                React.createElement("td", { className: `py-1.5 pr-1.5 text-right rounded-r-md ${e.diff > 0 ? "text-emerald-600" : e.diff < 0 ? "text-red-500" : ""}` }, e.diff > 0 ? `+${e.diff}` : e.diff)))))));
+            days.every((d) => teamEvents.filter((e) => e.date === isoDate(d)).length === 0) && (React.createElement("p", { className: "text-sm text-slate-400 text-center py-6" }, "Keine Termine in den nächsten 7 Tagen."))));
+    // Tabellen: bis 2 Teams komplett, bei mehr Teams eine Zeile je Team (Platz,
+    // Bilanz) - Klick fuehrt zur Teamseite mit kompletter Tabelle + Spielplan.
+    const tableTeams = connectedGameTeams.filter((g) => g.summary && g.summary.table);
+    const standingsCards = tableTeams.length <= 2
+        ? tableTeams.map((g) => React.createElement("div", { key: g.team.id, className: `${cardClass} p-5` },
+            React.createElement("div", { className: "flex items-baseline justify-between gap-2 mb-3" },
+                React.createElement(SectionLabel, null, `Tabelle ${g.team.name}`),
+                React.createElement("span", { className: "text-[11px] text-slate-400 truncate" }, g.summary.table.liganame)),
+            React.createElement(StandingsTable, { table: g.summary.table })))
+        : React.createElement("div", { className: `${cardClass} p-5` },
+            React.createElement(SectionLabel, null, "Tabellenstand"),
+            React.createElement("div", { className: "mt-2" }, tableTeams.map((g) => {
+                const us = g.summary.us;
+                const size = g.summary.table.entries.length;
+                return React.createElement("button", { key: g.team.id, onClick: () => openTeam(g.team.id), className: "w-full flex items-center gap-2.5 py-2 border-b border-stone-100 last:border-0 text-left hover:bg-stone-50 rounded-md px-1.5 -mx-1.5 transition min-w-0" },
+                    React.createElement("span", { className: "min-w-0 flex-1" },
+                        React.createElement("span", { className: "block text-sm font-semibold text-slate-800 truncate" }, g.team.name),
+                        React.createElement("span", { className: "block text-[11px] text-slate-400 truncate" }, g.summary.table.liganame)),
+                    us ? React.createElement(React.Fragment, null,
+                        React.createElement("span", { className: "text-xs text-slate-500 tabular-nums shrink-0" }, `${us.won}–${us.lost}`),
+                        React.createElement("span", { className: `text-sm font-black tabular-nums shrink-0 w-12 text-right ${us.rank <= 3 ? "text-[#C43E0E]" : "text-slate-800"}` }, `${us.rank}.`, React.createElement("span", { className: "text-[10px] font-semibold text-slate-400" }, `/${size}`)))
+                        : React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, "–"));
+            })));
     const incompleteProfilePlayers = players.filter((p) => p.onboardingCompleted !== true);
     // Anwesenheitsquote aus den direkt in "Alle Einheiten"/"Anwesenheit" markierten
     // Status berechnen (nur vergangene Einheiten, erst ab ein paar entschiedenen
     // Terminen ueberhaupt werten - sonst waere eine einzelne verpasste Einheit
     // gleich "0%"). "Verletzt" zaehlt bewusst nicht als Fehlen mit rein.
     const todayKey = today();
-    const pastEvents = events.filter((e) => e.date && e.date < todayKey);
+    const pastEvents = teamEvents.filter((e) => e.date && e.date < todayKey);
     const lowAttendancePlayers = players
         .map((p) => {
             let present = 0, absent = 0;
@@ -369,31 +505,45 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
     // Spiele mit Ergebnis (DBB) der letzten Tage, fuer die noch kein Spieler des
     // Teams eine Statistik mit diesem Datum hat
     const missingStatsItems = connectedGameTeams.flatMap((g) => {
-        const teamPlayers = players.filter((p) => p.teamId === g.team.id);
+        const teamPlayers = playersOfTeam(allPlayers, g.team.id);
         return g.doc.matches
             .filter((m) => dbbScore(m) && m.date <= todayKeyLoad && daysFromToday(m.date) >= -DBB_STATS_REMINDER_DAYS)
-            .filter((m) => teamPlayers.length > 0 && !teamPlayers.some((p) => (p.stats || []).some((st) => st.date === m.date)))
+            .filter((m) => teamPlayers.length > 0 && !statsExistForGame(allPlayers, g.team.id, m))
             .map((m) => {
                 const sc = dbbScore(m);
-                return { id: "stats-" + m.matchId, kind: "stats", title: `${m.isHome ? "vs" : "@"} ${dbbOpponent(m).name}`, sub: `${g.team.name} · ${shortDateLabel(m.date)} · ${sc.us}:${sc.them}`, label: DBB_SCORES_ALTERSKLASSEN.includes(g.team.altersklasse) ? "DBB Scores fehlen" : "Statistik fehlt", onClick: () => onOpenStatsImport && onOpenStatsImport({ teamId: g.team.id, date: m.date, gegner: dbbOpponent(m).name }) };
+                return { id: "stats-" + m.matchId, kind: "stats", title: `${g.team.name} ${m.isHome ? "vs" : "@"} ${dbbOpponent(m).name}`, sub: `${shortDateLabel(m.date)} · ${sc.us}:${sc.them}`, label: DBB_SCORES_ALTERSKLASSEN.includes(g.team.altersklasse) ? "DBB Scores fehlen" : "Statistik fehlt", onClick: () => onOpenStatsImport && onOpenStatsImport({ teamId: g.team.id, matchId: m.matchId, date: m.date, gegner: dbbOpponent(m).name }) };
             });
     });
+    // Wichtigstes zuerst; unvollstaendige Profile ganz unten
     const attentionItems = [
         ...missingStatsItems,
         ...outPlayers.map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury", label: STATUS_OPTIONS.find((s) => s.value === p.status)?.label || "Verletzt/Reha" })),
-        ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", label: wellnessFlagReason(entry) })),
-        ...incompleteProfilePlayers.map((p) => ({ id: "profile-" + p.id, player: p, kind: "profile", label: "Profil unvollständig" })),
-        ...lowAttendancePlayers.map(({ player, quote }) => ({ id: "attendance-" + player.id, player, kind: "attendance", label: `${quote}% Anwesenheit` })),
-        ...devPlanWaitingRows.map(({ player, waiting }) => ({ id: "devplan-" + waiting.id, player, kind: "devplan", label: "Wartet auf deine Freigabe" })),
-        ...feedbackWaitingRows.map(({ player, waiting }) => ({ id: "feedback-" + waiting.id, player, kind: "feedback", label: "Feedback angefragt" })),
         ...loadAlarmRows.map(({ player, acwr }) => ({ id: "load-" + player.id, player, kind: "load", label: `ACWR ${acwr} - Belastungsspitze` })),
+        ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", label: wellnessFlagReason(entry) })),
+        ...feedbackWaitingRows.map(({ player, waiting }) => ({ id: "feedback-" + waiting.id, player, kind: "feedback", label: "Feedback angefragt" })),
+        ...devPlanWaitingRows.map(({ player, waiting }) => ({ id: "devplan-" + waiting.id, player, kind: "devplan", label: "Wartet auf deine Freigabe" })),
+        ...lowAttendancePlayers.map(({ player, quote }) => ({ id: "attendance-" + player.id, player, kind: "attendance", label: `${quote}% Anwesenheit` })),
+        ...incompleteProfilePlayers.map((p) => ({ id: "profile-" + p.id, player: p, kind: "profile", label: "Profil unvollständig" })),
     ];
-    const attentionRows = attentionItems.map((item) => {
+    // Viele gleichartige Hinweise (z. B. 19x "Profil unvollstaendig") ohne Filter
+    // als eine Sammelzeile - Klick filtert dann genau auf diese Art.
+    const ATTENTION_GROUP_MIN = 4;
+    const groupedKinds = attentionFilter ? [] : ["profile", "attendance"].filter((k) => attentionItems.filter((i) => i.kind === k).length >= ATTENTION_GROUP_MIN);
+    const displayItems = attentionFilter
+        ? attentionItems.filter((i) => i.kind === attentionFilter)
+        : [
+            ...attentionItems.filter((i) => !groupedKinds.includes(i.kind)),
+            ...groupedKinds.map((k) => {
+                const n = attentionItems.filter((i) => i.kind === k).length;
+                return { id: "group-" + k, kind: k, title: k === "profile" ? `${n} Spieler-Profile unvollständig` : `${n} Spieler unter ${ATTENDANCE_WARN_THRESHOLD}% Anwesenheit`, sub: "", label: "Alle ansehen →", onClick: () => { setAttentionFilter(k); setAttentionShowAll(false); } };
+            }),
+        ];
+    const attentionRows = displayItems.map((item) => {
         const style = ATTENTION_KIND_STYLE[item.kind] || ATTENTION_KIND_STYLE.injury;
         return React.createElement("button", { key: item.id, onClick: item.onClick || (() => onSelectPlayer(item.player.id)), className: `w-full flex items-center gap-2.5 ${style.row} border-l-2 rounded-xl px-3 py-2 text-left transition` },
             React.createElement(style.icon, { size: 14, className: `${style.text} shrink-0` }),
             React.createElement("span", { className: "text-sm font-semibold text-slate-800 flex-1 truncate" }, item.title || item.player.name),
-            React.createElement("span", { className: "hidden sm:inline text-xs text-slate-400 shrink-0" }, item.sub || teamName(item.player.teamId)),
+            React.createElement("span", { className: "hidden sm:inline text-xs text-slate-400 shrink-0" }, item.sub !== undefined ? item.sub : teamName(item.player.teamId)),
             React.createElement("span", { className: `text-xs font-medium shrink-0 max-w-[45%] truncate ${style.text}` }, item.label));
     });
     const attentionCountsByKind = attentionItems.reduce((acc, item) => { acc[item.kind] = (acc[item.kind] || 0) + 1; return acc; }, {});
@@ -402,26 +552,24 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         const style = ATTENTION_KIND_STYLE[k];
         const active = attentionFilter === k;
         const dimmed = attentionFilter && !active;
-        return React.createElement("button", { key: k, type: "button", onClick: () => { setAttentionFilter(active ? null : k); setAttentionExpanded(true); setAttentionShowAll(false); }, "aria-pressed": active, className: `inline-flex items-center gap-1 text-[11px] font-bold pl-1.5 pr-2 py-1 rounded-full transition ${style.badge} ${dimmed ? "opacity-35 hover:opacity-70" : ""} ${active ? "ring-2 ring-offset-1 ring-slate-900/30" : ""}` },
+        return React.createElement("button", { key: k, type: "button", onClick: () => { setAttentionFilter(active ? null : k); setAttentionShowAll(false); }, "aria-pressed": active, className: `inline-flex items-center gap-1 text-[11px] font-bold pl-1.5 pr-2 py-1 rounded-full transition ${style.badge} ${dimmed ? "opacity-35 hover:opacity-70" : ""} ${active ? "ring-2 ring-offset-1 ring-slate-900/30" : ""}` },
             React.createElement(style.icon, { size: 11 }),
             ATTENTION_KIND_LABEL[k],
             React.createElement("span", { className: "tabular-nums opacity-90" }, attentionCountsByKind[k]));
     });
-    const filteredAttentionRows = attentionFilter ? attentionRows.filter((_, i) => attentionItems[i].kind === attentionFilter) : attentionRows;
+    const filteredAttentionRows = attentionRows;
     const visibleAttentionRows = attentionShowAll ? filteredAttentionRows : filteredAttentionRows.slice(0, ATTENTION_PREVIEW_COUNT);
-    const scheduleConflicts = groupConflictsByEventPair(findScheduleConflicts(events, players, CONFLICT_MIN_OVERLAP_MINUTES));
+    const scheduleConflicts = groupConflictsByEventPair(findScheduleConflicts(teamEvents, players, CONFLICT_MIN_OVERLAP_MINUTES));
     const conflictBanner = scheduleConflicts.length > 0 && React.createElement("button", { onClick: onGoToAllUnits, className: "w-full flex items-center gap-2.5 bg-amber-50 hover:bg-amber-100 border-l-2 border-amber-500 rounded-xl px-3 py-2.5 text-left transition" },
         React.createElement(IconAlert, { size: 14, className: "text-amber-600 shrink-0" }),
         React.createElement("span", { className: "text-sm font-semibold text-amber-800 flex-1" }, scheduleConflicts.length, " Terminüberschneidung", scheduleConflicts.length > 1 ? "en" : "", " gefunden"),
         React.createElement("span", { className: "text-xs font-medium text-amber-700 shrink-0" }, "In „Alle Einheiten“ ansehen →"));
     const attentionCard = React.createElement("div", { className: `${cardClass} p-5` },
-        React.createElement("button", { type: "button", onClick: () => setAttentionExpanded((v) => !v), className: "w-full flex items-center justify-between gap-3" },
-            React.createElement("div", { className: "flex items-center gap-2" },
-                React.createElement(SectionLabel, null, "Braucht Aufmerksamkeit"),
-                React.createElement("span", { className: `text-xs font-bold tabular-nums rounded-full px-2 py-0.5 ${attentionItems.length > 0 ? "bg-slate-900 text-white" : "bg-emerald-100 text-emerald-700"}` }, attentionItems.length)),
-            React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform shrink-0 ${attentionExpanded ? "rotate-180" : ""}` })),
+        React.createElement("div", { className: "flex items-center gap-2" },
+            React.createElement(SectionLabel, null, "Braucht Aufmerksamkeit"),
+            React.createElement("span", { className: `text-xs font-bold tabular-nums rounded-full px-2 py-0.5 ${attentionItems.length > 0 ? "bg-slate-900 text-white" : "bg-emerald-100 text-emerald-700"}` }, attentionItems.length)),
         attentionBadges.length > 1 && React.createElement("div", { className: "flex flex-wrap gap-1.5 mt-3" }, attentionBadges),
-        attentionExpanded && React.createElement("div", { className: "mt-3 space-y-1.5" },
+        React.createElement("div", { className: "mt-3 space-y-1.5" },
             conflictBanner,
             attentionRows.length === 0 && !conflictBanner
                 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4" }, "Alles im grünen Bereich - keine Auffälligkeiten.")
@@ -436,16 +584,19 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
         const rank = (r) => (r.zone.label === "Alarm" ? 0 : r.zone.label === "Erhöht" ? 1 : r.todaysEntries.length === 0 ? 2 : 3);
         return rank(a) - rank(b) || a.player.name.localeCompare(b.player.name);
     });
+    // Ohne "Alle anzeigen" nur Spieler mit Belastungsdaten (Alarm/Erhoeht zuerst)
+    const loadRowsWithData = trainingLoadTableRows.filter((r) => r.todaysEntries.length > 0 || r.acwr !== null || r.load7);
+    const visibleLoadRows = loadShowAll ? trainingLoadTableRows : loadRowsWithData.slice(0, DASHBOARD_LIST_PREVIEW);
     const trainingLoadCard = React.createElement("div", { className: `${cardClass} p-5` },
-        React.createElement("button", { type: "button", onClick: () => setLoadExpanded((v) => !v), className: "w-full flex items-center justify-between" },
-            React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
-                React.createElement(SectionLabel, null, "Trainingsbelastung heute"),
-                players.length > 0 && React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, `${loadEntryCount}/${players.length} eingetragen`),
-                loadAlarmRows.length > 0 && React.createElement("span", { className: "text-[11px] font-bold rounded-full px-2 py-0.5 bg-fuchsia-500 text-white" }, `${loadAlarmRows.length} Alarm`),
-                loadHighCount > 0 && React.createElement("span", { className: "text-[11px] font-bold rounded-full px-2 py-0.5 bg-amber-100 text-amber-800" }, `${loadHighCount} erhöht`)),
-            React.createElement(IconArrowDown, { size: 16, className: `text-slate-400 transition-transform shrink-0 ${loadExpanded ? "rotate-180" : ""}` })),
-        loadExpanded && (players.length === 0
+        React.createElement("div", { className: "flex items-center gap-2 flex-wrap" },
+            React.createElement(SectionLabel, null, "Trainingsbelastung heute"),
+            players.length > 0 && React.createElement("span", { className: "text-xs font-semibold text-slate-400" }, `${loadEntryCount}/${players.length} eingetragen`),
+            loadAlarmRows.length > 0 && React.createElement("span", { className: "text-[11px] font-bold rounded-full px-2 py-0.5 bg-fuchsia-500 text-white" }, `${loadAlarmRows.length} Alarm`),
+            loadHighCount > 0 && React.createElement("span", { className: "text-[11px] font-bold rounded-full px-2 py-0.5 bg-amber-100 text-amber-800" }, `${loadHighCount} erhöht`)),
+        players.length === 0
             ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4 mt-3" }, "Noch keine Spieler.")
+            : visibleLoadRows.length === 0
+                ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-4 mt-3" }, "Noch keine Belastungsdaten eingetragen.")
             : React.createElement("div", { className: "mt-3 -mx-1 overflow-x-auto" },
                 React.createElement("table", { className: "w-full text-sm" },
                     React.createElement("thead", null,
@@ -456,7 +607,7 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                             React.createElement("th", { className: "text-right px-3 py-2" }, "Load 7T Ø"),
                             React.createElement("th", { className: "text-right px-3 py-2" }, "ACWR"),
                             React.createElement("th", { className: "text-left px-3 py-2" }, "Zone"))),
-                    React.createElement("tbody", null, trainingLoadTableRows.map((r) => React.createElement("tr", { key: r.player.id, onClick: () => onSelectPlayer(r.player.id), className: "border-b border-stone-100 last:border-0 odd:bg-stone-50/40 hover:bg-red-50/60 cursor-pointer transition-colors" },
+                    React.createElement("tbody", null, visibleLoadRows.map((r) => React.createElement("tr", { key: r.player.id, onClick: () => onSelectPlayer(r.player.id), className: "border-b border-stone-100 last:border-0 odd:bg-stone-50/40 hover:bg-red-50/60 cursor-pointer transition-colors" },
                         React.createElement("td", { className: "px-3 py-2 font-medium text-slate-800 truncate max-w-[160px]" }, r.player.name),
                         React.createElement("td", { className: "hidden sm:table-cell px-3 py-2 text-slate-400" }, teamName(r.player.teamId)),
                         React.createElement("td", { className: "px-3 py-2 text-center" }, r.todaysEntries.length > 0
@@ -464,7 +615,15 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                             : React.createElement("span", { className: "text-slate-300" }, "–")),
                         React.createElement("td", { className: "px-3 py-2 text-right tabular-nums" }, r.load7 || "–"),
                         React.createElement("td", { className: "px-3 py-2 text-right tabular-nums font-semibold" }, r.acwr === null ? "–" : r.acwr),
-                        React.createElement("td", { className: "px-3 py-2" }, React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${r.zone.cls}` }, r.zone.label)))))))));
+                        React.createElement("td", { className: "px-3 py-2" }, React.createElement("span", { className: `text-xs font-semibold rounded-full px-2 py-0.5 ${r.zone.cls}` }, r.zone.label))))))),
+        (loadShowAll || trainingLoadTableRows.length > visibleLoadRows.length) && React.createElement("button", { type: "button", onClick: () => setLoadShowAll((v) => !v), className: "w-full text-center text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B] pt-3" },
+            loadShowAll ? "Weniger anzeigen" : `Alle ${trainingLoadTableRows.length} Spieler anzeigen`));
+    // Team-Filter (nur bei mehreren Teams): eine Zeile, am Handy seitlich scrollbar
+    const teamFilterBar = allTeams.length > 1 && React.createElement("div", { className: "-mx-4 px-4 sm:mx-0 sm:px-0 overflow-x-auto" },
+        React.createElement("div", { className: "flex gap-1.5 w-max sm:w-auto sm:flex-wrap" }, [{ id: "all", name: "Alle Teams" }, ...allTeams].map((t) => {
+            const on = activeFilter === t.id;
+            return React.createElement("button", { key: t.id, type: "button", "aria-pressed": on, onClick: () => setTeamFilter(t.id), className: `whitespace-nowrap text-xs sm:text-sm font-semibold rounded-full px-3 py-1.5 border transition ${on ? "bg-slate-900 border-slate-900 text-white" : "bg-white border-stone-200 text-slate-600 hover:border-stone-300"}` }, t.name);
+        })));
     return (React.createElement("div", { className: "space-y-5 sm:space-y-6 rsk-fade-in" },
         React.createElement("div", { className: "flex items-end justify-between gap-3 flex-wrap" },
             React.createElement("div", { className: "min-w-0" },
@@ -478,10 +637,11 @@ function TrainerDashboard({ events, teams, players, wellnessData, trainingLoadDa
                     React.createElement(IconPaperclip, { size: 14 }),
                     React.createElement("span", { className: "hidden sm:inline" }, " Notiz/Datei für Spieler"),
                     React.createElement("span", { className: "sm:hidden" }, " Notiz")))),
+        teamFilterBar,
         gameDayHero,
         kpiStrip,
         showEventForm && (React.createElement(Modal, { title: editingEvent ? "Termin bearbeiten" : "Termin anlegen", onClose: () => setShowEventForm(false), wide: true },
-            React.createElement(EventForm, { initialEvent: editingEvent, teams: teams, allPlayers: players, onSubmit: (vals) => { editingEvent ? onEditEvent(editingEvent.id, vals) : onAddEvent(vals); setShowEventForm(false); }, onClose: () => setShowEventForm(false) }))),
+            React.createElement(EventForm, { initialEvent: editingEvent, teams: allTeams, allPlayers: allPlayers, onSubmit: (vals) => { editingEvent ? onEditEvent(editingEvent.id, vals) : onAddEvent(vals); setShowEventForm(false); }, onClose: () => setShowEventForm(false) }))),
         React.createElement("div", { className: "grid xl:grid-cols-3 gap-5 sm:gap-6 items-start" },
             React.createElement("div", { className: "xl:col-span-2 space-y-5 sm:space-y-6 min-w-0" }, attentionCard, trainingLoadCard),
             React.createElement("div", { className: "space-y-5 sm:space-y-6 min-w-0" }, terminCard, standingsCards))));
@@ -1046,7 +1206,7 @@ function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, 
                 const hasNumber = p.number !== "" && p.number !== undefined && p.number !== null;
                 return React.createElement("button", { key: p.id, onClick: () => onSelectPlayer(p.id), className: "group bg-white rounded-2xl border border-stone-100 shadow-[0_1px_2px_rgba(0,0,0,0.04)] hover:shadow-[0_4px_16px_rgba(0,0,0,0.08)] hover:-translate-y-0.5 transition-all p-2.5 sm:p-3 flex items-center gap-2.5 sm:gap-3 text-left min-w-0" },
                     p.photoUrl
-                        ? React.createElement("img", { src: p.photoUrl, alt: "", className: "w-9 h-9 sm:w-11 sm:h-11 rounded-xl object-cover shrink-0" })
+                        ? React.createElement("img", { src: cloudinaryImage(p.photoUrl, 44, 44), alt: "", loading: "lazy", className: "w-9 h-9 sm:w-11 sm:h-11 rounded-xl object-cover shrink-0" })
                         : React.createElement("span", { className: "w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 text-white flex items-center justify-center text-sm font-black shrink-0" }, hasNumber ? p.number : (splitName(p.name).first || p.name).charAt(0).toUpperCase()),
                     React.createElement("span", { className: "min-w-0 flex-1" },
                         React.createElement("span", { className: "block text-sm font-semibold text-slate-900 leading-snug line-clamp-2 [hyphens:auto] break-words group-hover:text-[#C43E0E] transition-colors", title: p.name }, p.name),
