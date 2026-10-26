@@ -1663,7 +1663,7 @@ function SpielerAkte() {
                     React.createElement("div", { className: "flex flex-col gap-0.5" }, visibleTeams.map((t, i) => {
                         const active = !selectedPlayerId && !showPlayers && selectedTeamId === t.id;
                         return React.createElement("button", { key: t.id, onClick: () => goTeam(t.id), className: `flex items-center gap-2.5 px-3 py-1.5 rounded-xl text-sm font-medium transition ${active ? "bg-gradient-to-r from-[#C43E0E]/10 to-[#C43E0E]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
-                            React.createElement("span", { className: `w-5 h-5 rounded-md bg-gradient-to-br ${TEAM_COLORS[i % TEAM_COLORS.length]} text-white flex items-center justify-center text-[10px] font-black shrink-0` }, (t.name || "?").charAt(0).toUpperCase()),
+                            React.createElement(TeamBadge, { team: t, colorIdx: i, size: "sm" }),
                             React.createElement("span", { className: "flex-1 text-left truncate" }, t.name),
                             React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, playersOfTeam(players, t.id).length));
                     }))))),

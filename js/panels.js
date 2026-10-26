@@ -311,7 +311,7 @@ function TrainerDashboard({ events, teams: allTeams, players: allPlayers, wellne
             React.createElement("div", { className: "flex items-center gap-2 min-w-0" },
                 g.team.logoUrl
                     ? React.createElement("img", { src: g.team.logoUrl, alt: "", className: "w-7 h-7 object-contain shrink-0" })
-                    : React.createElement("span", { className: `w-6 h-6 rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, (g.team.name || "?").charAt(0).toUpperCase()),
+                    : React.createElement(TeamBadge, { team: g.team, colorIdx: g.colorIdx }),
                 React.createElement("button", { onClick: () => openTeam(g.team.id), className: "text-sm font-bold text-white hover:text-[#FF8A55] truncate" }, g.team.name),
                 s && s.us && React.createElement("span", { className: "ml-auto shrink-0 text-[11px] font-semibold text-white/70 bg-white/10 rounded-full px-2 py-0.5 tabular-nums", title: s.table.liganame }, `Platz ${s.us.rank} · ${s.us.won}–${s.us.lost}`)),
             next ? React.createElement("div", { className: "min-w-0" },
@@ -338,7 +338,7 @@ function TrainerDashboard({ events, teams: allTeams, players: allPlayers, wellne
     const compactBoard = shownGameTeams.length > 3;
     const teamBadge = (g, small) => g.team.logoUrl
         ? React.createElement("img", { src: g.team.logoUrl, alt: "", className: `${small ? "w-5 h-5" : "w-7 h-7"} object-contain shrink-0` })
-        : React.createElement("span", { className: `${small ? "w-5 h-5 text-[10px]" : "w-6 h-6 text-[11px]"} rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center font-black shrink-0` }, (g.team.name || "?").charAt(0).toUpperCase());
+        : React.createElement(TeamBadge, { team: g.team, colorIdx: g.colorIdx, size: small ? "sm" : null });
     const upcomingGames = connectedGameTeams.flatMap((g) => g.doc.matches
         .filter((m) => m.date && !m.cancelled && !dbbScore(m) && m.date >= todayKeyLoad && daysFromToday(m.date) <= 7)
         .map((m) => ({ g, m })));
@@ -698,6 +698,19 @@ function RadarEditor({ values, onChange, modes, onModeChange, autoValues }) {
     return React.createElement("div", { className: "space-y-3" }, rows);
 }
 const WELLNESS_SCALE_COLORS = { 1: "bg-red-500", 2: "bg-orange-500", 3: "bg-amber-400", 4: "bg-lime-500", 5: "bg-emerald-500" };
+// Team-Kennzeichen: hinterlegtes Teamlogo, sonst farbiges Kuerzel (bei U-Teams
+// die Jahrgangszahl, z. B. "14", sonst der Anfangsbuchstabe)
+function teamShortLabel(team) {
+    const name = (team && team.name) || "?";
+    const u = name.match(/^U\s?(\d+)/i);
+    return u ? u[1] : name.charAt(0).toUpperCase();
+}
+function TeamBadge({ team, colorIdx, size }) {
+    const box = size === "sm" ? "w-5 h-5" : "w-6 h-6";
+    if (team && team.logoUrl)
+        return React.createElement("img", { src: team.logoUrl, alt: "", className: `${box} object-contain shrink-0` });
+    return React.createElement("span", { className: `${box} ${size === "sm" ? "text-[10px]" : "text-[11px]"} rounded-md bg-gradient-to-br ${TEAM_COLORS[(colorIdx || 0) % TEAM_COLORS.length]} text-white flex items-center justify-center font-black shrink-0 tracking-tight` }, teamShortLabel(team));
+}
 const TEAM_COLORS = ["from-[#C43E0E] to-[#8A2C0A]", "from-teal-600 to-teal-900", "from-emerald-500 to-emerald-800", "from-violet-500 to-violet-800", "from-amber-500 to-amber-800", "from-slate-600 to-slate-900"];
 // Monitoring-Verlauf (Trainingsbelastung + Wellness-Check-in): nach Kalenderwoche
 // gruppiert und einzeln ein-/ausklappbar, damit die Seite bei wachsender
@@ -1197,7 +1210,7 @@ function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, 
             React.createElement("div", { className: `flex items-center gap-2.5 px-3 sm:px-4 ${isOpen(g) ? "pt-1 mb-2.5" : "py-2.5"}` },
                 React.createElement("button", { onClick: () => toggleGroup(g), disabled: forceOpen, "aria-expanded": isOpen(g), className: "flex items-center gap-2.5 min-w-0 flex-1 text-left group/head disabled:cursor-default" },
                 !forceOpen && React.createElement(IconChevronDown, { size: 16, className: `text-slate-400 shrink-0 transition-transform ${isOpen(g) ? "" : "-rotate-90"}` }),
-                React.createElement("span", { className: `w-6 h-6 rounded-md bg-gradient-to-br ${TEAM_COLORS[g.colorIdx % TEAM_COLORS.length]} text-white flex items-center justify-center text-[11px] font-black shrink-0` }, ((g.team && g.team.name) || "?").charAt(0).toUpperCase()),
+                React.createElement(TeamBadge, { team: g.team, colorIdx: g.colorIdx }),
                 React.createElement("h3", { className: "text-sm font-bold text-slate-800" }, g.team ? g.team.name : "Ohne Team"),
                 React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, g.players.length)),
                 g.team && React.createElement("button", { onClick: () => onOpenTeam(g.team.id), className: "ml-auto text-xs font-semibold text-[#C43E0E] hover:text-[#FF6A2B] shrink-0" }, "Team-Übersicht →")),
