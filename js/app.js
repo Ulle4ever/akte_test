@@ -1232,7 +1232,22 @@ function SpielerAkte() {
     }
     async function handleEditTeam(id, changes) {
         const before = meta.teams.find((t) => t.id === id);
-        await persistMeta({ teams: meta.teams.map((t) => (t.id === id ? { ...t, ...changes } : t)) });
+        if (isFullTrainer) {
+            await persistMeta({ teams: meta.teams.map((t) => (t.id === id ? { ...t, ...changes } : t)) });
+        }
+        else {
+            // Team-Trainer: ueber die Cloud Function (prueft, ob das Team zum Zugang gehoert)
+            const { altersklasse, ...own } = changes;
+            try {
+                await functionsInstance.httpsCallable("updateOwnTeam")({ teamId: id, changes: own });
+                setMeta((prev) => ({ ...prev, teams: prev.teams.map((t) => (t.id === id ? { ...t, ...own } : t)) }));
+                setSaveError(false);
+            }
+            catch (e) {
+                setSaveError(true);
+                return;
+            }
+        }
         if ((before?.dbbTeamId || "") !== (changes.dbbTeamId || ""))
             runDbbSync();
     }
@@ -1730,7 +1745,10 @@ function SpielerAkte() {
                             React.createElement(TeamNoteForm, { teams: teams, players: players, defaultTeamId: selectedTeamId, onSubmit: addTeamNote, onClose: () => setModal(null) })))));
                 })(),
                 !selectedPlayer && selectedTeamId !== "all" && !showTeamCalendar && (React.createElement("div", null,
-                    React.createElement("div", { className: "flex justify-end mb-3" },
+                    React.createElement("div", { className: "flex justify-end gap-2 mb-3" },
+                        isTrainer && teams.find((t) => t.id === selectedTeamId) && (isFullTrainer || (trainerTeamIds || []).includes(selectedTeamId)) && React.createElement("button", { onClick: () => { setEditingTeam(teams.find((t) => t.id === selectedTeamId)); setModal("editTeam"); }, className: "flex items-center gap-1.5 text-sm font-medium text-slate-600 hover:text-slate-900 bg-stone-100 hover:bg-stone-200 rounded-lg px-3 py-1.5" },
+                            React.createElement(IconEdit, { size: 14 }),
+                            " Team bearbeiten"),
                         React.createElement("button", { onClick: () => setShowTeamCalendar(true), className: "flex items-center gap-1.5 text-sm font-medium text-[#C43E0E] hover:text-[#FF6A2B] bg-sky-50 hover:bg-sky-100 rounded-lg px-3 py-1.5" },
                             React.createElement(IconCalendar, { size: 14 }),
                             " Team-Kalender")),
@@ -1789,7 +1807,9 @@ function SpielerAkte() {
                                         React.createElement("h2", { className: "font-display italic font-black uppercase text-xl sm:text-4xl leading-[0.95] text-white [overflow-wrap:anywhere] [hyphens:auto]" }, selectedPlayer.name),
                                         React.createElement("div", { className: "flex items-center gap-2 mt-2 flex-wrap" },
                                             React.createElement("p", { className: "text-sm text-white/60" }, selectedTeam?.name || "Kein Team"),
-                                            STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label)))),
+                                            STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label)),
+                                            isInjured(selectedPlayer) && React.createElement("span", { className: `text-[11px] font-bold px-2 py-0.5 rounded-full ${injuryCountdown(selectedPlayer).overdue ? "bg-amber-400 text-slate-900" : "bg-rose-500 text-white"}`, title: selectedPlayer.injuryUntil ? "Zurück voraussichtlich am " + fmtDate(selectedPlayer.injuryUntil) : "" }, injuryCountdown(selectedPlayer).label)),
+                                        isInjured(selectedPlayer) && selectedPlayer.injuryReason && React.createElement("p", { className: "text-xs text-white/60 mt-1.5" }, selectedPlayer.injuryReason, selectedPlayer.injuryUntil ? ` · zurück am ${fmtDate(selectedPlayer.injuryUntil)}` : "")),
                                     React.createElement("div", { className: "flex gap-2 shrink-0" },
                                         isTrainer && (React.createElement(React.Fragment, null,
                                             React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-black/35 text-white/80", "aria-label": "Bearbeiten" },
@@ -2136,7 +2156,7 @@ function SpielerAkte() {
                 { label: "Geburtsdatum", value: fmtDate(selectedPlayer.birthdate) },
                 { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "–" },
                 { label: "Letzter Verein", value: selectedPlayer.previousClub || "–" },
-                { label: "Status", value: STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label || "–" },
+                { label: "Status", value: [STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label || "–", isInjured(selectedPlayer) ? [selectedPlayer.injuryReason, injuryCountdown(selectedPlayer).label].filter(Boolean).join(", ") : null].filter(Boolean).join(" · ") },
                 { label: "Schule", value: selectedPlayer.school || "–" },
                 { label: "Wohnort", value: wohnort },
                 { label: "Telefon", value: selectedPlayer.phone || "–" },
@@ -2191,7 +2211,7 @@ function SpielerAkte() {
         modal === "teams" && (React.createElement(Modal, { title: "Teams verwalten", onClose: () => setModal(null) },
             React.createElement(TeamsManager, { teams: visibleTeams, onEdit: (t) => { setEditingTeam(t); setModal("editTeam"); }, onClose: () => setModal(null) }))),
         modal === "editTeam" && editingTeam && (React.createElement(Modal, { title: "Team bearbeiten", onClose: () => { setModal(null); setEditingTeam(null); } },
-            React.createElement(TeamForm, { initial: editingTeam, onSubmit: (changes) => handleEditTeam(editingTeam.id, changes), onClose: () => { setModal(null); setEditingTeam(null); } }))),
+            React.createElement(TeamForm, { initial: editingTeam, limited: !isFullTrainer, onSubmit: (changes) => handleEditTeam(editingTeam.id, changes), onClose: () => { setModal(null); setEditingTeam(null); } }))),
         modal === "player" && (React.createElement(Modal, { title: "Spieler anlegen", onClose: () => setModal(null) },
             React.createElement(PlayerForm, { teams: visibleTeams, onSubmit: handleAddPlayer, onClose: () => setModal(null) }))),
         modal === "editPlayer" && selectedPlayer && (React.createElement(Modal, { title: "Spieler bearbeiten", onClose: () => setModal(null) },

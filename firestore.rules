@@ -72,8 +72,12 @@ service cloud.firestore {
       allow read: if isSignedIn();
       // Club-weite Vorlagen (Teams anlegen, Statistik-Kategorien, Test-Arten) sind
       // Sache des Vollzugriff-Trainers - ein team-beschraenkter Trainer darf hier
-      // nichts aendern.
-      allow write: if isFullTrainer();
+      // nichts aendern. Ausnahme: Statistik-Felder (statCategories) - die legt der
+      // Statistik-Import bei Bedarf automatisch an (Fouls, Effizienz usw.), auch
+      // fuer Team-Trainer. Ihre Team-Einstellungen aendern Team-Trainer ueber die
+      // Cloud Function updateOwnTeam.
+      allow write: if isFullTrainer()
+        || (isTrainer() && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['statCategories']));
     }
 
     match /accounts/{uid} {

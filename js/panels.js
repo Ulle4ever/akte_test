@@ -534,7 +534,7 @@ function TrainerDashboard({ events, teams: allTeams, players: allPlayers, wellne
     // Wichtigstes zuerst; unvollstaendige Profile ganz unten
     const attentionItems = [
         ...missingStatsItems,
-        ...outPlayers.map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury", label: STATUS_OPTIONS.find((s) => s.value === p.status)?.label || "Verletzt/Reha" })),
+        ...[...outPlayers].sort((a, b) => (injuryCountdown(a).days ?? 9999) - (injuryCountdown(b).days ?? 9999)).map((p) => ({ id: "injury-" + p.id, player: p, kind: "injury", label: [p.injuryReason || STATUS_OPTIONS.find((s) => s.value === p.status)?.label || "Verletzt/Reha", injuryCountdown(p).label].join(" · ") })),
         ...loadAlarmRows.map(({ player, acwr }) => ({ id: "load-" + player.id, player, kind: "load", label: `ACWR ${acwr} - Belastungsspitze` })),
         ...flaggedWellness.map(({ player, entry }) => ({ id: "wellness-" + player.id, player, kind: "wellness", label: wellnessFlagReason(entry) })),
         ...feedbackWaitingRows.map(({ player, waiting }) => ({ id: "feedback-" + waiting.id, player, kind: "feedback", label: "Feedback angefragt" })),
@@ -1242,7 +1242,9 @@ function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, 
                         React.createElement("span", { className: "block text-sm font-semibold text-slate-900 leading-snug line-clamp-2 [hyphens:auto] break-words group-hover:text-[#C43E0E] transition-colors", title: p.name }, p.name),
                         React.createElement("span", { className: "flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 min-w-0" },
                             React.createElement("span", { className: `w-1.5 h-1.5 rounded-full shrink-0 ${st?.dot || "bg-slate-300"}` }),
-                            React.createElement("span", { className: "truncate" }, [hasNumber && p.photoUrl ? "#" + p.number : null, POSITION_ABBR[p.position] || p.position].filter(Boolean).join(" · ") || "–"))));
+                            isInjured(p)
+                                ? React.createElement("span", { className: `truncate font-semibold ${injuryCountdown(p).overdue ? "text-amber-700" : "text-rose-700"}`, title: p.injuryReason || "" }, injuryCountdown(p).label)
+                                : React.createElement("span", { className: "truncate" }, [hasNumber && p.photoUrl ? "#" + p.number : null, POSITION_ABBR[p.position] || p.position].filter(Boolean).join(" · ") || "–"))));
             })))));
 }
 function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {

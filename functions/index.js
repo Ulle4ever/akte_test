@@ -381,6 +381,40 @@ exports.syncDbbScheduled = onSchedule({ schedule: "0 7,22 * * 0,5", timeZone: "E
     await syncAllDbbTeams();
 });
 
+// Team-Trainer duerfen die Einstellungen IHRER Teams aendern (Name, Cheftrainer,
+// DBB-Link, Logo). club/meta ist per Regel nur fuer Main Accounts beschreibbar,
+// weil sich in einer Teams-Liste nicht pruefen laesst, welches Team geaendert
+// wurde - deshalb hier serverseitig, nur fuer erlaubte Teams und Felder.
+const OWN_TEAM_FIELDS = ["name", "trainer", "dbbTeamId", "logoUrl"];
+exports.updateOwnTeam = onCall({ region: "europe-west1" }, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Bitte eingeloggt sein.");
+    const callerSnap = await db.collection("accounts").doc(request.auth.uid).get();
+    const acc = callerSnap.exists ? callerSnap.data() : null;
+    if (!acc || acc.role !== "trainer")
+        throw new HttpsError("permission-denied", "Nur Trainer duerfen Teams bearbeiten.");
+    const ownTeamIds = Array.isArray(acc.teamIds) && acc.teamIds.length ? acc.teamIds : (acc.teamId ? [acc.teamId] : null);
+    const { teamId, changes } = request.data || {};
+    if (!teamId || (ownTeamIds && !ownTeamIds.includes(teamId)))
+        throw new HttpsError("permission-denied", "Dieses Team gehoert nicht zu deinem Zugang.");
+    const clean = {};
+    for (const k of OWN_TEAM_FIELDS) {
+        if (changes && typeof changes[k] === "string")
+            clean[k] = changes[k].trim().slice(0, 500);
+    }
+    if ("name" in clean && !clean.name)
+        throw new HttpsError("invalid-argument", "Bitte einen Teamnamen eingeben.");
+    const ref = db.collection("club").doc("meta");
+    await db.runTransaction(async (tx) => {
+        const snap = await tx.get(ref);
+        const teams = (snap.exists ? snap.data().teams : null) || [];
+        if (!teams.some((t) => t.id === teamId))
+            throw new HttpsError("not-found", "Team nicht gefunden.");
+        tx.update(ref, { teams: teams.map((t) => (t.id === teamId ? { ...t, ...clean } : t)) });
+    });
+    return { ok: true };
+});
+
 // "Jetzt aktualisieren" in der App (nur Trainer)
 exports.syncDbbNow = onCall({ region: "europe-west1", timeoutSeconds: 300 }, async (request) => {
     if (!request.auth)

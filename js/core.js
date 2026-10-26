@@ -14,6 +14,37 @@ const STATUS_STYLES = {
     verletzt: { dot: "bg-rose-500", badge: "bg-rose-50 text-rose-700 border-rose-200", text: "text-rose-700" },
     reha: { dot: "bg-amber-500", badge: "bg-amber-50 text-amber-700 border-amber-200", text: "text-amber-700" },
 };
+// Verletzung/Reha: Grund + voraussichtliches Rueckkehrdatum (injuryUntil),
+// daraus zaehlt die App die verbleibenden Tage herunter.
+const INJURY_STATUSES = ["verletzt", "reha"];
+function isInjured(p) {
+    return !!p && INJURY_STATUSES.includes(p.status);
+}
+function addDaysIso(iso, days) {
+    const d = new Date(iso + "T00:00:00");
+    d.setDate(d.getDate() + days);
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+function daysUntilIso(iso) {
+    const t = new Date();
+    t.setHours(0, 0, 0, 0);
+    return Math.round((new Date(iso + "T00:00:00") - t) / 86400000);
+}
+// { days, label, overdue } fuer verletzte Spieler, sonst null
+function injuryCountdown(p) {
+    if (!isInjured(p))
+        return null;
+    if (!p.injuryUntil)
+        return { days: null, label: "Dauer offen", overdue: false };
+    const days = daysUntilIso(p.injuryUntil);
+    if (days > 1)
+        return { days, label: `noch ${days} Tage`, overdue: false };
+    if (days === 1)
+        return { days, label: "noch 1 Tag", overdue: false };
+    if (days === 0)
+        return { days, label: "Rückkehr heute", overdue: false };
+    return { days, label: `Rückkehr überfällig (${-days} T.)`, overdue: true };
+}
 const VIDEO_TYPES = ["Spielszene", "Trainingsdrill", "Analyse", "Wurftechnik"];
 const RADAR_SKILLS = [
     { id: "wurf", label: "Wurf", autoCapable: true, defaultMode: "auto" },

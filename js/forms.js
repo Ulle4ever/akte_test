@@ -104,7 +104,7 @@ function parseDbbTeamId(value) {
     const m = s.match(/team(?:id)?[\/=](\d{4,})/i) || s.match(/^(\d{4,})$/);
     return m ? Number(m[1]) : null;
 }
-function TeamForm({ initial, onSubmit, onClose }) {
+function TeamForm({ initial, onSubmit, onClose, limited }) {
     const [name, setName] = useState(initial?.name || "");
     const [altersklasse, setAltersklasse] = useState(initial?.altersklasse || "");
     const [trainer, setTrainer] = useState(initial?.trainer || "");
@@ -150,7 +150,7 @@ function TeamForm({ initial, onSubmit, onClose }) {
         React.createElement(Field, { label: "Teamname" },
             React.createElement("input", { className: inputClass, value: name, onChange: (e) => { setName(e.target.value); setError(""); }, placeholder: "z. B. U16 Herren", autoFocus: true }),
             error && React.createElement("p", { className: "text-xs text-red-600 mt-1" }, error)),
-        React.createElement(Field, { label: "Altersklasse / Liga" },
+        !limited && React.createElement(Field, { label: "Altersklasse / Liga" },
             React.createElement("select", { className: inputClass, value: altersklasse, onChange: (e) => setAltersklasse(e.target.value) },
                 React.createElement("option", { value: "" }, "– bitte wählen –"),
                 ALTERSKLASSE_OPTIONS.map((a) => React.createElement("option", { key: a, value: a }, a)))),
@@ -187,6 +187,18 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [district, setDistrict] = useState(initial?.district || "");
     const [photoFile, setPhotoFile] = useState(null);
     const [removePhoto, setRemovePhoto] = useState(false);
+    const wasInjured = isInjured(initial);
+    const [injuryReason, setInjuryReason] = useState(initial?.injuryReason || "");
+    const [injuryUntil, setInjuryUntil] = useState(initial?.injuryUntil || "");
+    const injurySince = wasInjured && initial?.injurySince ? initial.injurySince : today();
+    const [durAmount, setDurAmount] = useState(() => initial?.injuryUntil ? String(Math.max(0, daysUntilIso(initial.injuryUntil))) : "");
+    const [durUnit, setDurUnit] = useState("tage");
+    function setDuration(amount, unit) {
+        setDurAmount(amount);
+        setDurUnit(unit);
+        const n = parseInt(amount, 10);
+        setInjuryUntil(isNaN(n) || n < 0 ? "" : addDaysIso(today(), unit === "wochen" ? n * 7 : n));
+    }
     const [photoInputKey, setPhotoInputKey] = useState(0); // Datei-Feld nach "Entfernen" leeren
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const [error, setError] = useState("");
@@ -231,9 +243,35 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             district: district.trim(),
             photoUrl,
             dlTeamIds: dlTeamIds.filter((id) => dlTeams.some((t) => t.id === id)),
+            ...injuryFieldsForSubmit(),
         });
         onClose();
     }
+    // Verletzt/Reha: Grund + Rueckkehrdatum speichern; wieder "aktiv" -> die
+    // Verletzung wandert in die Historie und die Felder werden geleert.
+    function injuryFieldsForSubmit() {
+        if (INJURY_STATUSES.includes(status))
+            return { injuryReason: injuryReason.trim(), injurySince, injuryUntil };
+        if (!wasInjured)
+            return {};
+        const history = [...(initial.injuryHistory || []), { reason: initial.injuryReason || "", since: initial.injurySince || "", until: initial.injuryUntil || "", back: today(), status: initial.status }];
+        return { injuryReason: "", injurySince: "", injuryUntil: "", injuryHistory: history };
+    }
+    const injuredNow = INJURY_STATUSES.includes(status);
+    const previewCountdown = injuredNow ? injuryCountdown({ status, injuryUntil }) : null;
+    const injuryFields = injuredNow && React.createElement("div", { className: "rounded-xl border border-rose-200 bg-rose-50/60 p-3 space-y-3" },
+        React.createElement(Field, { label: "Grund" },
+            React.createElement("input", { className: inputClass, value: injuryReason, onChange: (e) => setInjuryReason(e.target.value), placeholder: "z. B. Bänderdehnung Knöchel rechts" })),
+        React.createElement(Field, { label: "Fällt voraussichtlich aus" },
+            React.createElement("div", { className: "flex gap-2" },
+                React.createElement("input", { type: "number", min: "0", className: inputClass + " w-24", value: durAmount, onChange: (e) => setDuration(e.target.value, durUnit), placeholder: "z. B. 3" }),
+                React.createElement("select", { className: inputClass + " w-32", value: durUnit, onChange: (e) => setDuration(durAmount, e.target.value) },
+                    React.createElement("option", { value: "tage" }, "Tage"),
+                    React.createElement("option", { value: "wochen" }, "Wochen")),
+                React.createElement("input", { type: "date", className: inputClass, value: injuryUntil, onChange: (e) => { setInjuryUntil(e.target.value); setDurAmount(e.target.value ? String(Math.max(0, daysUntilIso(e.target.value))) : ""); setDurUnit("tage"); }, "aria-label": "Zurück am" }))),
+        React.createElement("p", { className: "text-xs text-rose-700" }, injuryUntil
+            ? `Zurück voraussichtlich am ${fmtDate(injuryUntil)} · ${previewCountdown.label}. Die App zählt automatisch runter.`
+            : "Ohne Dauer steht beim Spieler „Dauer offen“."));
     return (React.createElement("form", { onSubmit: handleSubmit, className: "space-y-4" },
         React.createElement(Field, { label: "Name" },
             React.createElement("input", { className: inputClass, value: name, onChange: (e) => { setName(e.target.value); setError(""); }, placeholder: "Vor- und Nachname", autoFocus: true })),
@@ -264,6 +302,7 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
                 React.createElement("input", { type: "date", className: inputClass, value: birthdate, onChange: (e) => setBirthdate(e.target.value) })),
             React.createElement(Field, { label: "Status" },
                 React.createElement("select", { className: inputClass, value: status, onChange: (e) => setStatus(e.target.value) }, STATUS_OPTIONS.map((s) => React.createElement("option", { key: s.value, value: s.value }, s.label))))),
+        injuryFields,
         React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: "Starke Hand" },
                 React.createElement("select", { className: inputClass, value: handedness, onChange: (e) => setHandedness(e.target.value) },
