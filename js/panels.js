@@ -447,7 +447,15 @@ function TrainerDashboard({ events, teams: allTeams, players: allPlayers, wellne
     // Tabellen: bis 2 Teams komplett, bei mehr Teams eine Zeile je Team (Platz,
     // Bilanz) - Klick fuehrt zur Teamseite mit kompletter Tabelle + Spielplan.
     const tableTeams = connectedGameTeams.filter((g) => g.summary && g.summary.table);
-    const standingsCards = tableTeams.length <= 2
+    // Teams ohne DBB-Tabelle (z. B. U10): Bilanz aus den eigenen Ergebnissen
+    const noTableTeams = connectedGameTeams.filter((g) => g.summary && !g.summary.table);
+    const ownRecord = (g) => g.doc.matches.reduce((acc, m) => {
+        const sc = dbbScore(m);
+        if (sc)
+            acc[sc.won ? "won" : "lost"]++;
+        return acc;
+    }, { won: 0, lost: 0 });
+    const standingsCards = tableTeams.length + noTableTeams.length <= 2
         ? tableTeams.map((g) => React.createElement("div", { key: g.team.id, className: `${cardClass} p-5` },
             React.createElement("div", { className: "flex items-baseline justify-between gap-2 mb-3" },
                 React.createElement(SectionLabel, null, `Tabelle ${g.team.name}`),
@@ -466,6 +474,15 @@ function TrainerDashboard({ events, teams: allTeams, players: allPlayers, wellne
                         React.createElement("span", { className: "text-xs text-slate-500 tabular-nums shrink-0" }, `${us.won}–${us.lost}`),
                         React.createElement("span", { className: `text-sm font-black tabular-nums shrink-0 w-12 text-right ${us.rank <= 3 ? "text-[#C43E0E]" : "text-slate-800"}` }, `${us.rank}.`, React.createElement("span", { className: "text-[10px] font-semibold text-slate-400" }, `/${size}`)))
                         : React.createElement("span", { className: "text-xs text-slate-400 shrink-0" }, "–"));
+            }), noTableTeams.map((g) => {
+                const rec = ownRecord(g);
+                const liga = (g.doc.matches.find((m) => m.liganame) || {}).liganame || "";
+                return React.createElement("button", { key: g.team.id, onClick: () => openTeam(g.team.id), className: "w-full flex items-center gap-2.5 py-2 border-b border-stone-100 last:border-0 text-left hover:bg-stone-50 rounded-md px-1.5 -mx-1.5 transition min-w-0" },
+                    React.createElement("span", { className: "min-w-0 flex-1" },
+                        React.createElement("span", { className: "block text-sm font-semibold text-slate-800 truncate" }, g.team.name),
+                        React.createElement("span", { className: "block text-[11px] text-slate-400 truncate" }, [liga, "ohne Tabelle"].filter(Boolean).join(" · "))),
+                    React.createElement("span", { className: "text-xs text-slate-500 tabular-nums shrink-0" }, `${rec.won}–${rec.lost}`),
+                    React.createElement("span", { className: "text-sm font-black text-slate-300 shrink-0 w-12 text-right" }, "–"));
             })));
     const incompleteProfilePlayers = players.filter((p) => p.onboardingCompleted !== true);
     // Anwesenheitsquote aus den direkt in "Alle Einheiten"/"Anwesenheit" markierten
