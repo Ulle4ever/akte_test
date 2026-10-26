@@ -353,6 +353,43 @@ const BOX_ALIASES = {
 const TOTALS_ROW_RE = /^(team\s*)?(totals?|gesamt|summe)$/i;
 const NAME_HEADER_RE = /^(name|spieler|player)$/i;
 const NUM_HEADER_RE = /^(nr\.?|nummer|#|number|no\.?)$/i;
+// ProA-Liveticker (2. Basketball-Bundesliga), Boxscore ohne Kopfzeile kopiert:
+// "#10 Name", dann je Spieler 23 Zahlen in fester Reihenfolge:
+// Min | 2P m-a-% | 3P m-a-% | FG m-a-% | FW m-a-% | Pkt Ass | OR-DR-REB | PF BS ST TO EFF
+const PROA_PLAYER_LINE_RE = /^#(\d+)\s+(\S.*)$/;
+const PROA_VALUES_PER_PLAYER = 23;
+function parseProaBoxscoreLines(lines) {
+    const players = [];
+    let i = 0;
+    while (i < lines.length) {
+        const head = lines[i].match(PROA_PLAYER_LINE_RE);
+        if (!head) {
+            i++;
+            continue;
+        }
+        const tokens = [];
+        let j = i + 1;
+        while (j < lines.length && !PROA_PLAYER_LINE_RE.test(lines[j]) && !/^(teamaktionen|gesamt)/i.test(lines[j])) {
+            // "3 - 6 - 50%" / "3-6-50%": Bindestriche zwischen Zahlen sind Trenner, kein Minus
+            tokens.push(...(lines[j].replace(/(\d)\s*-\s*(?=\d)/g, "$1 ").match(/\d{1,3}:\d{2}|-?\d+/g) || []));
+            j++;
+        }
+        i = j;
+        if (tokens.length < PROA_VALUES_PER_PLAYER || !tokens[0].includes(":"))
+            continue;
+        const [mm, ss] = tokens[0].split(":").map(Number);
+        const v = tokens.slice(1).map((t) => parseInt(t, 10));
+        // v: 0-2 2P, 3-5 3P, 6-8 FG, 9-11 FW, 12 Pkt, 13 Ass, 14 OR, 15 DR, 16 REB, 17 PF, 18 BS, 19 ST, 20 TO, 21 EFF
+        players.push({
+            number: parseInt(head[1], 10), name: head[2].trim(),
+            minuten: Math.round((mm + ss / 60) * 10) / 10,
+            punkte: v[12], assists: v[13], rebOff: v[14], rebDef: v[15], rebounds: v[16],
+            fouls: v[17], blocks: v[18], steals: v[19], turnovers: v[20], eff: v[21],
+            fgm: v[6], fga: v[7], tpm: v[3], tpa: v[4], ftm: v[9], fta: v[10],
+        });
+    }
+    return { players, error: players.length === 0 ? "Keine Spielerzeilen im ProA-Boxscore erkannt." : null };
+}
 function parseBoxscoreText(text) {
     const lines = text.split(/\r\n|\n|\r/).map((l) => l.trim()).filter((l) => l.length > 0);
     let headerIdx = -1;
@@ -367,6 +404,8 @@ function parseBoxscoreText(text) {
             break;
         }
     }
+    if (headerIdx === -1 && lines.some((l) => PROA_PLAYER_LINE_RE.test(l)))
+        return parseProaBoxscoreLines(lines);
     if (headerIdx === -1)
         return { players: [], error: "Konnte die Kopfzeile mit Minuten- und Punkte-Spalte nicht finden. Wurde die Tabelle komplett kopiert?" };
     const headerCellsRaw = lines[headerIdx].split("\t").map((c) => c.trim());
