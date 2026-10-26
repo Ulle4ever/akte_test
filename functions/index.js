@@ -212,6 +212,18 @@ function berlinNow() {
     return { date: `${parts.year}-${parts.month}-${parts.day}`, hour: Number(parts.hour) % 24, minute: Number(parts.minute), weekday: parts.weekday };
 }
 
+// Der DBB fuehrt manche Teams doppelt in der Tabelle (z. B. ProA: "SBB Boerde
+// Baskets" mit allen Spielen und "SBB Baskets" mit 0 Spielen). Ein Eintrag ohne
+// Spiele fliegt raus, wenn alle Woerter seines Namens im Namen eines Teams mit
+// Spielen vorkommen; danach werden die Plaetze neu durchgezaehlt.
+function dropDuplicateTableEntries(entries) {
+    const words = (name) => String(name || "").toLowerCase().match(/[a-z0-9äöüß]+/g) || [];
+    const isPartOf = (a, b) => { const wb = words(b); const wa = words(a); return wa.length > 0 && wa.every((w) => wb.includes(w)); };
+    const kept = entries.filter((e) => e.isUs || Number(e.games) > 0
+        || !entries.some((o) => o !== e && Number(o.games) > 0 && isPartOf(e.name, o.name)));
+    return kept.length === entries.length ? entries : kept.map((e, i) => ({ ...e, rank: i + 1 }));
+}
+
 function mapDbbTeam(t) {
     return { id: t.teamPermanentId || null, name: t.teamname || "", short: t.teamnameSmall || "" };
 }
@@ -268,11 +280,12 @@ async function syncDbbTeam(team) {
         for (const ligaId of ligaIds.slice(0, 3)) {
             try {
                 const t = await dbbGet(`/competition/table/id/${ligaId}`);
-                const entries = (t.tabelle?.entries || []).map((e) => ({
+                const rawEntries = (t.tabelle?.entries || []).map((e) => ({
                     rank: e.rang, ...mapDbbTeam(e.team || {}), games: e.anzspiele, won: e.s, lost: e.n,
                     points: e.anzGewinnpunkte, scored: e.koerbe, against: e.gegenKoerbe, diff: e.korbdiff,
                     isUs: e.team?.teamPermanentId === dbbTeamId,
                 }));
+                const entries = dropDuplicateTableEntries(rawEntries);
                 if (entries.length > 0)
                     tables.push({ ligaId, liganame: t.ligaData?.liganame || "", ligaShort: t.ligaData?.skNameSmall || "", entries });
             }
