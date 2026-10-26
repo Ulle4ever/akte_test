@@ -445,6 +445,18 @@ function SpielerAkte() {
     const restoringNavRef = useRef(false);
     const navInitRef = useRef(false);
     const [navDepth, setNavDepth] = useState(0);
+    // Tiefste erreichbare Seite in diesem Tab (fuer "Vor"): wird beim Aufrufen
+    // einer neuen Seite gesetzt (Vorwaerts-Verlauf verfaellt dann wie im Browser),
+    // beim Zurueck/Vor bleibt sie stehen. Ueberlebt Neuladen (sessionStorage).
+    const [navMax, setNavMaxState] = useState(() => {
+        try { return Number(sessionStorage.getItem("rsk.navMax")) || 0; }
+        catch (e) { return 0; }
+    });
+    function setNavMax(n) {
+        setNavMaxState(n);
+        try { sessionStorage.setItem("rsk.navMax", String(n)); }
+        catch (e) { }
+    }
     useEffect(() => {
         if (!account)
             return;
@@ -469,6 +481,7 @@ function SpielerAkte() {
             const depth = (cur.depth || 0) + 1;
             window.history.pushState({ rskNav: navKey, depth }, "");
             setNavDepth(depth);
+            setNavMax(depth);
             // Neue Seite beginnt oben (nicht beim Reiterwechsel in der Akte)
             const prev = JSON.parse(cur.rskNav);
             if (prev.p !== navState.p || prev.t !== navState.t || prev.pl !== navState.pl || prev.gc !== navState.gc || prev.v !== navState.v || prev.au !== navState.au || prev.at !== navState.at)
@@ -1668,10 +1681,15 @@ function SpielerAkte() {
                             React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, playersOfTeam(players, t.id).length));
                     }))))),
             React.createElement("main", { className: "flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1440px] mx-auto w-full" },
-                (breadcrumbItems.length > 1 || navDepth > 0) && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs text-slate-500 mb-4 flex-wrap" },
-                    navDepth > 0 && React.createElement("button", { onClick: () => window.history.back(), className: "flex items-center gap-1 font-semibold text-slate-600 hover:text-[#C43E0E] bg-white border border-stone-200 hover:border-stone-300 rounded-full pl-1.5 pr-2.5 py-1 mr-1.5 transition", "aria-label": "Zurück zur vorherigen Seite" },
-                        React.createElement(IconArrowDown, { size: 12, className: "rotate-90" }),
-                        "Zurück"),
+                (breadcrumbItems.length > 1 || navDepth > 0 || navDepth < navMax) && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs text-slate-500 mb-4 flex-wrap" },
+                    (navDepth > 0 || navDepth < navMax) && React.createElement("div", { className: "flex items-center mr-1.5 bg-white border border-stone-200 rounded-full overflow-hidden" },
+                        React.createElement("button", { onClick: () => window.history.back(), disabled: navDepth === 0, className: "flex items-center gap-1 font-semibold text-slate-600 hover:text-[#C43E0E] hover:bg-stone-50 disabled:text-slate-300 disabled:hover:bg-transparent pl-1.5 pr-2.5 py-1 transition", "aria-label": "Zurück zur vorherigen Seite" },
+                            React.createElement(IconArrowDown, { size: 12, className: "rotate-90" }),
+                            "Zurück"),
+                        React.createElement("span", { className: "w-px h-4 bg-stone-200" }),
+                        React.createElement("button", { onClick: () => window.history.forward(), disabled: navDepth >= navMax, className: "flex items-center gap-1 font-semibold text-slate-600 hover:text-[#C43E0E] hover:bg-stone-50 disabled:text-slate-300 disabled:hover:bg-transparent pl-2.5 pr-1.5 py-1 transition", "aria-label": "Vor zur nächsten Seite" },
+                            "Vor",
+                            React.createElement(IconArrowDown, { size: 12, className: "-rotate-90" }))),
                     breadcrumbItems.length > 1 && breadcrumbItems.map((b, i) => React.createElement(React.Fragment, { key: i },
                     i > 0 && React.createElement(IconArrowDown, { size: 10, className: "-rotate-90 text-slate-300 shrink-0" }),
                     b.onClick
