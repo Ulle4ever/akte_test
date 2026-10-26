@@ -186,6 +186,8 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
     const [city, setCity] = useState(initial?.city || "");
     const [district, setDistrict] = useState(initial?.district || "");
     const [photoFile, setPhotoFile] = useState(null);
+    const [removePhoto, setRemovePhoto] = useState(false);
+    const [photoInputKey, setPhotoInputKey] = useState(0); // Datei-Feld nach "Entfernen" leeren
     const [uploadingPhoto, setUploadingPhoto] = useState(false);
     const [error, setError] = useState("");
     async function handleSubmit(e) {
@@ -198,7 +200,7 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             setError("Bitte ein Team auswählen.");
             return;
         }
-        let photoUrl = initial?.photoUrl || "";
+        let photoUrl = removePhoto ? "" : (initial?.photoUrl || "");
         if (photoFile) {
             setUploadingPhoto(true);
             try {
@@ -246,9 +248,12 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             })),
             React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, "Spieler bleibt im Hauptteam, sieht aber zusätzlich den Spielplan dieser Mannschaft, und du kannst Stats aus deren Spielen für ihn importieren.")),
         React.createElement(Field, { label: "Portraitfoto (optional)" },
-            React.createElement("input", { type: "file", accept: "image/*", onChange: (e) => setPhotoFile(e.target.files[0] || null), className: "block w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }),
-            initial?.photoUrl && !photoFile && React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Aktuell ist schon ein Foto hinterlegt - neue Datei wählen, um es zu ersetzen."),
-            photoFile && React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Ausgewählt: ", photoFile.name)),
+            React.createElement("div", { className: "flex items-center gap-3" },
+                (photoFile || (initial?.photoUrl && !removePhoto)) && React.createElement("img", { src: photoFile ? URL.createObjectURL(photoFile) : cloudinaryImage(initial.photoUrl, 48, 56), alt: "", className: "w-12 h-14 rounded-lg object-cover shrink-0" }),
+                React.createElement("input", { key: photoInputKey, type: "file", accept: "image/*", onChange: (e) => { setPhotoFile(e.target.files[0] || null); setRemovePhoto(false); }, className: "block w-full min-w-0 text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-stone-100 file:px-3 file:py-1.5 file:text-sm file:font-medium file:text-slate-700 hover:file:bg-stone-200" }),
+                (photoFile || (initial?.photoUrl && !removePhoto)) && React.createElement("button", { type: "button", onClick: () => { setPhotoFile(null); setRemovePhoto(true); setPhotoInputKey((k) => k + 1); }, className: "text-xs text-slate-400 hover:text-red-500 shrink-0" }, "Entfernen")),
+            initial?.photoUrl && !photoFile && !removePhoto && React.createElement("p", { className: "text-xs text-slate-500 mt-1" }, "Neue Datei wählen, um das Foto zu ersetzen."),
+            removePhoto && initial?.photoUrl && React.createElement("p", { className: "text-xs text-amber-600 mt-1" }, "Foto wird beim Speichern entfernt.")),
         React.createElement("div", { className: "grid grid-cols-2 gap-3" },
             React.createElement(Field, { label: "Position" },
                 React.createElement("select", { className: inputClass, value: position, onChange: (e) => setPosition(e.target.value) }, POSITIONS.map((p) => React.createElement("option", { key: p, value: p }, p)))),
