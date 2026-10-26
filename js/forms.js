@@ -36,19 +36,19 @@ function TeamsManager({ teams, onEdit, onClose }) {
                 React.createElement(IconEdit, { size: 15 }))))),
         React.createElement("button", { onClick: onClose, className: "w-full text-sm text-slate-500 hover:text-slate-700 pt-2" }, "Schließen")));
 }
-const ALTERSKLASSE_OPTIONS = ["U10", "U12", "U14", "U16", "U18", "JBBL", "NBBL", "ProA", "1. Regionalliga"];
+const ALTERSKLASSE_OPTIONS = ["U10", "U12", "U14", "U16", "U18", "JBBL", "NBBL", "ProA", "1. Regionalliga", "Oberliga"];
 // Altersklassen, fuer die der DBB-Scores-Statistik-Import angeboten wird (JBBL/NBBL
 // haben eigene, ausfuehrlichere Statistiken und brauchen den Import nicht).
 const DBB_SCORES_ALTERSKLASSEN = ["U10", "U12", "U14", "U16", "U18"];
-// Doppellizenz-Teams (Herren): kein eigener Kader - Spieler bleiben in ihrem
+// Doppellizenz-Teams (Herren: ProA, 1. Regionalliga, Oberliga): kein eigener Kader - Spieler bleiben in ihrem
 // Hauptteam (NBBL/JBBL) und werden dort per player.dlTeamIds zugeordnet.
-const DOPPELLIZENZ_ALTERSKLASSEN = ["ProA", "1. Regionalliga"];
+const DOPPELLIZENZ_ALTERSKLASSEN = ["ProA", "1. Regionalliga", "Oberliga"];
 function isDoppellizenzTeam(team) {
     return !!team && DOPPELLIZENZ_ALTERSKLASSEN.includes(team.altersklasse);
 }
 // Feste Reihenfolge ueberall (Seitenleiste, Dashboard, Auswahllisten): Herren,
 // dann Nachwuchs-Bundesligen, dann die U-Teams absteigend, innerhalb nach Name.
-const TEAM_SORT_ORDER = ["ProA", "1. Regionalliga", "NBBL", "JBBL", "U18", "U16", "U14", "U12", "U10"];
+const TEAM_SORT_ORDER = ["ProA", "1. Regionalliga", "Oberliga", "NBBL", "JBBL", "U18", "U16", "U14", "U12", "U10"];
 function sortTeams(teams) {
     const rank = (t) => {
         const i = TEAM_SORT_ORDER.indexOf(t.altersklasse);
