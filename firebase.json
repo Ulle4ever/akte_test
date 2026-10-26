@@ -13,7 +13,8 @@
       "**/.*",
       "**/node_modules/**",
       "functions/**",
-      "*.md"
+      "*.md",
+      "index.html.html"
     ],
     "headers": [
       {

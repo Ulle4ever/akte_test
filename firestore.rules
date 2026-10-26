@@ -50,11 +50,17 @@ service cloud.firestore {
     // Team eines beliebigen Spielers (fuer team-beschraenkte Trainer-Pruefungen,
     // z.B. bei playerPrivate/playerWellness/playerGrades, wo der Dokument-Name
     // die Spieler-ID ist).
+    // Trainer eines Doppellizenz-Teams (ProA/Regio/Oberliga) gilt auch fuer die
+    // Spieler, die dort per dlTeamIds gemeldet sind.
+    function trainerHasDlPlayer(playerData) {
+      return isTrainer() && 'dlTeamIds' in playerData && trainerTeamInList(playerData.dlTeamIds);
+    }
     function playerBelongsToTrainerTeam(playerId) {
       return isFullTrainer()
         || (isTrainer()
             && exists(/databases/$(database)/documents/players/$(playerId))
-            && trainerHasTeam(get(/databases/$(database)/documents/players/$(playerId)).data.teamId));
+            && (trainerHasTeam(get(/databases/$(database)/documents/players/$(playerId)).data.teamId)
+                || trainerHasDlPlayer(get(/databases/$(database)/documents/players/$(playerId)).data)));
     }
     // Welche Teams ein Termin betrifft (eigenes Team + Teams einzeln eingeladener
     // Spieler), gepflegt vom Client im Feld involvedTeamIds. Fehlt das Feld (z.B.
@@ -97,11 +103,14 @@ service cloud.firestore {
     match /players/{playerId} {
       allow read: if isFullTrainer()
         || trainerHasTeam(resource.data.teamId)
+        || trainerHasDlPlayer(resource.data)
         || myPlayerId() == playerId;
       allow create: if isFullTrainer()
         || trainerHasTeam(request.resource.data.teamId);
       allow update: if isFullTrainer()
         || (trainerHasTeam(resource.data.teamId) && trainerHasTeam(request.resource.data.teamId))
+        || (trainerHasDlPlayer(resource.data)
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['stats']))
         || (myPlayerId() == playerId
             && request.resource.data.diff(resource.data).affectedKeys().hasOnly([
               'birthdate', 'city', 'district', 'school', 'height', 'weight',

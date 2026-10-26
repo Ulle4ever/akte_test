@@ -224,7 +224,13 @@ function SpielerAkte() {
                         snaps.forEach((sn) => sn.docs.forEach((d) => byId.set(d.id, d)));
                         return [...byId.values()];
                     }
-                    const loadedPlayers = (await queryPerTeam("players", "teamId", "==")).map((d) => ({ id: d.id, ...d.data() }));
+                    // Trainer eines Doppellizenz-Teams (ProA/Regio/Oberliga): dazu die
+                    // Spieler, die dort per dlTeamIds gemeldet sind
+                    const dlScopeIds = scopeTeamIds ? scopeTeamIds.filter((id) => isDoppellizenzTeam((loadedMeta.teams || []).find((t) => t.id === id))) : [];
+                    const dlPlayerDocs = dlScopeIds.length ? (await Promise.all(dlScopeIds.map((t) => db.collection("players").where("dlTeamIds", "array-contains", t).get()))).flatMap((sn) => sn.docs) : [];
+                    const playerById = new Map();
+                    [...(await queryPerTeam("players", "teamId", "==")), ...dlPlayerDocs].forEach((d) => playerById.set(d.id, d));
+                    const loadedPlayers = [...playerById.values()].map((d) => ({ id: d.id, ...d.data() }));
                     if (!cancelled)
                         setPlayers(loadedPlayers);
                     const privDefaults = { notes: [], tests: [], attendance: [], grades: [] };
@@ -493,6 +499,16 @@ function SpielerAkte() {
             const st = e.state;
             if (!st || !st.rskNav)
                 return;
+            // Offenes Fenster (Formular, Import ...): Zurueck schliesst nur das
+            // Fenster und bleibt auf der Seite
+            if (modalRef.current) {
+                setModal(null);
+                const depth = (st.depth || 0) + 1;
+                window.history.pushState({ rskNav: navKeyRef.current, depth }, "");
+                setNavDepth(depth);
+                setNavMax(depth);
+                return;
+            }
             const n = JSON.parse(st.rskNav);
             restoringNavRef.current = st.rskNav !== navKeyRef.current;
             setSelectedPlayerId(n.p);
@@ -515,6 +531,8 @@ function SpielerAkte() {
     }, []);
     const navKeyRef = useRef(navKey);
     navKeyRef.current = navKey;
+    const modalRef = useRef(modal);
+    modalRef.current = modal;
     async function handleLogin(e) {
         e.preventDefault();
         setLoginError("");
@@ -1811,7 +1829,7 @@ function SpielerAkte() {
                                             isInjured(selectedPlayer) && React.createElement("span", { className: `text-[11px] font-bold px-2 py-0.5 rounded-full ${injuryCountdown(selectedPlayer).overdue ? "bg-amber-400 text-slate-900" : "bg-rose-500 text-white"}`, title: selectedPlayer.injuryUntil ? "Zurück voraussichtlich am " + fmtDate(selectedPlayer.injuryUntil) : "" }, injuryCountdown(selectedPlayer).label)),
                                         isInjured(selectedPlayer) && selectedPlayer.injuryReason && React.createElement("p", { className: "text-xs text-white/60 mt-1.5" }, selectedPlayer.injuryReason, selectedPlayer.injuryUntil ? ` · zurück am ${fmtDate(selectedPlayer.injuryUntil)}` : "")),
                                     React.createElement("div", { className: "flex gap-2 shrink-0" },
-                                        isTrainer && (React.createElement(React.Fragment, null,
+                                        isTrainer && (isFullTrainer || (trainerTeamIds || []).includes(selectedPlayer.teamId)) && (React.createElement(React.Fragment, null,
                                             React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-black/35 text-white/80", "aria-label": "Bearbeiten" },
                                                 React.createElement(IconEdit, { size: 16 })),
                                             React.createElement("button", { onClick: () => setConfirmDeletePlayer(true), className: "p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-red-500/40 text-white/80", "aria-label": "Löschen" },

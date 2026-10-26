@@ -1176,12 +1176,13 @@ function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, 
     });
     const q = query.trim().toLowerCase();
     const filtered = players
-        .filter((p) => teamFilter === "all" || p.teamId === teamFilter)
+        .filter((p) => teamFilter === "all" || p.teamId === teamFilter || (p.dlTeamIds || []).includes(teamFilter))
         .filter((p) => statusFilter === "all" || (p.status || "aktiv") === statusFilter)
         .filter((p) => !q || p.name.toLowerCase().includes(q) || (p.position || "").toLowerCase().includes(q));
     const groups = [
-        ...teams.map((t, i) => ({ team: t, colorIdx: i, players: filtered.filter((p) => p.teamId === t.id) })),
-        { team: null, colorIdx: teams.length, players: filtered.filter((p) => !teams.some((t) => t.id === p.teamId)) },
+        // Doppellizenz-Teams zeigen ihre gemeldeten Spieler (die zusaetzlich im Hauptteam stehen)
+        ...teams.map((t, i) => ({ team: t, colorIdx: i, players: isDoppellizenzTeam(t) ? playersOfTeam(filtered, t.id) : filtered.filter((p) => p.teamId === t.id) })),
+        { team: null, colorIdx: teams.length, players: filtered.filter((p) => !teams.some((t) => t.id === p.teamId || (isDoppellizenzTeam(t) && (p.dlTeamIds || []).includes(t.id)))) },
     ].filter((g) => g.players.length > 0)
         .map((g) => ({ ...g, players: [...g.players].sort((a, b) => a.name.localeCompare(b.name)) }));
     // Bei Suche, Status- oder Teamfilter alles offen zeigen, damit Treffer sichtbar sind
@@ -1198,7 +1199,7 @@ function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, 
     }
     const allOpen = groups.length > 0 && groups.every(isOpen);
     function setAll(open) { saveCollapsed(Object.fromEntries(groups.map((g) => [groupKey(g), !open]))); }
-    const statusCount = (s) => players.filter((p) => (teamFilter === "all" || p.teamId === teamFilter) && (s === "all" || (p.status || "aktiv") === s)).length;
+    const statusCount = (s) => players.filter((p) => (teamFilter === "all" || p.teamId === teamFilter || (p.dlTeamIds || []).includes(teamFilter)) && (s === "all" || (p.status || "aktiv") === s)).length;
     const chip = (active) => `px-3 py-1.5 rounded-full text-xs sm:text-sm font-semibold whitespace-nowrap shrink-0 transition border ${active ? "bg-slate-900 border-slate-900 text-white" : "bg-white border-stone-200 text-slate-500 hover:text-slate-800 hover:border-stone-300"}`;
     return React.createElement("div", { className: "space-y-5 rsk-fade-in" },
         React.createElement("div", { className: "flex items-center justify-between gap-3 flex-wrap" },

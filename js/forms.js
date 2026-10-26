@@ -242,7 +242,9 @@ function PlayerForm({ teams, initial, onSubmit, onClose }) {
             city: city.trim(),
             district: district.trim(),
             photoUrl,
-            dlTeamIds: dlTeamIds.filter((id) => dlTeams.some((t) => t.id === id)),
+            // Doppellizenz-Teams, die dieser Zugang nicht sieht (z. B. NBBL-Trainer
+            // und ProA), bleiben unveraendert erhalten
+            dlTeamIds: [...dlTeamIds.filter((id) => dlTeams.some((t) => t.id === id)), ...(initial?.dlTeamIds || []).filter((id) => !dlTeams.some((t) => t.id === id))],
             ...injuryFieldsForSubmit(),
         });
         onClose();
