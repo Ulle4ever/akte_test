@@ -1417,6 +1417,11 @@ function SpielerAkte() {
         return next;
     }
     function handleImportBoxscore(entries, date, gegner, game) {
+        handleImportBoxscoreGames([{ entries, date, gegner, game }]);
+    }
+    // Mehrere Spiele auf einmal (Excel-Import): je Spieler werden erst alle
+    // Spiele zusammengefuehrt und dann einmal gespeichert.
+    function handleImportBoxscoreGames(games) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
         let normalCat = cats.find((c) => c.id === "normal") || cats[0];
         function findOrCreateField(label, altLabels = []) {
@@ -1434,8 +1439,10 @@ function SpielerAkte() {
         const rebOffFieldId = findOrCreateField("Rebounds Offensiv", ["Offensive Rebounds", "OR"]);
         const rebDefFieldId = findOrCreateField("Rebounds Defensiv", ["Defensive Rebounds", "DR"]);
         const effFieldId = findOrCreateField("Effizienz", ["EFF", "EF"]);
+        const plusMinusFieldId = games.some((g) => g.entries.some((e) => e.stats.plusMinus != null)) ? findOrCreateField("Plus/Minus", ["+/-"]) : null;
         persistMeta({ statCategories: cats });
-        entries.forEach(({ playerId, stats: row }) => {
+        const nextStats = {};
+        games.forEach(({ entries, date, gegner, game }) => entries.forEach(({ playerId, stats: row }) => {
             const fieldValues = { minuten: row.minuten };
             if (row.punkte !== null)
                 fieldValues.punkte = row.punkte;
@@ -1469,11 +1476,14 @@ function SpielerAkte() {
                 fieldValues.ft_m = row.ftm;
             if (row.fta !== null)
                 fieldValues.ft_a = row.fta;
+            if (plusMinusFieldId && row.plusMinus != null)
+                fieldValues[plusMinusFieldId] = row.plusMinus;
             const player = players.find((p) => p.id === playerId);
             if (!player)
                 return;
-            persistPlayerFields(playerId, { stats: mergeGameStats(player.stats, date, gegner, game, fieldValues) });
-        });
+            nextStats[playerId] = mergeGameStats(nextStats[playerId] || player.stats, date, gegner, game, fieldValues);
+        }));
+        Object.entries(nextStats).forEach(([playerId, stats]) => persistPlayerFields(playerId, { stats }));
     }
     function handleImportDbbScores(entries, date, gegner, game) {
         const cats = statCategories.map((c) => ({ ...c, fields: [...c.fields] }));
@@ -1703,7 +1713,7 @@ function SpielerAkte() {
                         { label: "Kalender importieren (.ics)", icon: IconCalendar, onClick: () => setModal("importCalendar") },
                         { label: "Kalender aus Screenshot (Beta)", icon: IconUpload, onClick: () => setModal("importScreenshot") },
                         { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
-                        { label: "Boxscore einfügen", icon: IconClipboard, onClick: () => { setStatsImportPreset(null); setModal("importBoxscore"); } },
+                        { label: "Boxscore / Excel importieren", icon: IconClipboard, onClick: () => { setStatsImportPreset(null); setModal("importBoxscore"); } },
                         { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
                         { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
                         ...(dbbEligibleTeams.length > 0 ? [{ label: "DBB Scores importieren", icon: IconUpload, onClick: () => { setStatsImportPreset(null); setModal("importDbbScores"); } }] : []),
@@ -2352,8 +2362,8 @@ function SpielerAkte() {
             React.createElement(IcsImportModal, { teams: teams, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
         modal === "importScreenshot" && (React.createElement(Modal, { title: "Kalender aus Screenshot importieren (Beta)", onClose: () => setModal(null), wide: true },
             React.createElement(ScreenshotImportModal, { teams: teams, allPlayers: players, onConfirm: handleImportCalendarEvents, onClose: () => setModal(null) }))),
-        modal === "importBoxscore" && (React.createElement(Modal, { title: "Boxscore einf\u00FCgen", onClose: () => setModal(null), wide: true },
-            React.createElement(BoxscoreImportModal, { players: players, teams: visibleTeams, dbbData: dbbData, preset: statsImportPreset, onConfirm: handleImportBoxscore, onClose: () => setModal(null) }))),
+        modal === "importBoxscore" && (React.createElement(Modal, { title: "Stats importieren", onClose: () => setModal(null), wide: true },
+            React.createElement(BoxscoreImportModal, { players: players, teams: visibleTeams, dbbData: dbbData, preset: statsImportPreset, onConfirm: handleImportBoxscore, onConfirmGames: handleImportBoxscoreGames, onClose: () => setModal(null) }))),
         modal === "importAdvanced" && (React.createElement(Modal, { title: "Advanced Stats importieren", onClose: () => setModal(null), wide: true },
             React.createElement(AdvancedStatsImportModal, { players: players, teams: visibleTeams, dbbData: dbbData, onConfirm: handleImportAdvancedStats, onClose: () => setModal(null) }))),
         modal === "advancedRechnerLive" && (React.createElement(Modal, { title: "Advanced-Rechner verbinden", onClose: () => setModal(null), wide: true },

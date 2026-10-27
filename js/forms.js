@@ -1575,13 +1575,271 @@ function playersForGame(players, teamId) {
     const own = playersOfTeam(players, teamId);
     return [...own, ...players.filter((p) => !own.includes(p))];
 }
-function BoxscoreImportModal({ players, teams, dbbData, onConfirm, onClose, preset }) {
+// Statistik-Excel des WBV (1. Regionalliga West): je Blatt eine Woche, eine
+// Zeile pro Spieler und Spiel fuer alle Teams der Liga. Die Blaetter sind nicht
+// ganz einheitlich ("Time Played (min)" / "Time Played"), daher mehrere Namen.
+const WBV_HEADERS = {
+    first: ["name"], last: ["surname"], team: ["team"], no: ["#"], date: ["fecha (fecha)", "fecha", "datum", "date"], vs: ["versus"],
+    min: ["time played (min)", "time played"], pts: ["points"], t3m: ["t3 made"], t3a: ["t3 attempted"], t2m: ["t2 made"], t2a: ["t2 attempted"],
+    t1m: ["t1 made"], t1a: ["t1 attempted"], oreb: ["off rebounds"], dreb: ["def rebounds"], ast: ["assists"], stl: ["steals"],
+    to: ["turnovers"], blk: ["blocks"], pf: ["fouls"], pm: ["+/-"], eff: ["fiba rating"],
+};
+const WBV_REQUIRED = ["first", "last", "team", "date", "vs", "pts"];
+// SheetJS (~900 KB) erst laden, wenn wirklich eine Excel gewaehlt wird
+let xlsxLoading = null;
+function loadXlsxLib() {
+    if (window.XLSX)
+        return Promise.resolve(window.XLSX);
+    if (!xlsxLoading) {
+        xlsxLoading = new Promise((resolve, reject) => {
+            const s = document.createElement("script");
+            s.src = "https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.18.5/xlsx.full.min.js";
+            s.onload = () => resolve(window.XLSX);
+            s.onerror = () => { xlsxLoading = null; reject(new Error("Der Excel-Leser konnte nicht geladen werden. Besteht eine Internetverbindung?")); };
+            document.head.appendChild(s);
+        });
+    }
+    return xlsxLoading;
+}
+function excelDateIso(v) {
+    if (typeof v === "number")
+        return new Date(Math.round((v - 25569) * 864e5)).toISOString().slice(0, 10);
+    const s = String(v || "").trim();
+    let m = s.match(/^(\d{4})-(\d{2})-(\d{2})/);
+    if (m)
+        return `${m[1]}-${m[2]}-${m[3]}`;
+    m = s.match(/^(\d{1,2})\.(\d{1,2})\.(\d{2}|\d{4})$/);
+    if (m)
+        return `${m[3].length === 2 ? "20" + m[3] : m[3]}-${m[2].padStart(2, "0")}-${m[1].padStart(2, "0")}`;
+    return null;
+}
+function parseWbvWorkbook(XLSX, data) {
+    const wb = XLSX.read(data, { type: "array" });
+    const rows = [];
+    const seen = new Set();
+    let sheetsFound = 0;
+    for (const sheetName of wb.SheetNames) {
+        const grid = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
+        const head = (grid[0] || []).map((c) => String(c ?? "").trim().toLowerCase());
+        const col = {};
+        Object.entries(WBV_HEADERS).forEach(([k, names]) => { col[k] = head.findIndex((h) => names.includes(h)); });
+        if (WBV_REQUIRED.some((k) => col[k] === -1))
+            continue;
+        sheetsFound++;
+        for (const r of grid.slice(1)) {
+            const g = (k) => (col[k] === -1 ? null : r[col[k]]);
+            const num = (k) => {
+                const v = g(k);
+                const n = typeof v === "number" ? v : parseFloat(String(v ?? "").replace(",", "."));
+                return isNaN(n) ? null : n;
+            };
+            const name = `${String(g("first") ?? "").trim()} ${String(g("last") ?? "").trim()}`.trim();
+            const date = excelDateIso(g("date"));
+            if (!name || !date)
+                continue;
+            const team = String(g("team") ?? "").trim(), vs = String(g("vs") ?? "").trim();
+            const key = [normalizeName(name), teamNameKey(team), date, teamNameKey(vs)].join("|");
+            if (seen.has(key))
+                continue;
+            seen.add(key);
+            const min = num("min"), t2m = num("t2m"), t2a = num("t2a"), t3m = num("t3m"), t3a = num("t3a"), oreb = num("oreb"), dreb = num("dreb");
+            const sum = (a, b) => (a === null && b === null ? null : (a || 0) + (b || 0));
+            const number = num("no");
+            rows.push({
+                name, team, vs, date, number,
+                stats: {
+                    number, name, minuten: min === null ? 0 : Math.round(min * 10) / 10,
+                    punkte: num("pts"), rebounds: sum(oreb, dreb), assists: num("ast"), steals: num("stl"),
+                    blocks: num("blk"), turnovers: num("to"), fouls: num("pf"),
+                    rebOff: oreb, rebDef: dreb, eff: num("eff"), plusMinus: num("pm"),
+                    fgm: sum(t2m, t3m), fga: sum(t2a, t3a), tpm: t3m, tpa: t3a, ftm: num("t1m"), fta: num("t1a"),
+                },
+            });
+        }
+    }
+    return { rows, error: sheetsFound === 0 ? "In der Datei steht keine Tabelle mit den Spalten Name, Surname, Team, Versus und Points. Ist das der Statistik-Export des WBV?" : null };
+}
+// Teamnamen vergleichbar machen: "RheinStars Köln 2" = "Rheinstars Koeln 2".
+// Eigene Teams nur bei genau gleichem Namen ("RheinStars Köln" ist die ProA,
+// "RheinStars Köln 2" die 1. Regionalliga), Gegner duerfen abweichen.
+function teamNameKey(s) {
+    return (s || "").toLowerCase().replace(/ä/g, "ae").replace(/ö/g, "oe").replace(/ü/g, "ue").replace(/ß/g, "ss")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[^a-z0-9]/g, "");
+}
+function sameTeamName(a, b) {
+    const x = teamNameKey(a), y = teamNameKey(b);
+    return !!x && !!y && (x === y || x.includes(y) || y.includes(x));
+}
+// Spiele eines eigenen Teams aus den Excel-Zeilen, je Spiel dem DBB-Spielplan
+// zugeordnet (gleicher Gegner, Datum +-2 Tage). Neueste zuerst.
+function wbvGamesForTeam(rows, team, dbbDoc) {
+    const matches = (dbbDoc?.matches || []).filter((m) => m.date && !m.cancelled);
+    const ownNames = [...new Set([team?.name, ...matches.map((m) => (m.isHome ? m.home : m.guest)?.name)].filter(Boolean))];
+    const own = new Set(ownNames.map(teamNameKey));
+    const ownRows = rows.filter((r) => own.has(teamNameKey(r.team)));
+    const groups = new Map();
+    ownRows.forEach((r) => {
+        const k = r.date + "|" + teamNameKey(r.vs);
+        if (!groups.has(k))
+            groups.set(k, { key: k, date: r.date, vs: r.vs, rows: [] });
+        groups.get(k).rows.push(r);
+    });
+    return [...groups.values()].map((g) => {
+        const m = matches.find((x) => Math.abs(new Date(x.date) - new Date(g.date)) <= 2 * 864e5 && sameTeamName(dbbOpponent(x)?.name, g.vs)) || null;
+        return { ...g, m, matchId: m ? m.matchId : null, date: m ? m.date : g.date, gegner: m ? dbbOpponent(m)?.name || g.vs : g.vs };
+    }).sort((a, b) => b.date.localeCompare(a.date));
+}
+function ExcelStatsImport({ players, teams, dbbData, preset, onConfirmGames, onClose }) {
+    const [stage, setStage] = useState("upload");
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const [fileName, setFileName] = useState("");
+    const [rows, setRows] = useState([]);
+    const [teamId, setTeamId] = useState(preset?.teamId || null);
+    const [selected, setSelected] = useState([]);
+    const [matches, setMatches] = useState({});
+    const team = teams.find((t) => t.id === teamId) || null;
+    const games = team ? wbvGamesForTeam(rows, team, (dbbData || {})[team.id]) : [];
+    const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
+    const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}${p.teamId ? " (" + teamName(p.teamId) + ")" : ""}`;
+    const orderedPlayers = playersForGame(players, teamId);
+    function prepare(allRows, id) {
+        const t = teams.find((x) => x.id === id);
+        const gs = t ? wbvGamesForTeam(allRows, t, (dbbData || {})[t.id]) : [];
+        const presetGame = preset?.matchId && gs.find((g) => g.matchId === preset.matchId);
+        setSelected(presetGame ? [presetGame.key] : gs.filter((g) => !statsExistForGame(players, id, { matchId: g.matchId, date: g.date })).map((g) => g.key));
+        const pool = playersOfTeam(players, id);
+        const next = {};
+        gs.forEach((g) => g.rows.forEach((r) => {
+            const k = normalizeName(r.name);
+            if (k in next)
+                return;
+            const last = normalizeName(r.name.split(" ").pop());
+            const hit = pool.find((p) => normalizeName(p.name) === k)
+                || players.find((p) => normalizeName(p.name) === k)
+                || pool.find((p) => r.number !== null && Number(p.number) === r.number && normalizeName(p.name).split(" ").pop() === last);
+            next[k] = hit ? hit.id : "";
+        }));
+        setMatches(next);
+        setTeamId(id);
+    }
+    async function handleFile(e) {
+        const file = e.target.files[0];
+        e.target.value = "";
+        if (!file)
+            return;
+        setFileName(file.name);
+        setError("");
+        setBusy(true);
+        try {
+            const XLSX = await loadXlsxLib();
+            const { rows: parsed, error: err } = parseWbvWorkbook(XLSX, await file.arrayBuffer());
+            if (err) {
+                setError(err);
+                return;
+            }
+            // Team mit den meisten Zeilen in der Datei, ausser es wurde vom Spielplan aus geoeffnet
+            const counts = teams.map((t) => ({ t, n: wbvGamesForTeam(parsed, t, (dbbData || {})[t.id]).reduce((s, g) => s + g.rows.length, 0) }));
+            const presetHit = counts.find((c) => c.t.id === preset?.teamId && c.n > 0);
+            const best = presetHit || counts.filter((c) => c.n > 0).sort((a, b) => b.n - a.n)[0];
+            if (!best) {
+                setError("In der Datei kommt keines eurer Teams vor. Stimmt der Teamname im Spielplan mit dem in der Excel überein?");
+                return;
+            }
+            setRows(parsed);
+            prepare(parsed, best.t.id);
+            setStage("review");
+        }
+        catch (err) {
+            setError("Die Datei konnte nicht gelesen werden: " + (err.message || "unbekannter Fehler"));
+        }
+        finally {
+            setBusy(false);
+        }
+    }
+    const chosenGames = games.filter((g) => selected.includes(g.key));
+    const filePlayers = [];
+    chosenGames.forEach((g) => g.rows.forEach((r) => {
+        const k = normalizeName(r.name);
+        const hit = filePlayers.find((x) => x.k === k);
+        if (hit)
+            hit.games++;
+        else
+            filePlayers.push({ k, name: r.name, number: r.number, games: 1 });
+    }));
+    filePlayers.sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const matchedCount = filePlayers.filter((x) => matches[x.k]).length;
+    function toggleGame(key) {
+        setSelected((s) => (s.includes(key) ? s.filter((k) => k !== key) : [...s, key]));
+    }
+    function handleConfirm() {
+        onConfirmGames(chosenGames.map((g) => {
+            const used = new Set();
+            const entries = g.rows.map((r) => ({ playerId: matches[normalizeName(r.name)], stats: r.stats }))
+                .filter((x) => x.playerId && !used.has(x.playerId) && used.add(x.playerId));
+            return { entries, date: g.date, gegner: g.gegner, game: { matchId: g.matchId, teamId } };
+        }).filter((g) => g.entries.length > 0));
+        onClose();
+    }
+    if (stage === "upload") {
+        return React.createElement("div", { className: "space-y-4" },
+            React.createElement("p", { className: "text-xs text-slate-500" }, "Statistik-Excel des Verbands auswählen (z. B. WBV, 1. Regionalliga). Die Datei enthält alle Spiele der Liga – die App sucht die Spiele eures Teams heraus und ordnet sie dem Spielplan zu. Mehrere Wochen auf einmal sind kein Problem."),
+            React.createElement("label", { className: `flex flex-col items-center justify-center gap-2 border-2 border-dashed border-stone-300 rounded-lg py-8 transition ${busy ? "opacity-60" : "cursor-pointer hover:border-[#C43E0E] hover:bg-red-50/30"}` },
+                React.createElement(IconUpload, { size: 24, className: "text-slate-400" }),
+                React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, busy ? "Datei wird gelesen…" : "Excel-Datei auswählen"),
+                React.createElement("input", { type: "file", accept: ".xlsx,.xls,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet,application/vnd.ms-excel", className: "hidden", disabled: busy, onChange: handleFile })),
+            fileName && !error && !busy && React.createElement("p", { className: "text-xs text-slate-400" }, "Zuletzt gewählt: ", fileName),
+            error && React.createElement("p", { className: "text-xs text-red-600" }, error));
+    }
+    return React.createElement("div", { className: "space-y-4" },
+        teams.length > 1 && React.createElement(Field, { label: "Team" },
+            React.createElement("select", { className: inputClass, value: teamId || "", onChange: (e) => prepare(rows, e.target.value) },
+                sortTeams(teams).map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
+        React.createElement("div", null,
+            React.createElement("div", { className: "flex items-baseline justify-between gap-2 mb-1.5" },
+                React.createElement("span", { className: "text-xs font-semibold text-slate-600" }, "Spiele aus der Datei"),
+                React.createElement("span", { className: "text-xs text-slate-400" }, chosenGames.length, " von ", games.length, " gewählt")),
+            games.length === 0
+                ? React.createElement("p", { className: "text-xs text-amber-600" }, "Für dieses Team stehen keine Spiele in der Datei.")
+                : React.createElement("div", { className: "max-h-[28vh] overflow-y-auto border border-stone-200 rounded-lg divide-y divide-stone-100" }, games.map((g) => {
+                    const has = statsExistForGame(players, teamId, { matchId: g.matchId, date: g.date });
+                    return React.createElement("label", { key: g.key, className: "flex items-center gap-2.5 px-2.5 py-2 text-xs cursor-pointer hover:bg-stone-50" },
+                        React.createElement("input", { type: "checkbox", checked: selected.includes(g.key), onChange: () => toggleGame(g.key), className: "accent-[#C43E0E]" }),
+                        React.createElement("span", { className: "flex-1 min-w-0 text-slate-700" },
+                            g.m ? dbbGameLabel(g.m) : `${shortDateLabel(g.date)} · ${g.vs}`,
+                            !g.m && React.createElement("span", { className: "text-amber-600" }, " (nicht im Spielplan)")),
+                        has && React.createElement("span", { className: "text-amber-600 font-semibold whitespace-nowrap" }, "✓ Stats da"),
+                        React.createElement("span", { className: "text-slate-400 whitespace-nowrap" }, g.rows.length, " Sp."));
+                })),
+            chosenGames.some((g) => statsExistForGame(players, teamId, { matchId: g.matchId, date: g.date })) && React.createElement("p", { className: "text-xs text-amber-600 mt-1" }, "Bei Spielen mit vorhandenen Stats werden die Werte in die bestehenden Einträge übernommen.")),
+        filePlayers.length > 0 && React.createElement("div", { className: "max-h-[32vh] overflow-y-auto border border-stone-200 rounded-lg" },
+            React.createElement("table", { className: "w-full text-xs" },
+                React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
+                    React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
+                        React.createElement("th", { className: "text-left px-2.5 py-2" }, "Aus Datei"),
+                        React.createElement("th", { className: "text-right px-2.5 py-2" }, "Spiele"),
+                        React.createElement("th", { className: "text-left px-2.5 py-2 w-1/2" }, "Zugeordneter Spieler"))),
+                React.createElement("tbody", null, filePlayers.map((fp) => React.createElement("tr", { key: fp.k, className: "border-t border-stone-100" },
+                    React.createElement("td", { className: "px-2.5 py-1.5 font-medium text-slate-700" }, fp.number !== null ? "#" + fp.number + " " : "", fp.name),
+                    React.createElement("td", { className: "px-2.5 py-1.5 text-right text-slate-500" }, fp.games),
+                    React.createElement("td", { className: "px-2.5 py-1.5" },
+                        React.createElement("select", { className: `w-full rounded border px-1.5 py-1 text-xs ${matches[fp.k] ? "border-emerald-300 bg-emerald-50" : "border-amber-300 bg-amber-50"}`, value: matches[fp.k] || "", onChange: (e) => setMatches((m) => ({ ...m, [fp.k]: e.target.value })) },
+                            React.createElement("option", { value: "" }, "– Überspringen –"),
+                            orderedPlayers.map((p) => React.createElement("option", { key: p.id, value: p.id }, playerOptionLabel(p)))))))))),
+        React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { onClick: () => setStage("upload"), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Andere Datei"),
+            React.createElement("button", { onClick: handleConfirm, disabled: chosenGames.length === 0 || matchedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
+                chosenGames.length === 1 ? "1 Spiel importieren" : `${chosenGames.length} Spiele importieren`)));
+}
+function BoxscoreImportModal({ players, teams, dbbData, onConfirm, onConfirmGames, onClose, preset }) {
     const [stage, setStage] = useState("paste");
     const [text, setText] = useState("");
     const [parseError, setParseError] = useState("");
     const [filePlayers, setFilePlayers] = useState([]);
     const [matches, setMatches] = useState([]);
     const statTeams = teams.filter((t) => !DBB_SCORES_ALTERSKLASSEN.includes(t.altersklasse));
+    // 1. Regionalliga: Stats kommen als Excel vom Verband, sonst Text einfuegen
+    const [mode, setMode] = useState(() => (teams.find((t) => t.id === preset?.teamId)?.altersklasse === "1. Regionalliga" ? "excel" : "text"));
     const [game, setGame] = useState({ teamId: preset?.teamId || null, matchId: preset?.matchId || null, date: preset?.date || today(), gegner: preset?.gegner || "" });
     const date = game.date, gegner = game.gegner || "";
     const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
@@ -1618,8 +1876,14 @@ function BoxscoreImportModal({ players, teams, dbbData, onConfirm, onClose, pres
         onClose();
     }
     const matchedCount = matches.filter(Boolean).length;
+    const modeSwitch = React.createElement("div", { className: "flex bg-stone-100 rounded-lg p-1 text-xs font-semibold" }, [["text", "Text einfügen"], ["excel", "Excel-Datei"]].map(([k, label]) => React.createElement("button", { key: k, type: "button", onClick: () => setMode(k), className: `flex-1 rounded-md py-1.5 transition ${mode === k ? "bg-slate-900 text-white shadow-sm" : "text-slate-500 hover:text-slate-700"}` }, label)));
+    if (mode === "excel") {
+        return React.createElement("div", { className: "space-y-4" }, modeSwitch,
+            React.createElement(ExcelStatsImport, { players, teams: statTeams, dbbData, preset, onConfirmGames, onClose }));
+    }
     if (stage === "paste") {
         return (React.createElement("div", { className: "space-y-4" },
+            modeSwitch,
             React.createElement(GameSelectFields, { teams: statTeams, dbbData, players, game, onChange: setGame }),
             React.createElement("p", { className: "text-xs text-slate-500" }, "Die Boxscore-Tabelle von der Statistik-Seite (z. B. NBBL) markieren, kopieren und hier einf\u00FCgen. \u00DCberschriften/Team-Zeile k\u00F6nnen mit drin sein, die App findet die richtige Stelle selbst."),
             React.createElement("textarea", { className: inputClass + " font-mono text-xs", rows: 10, value: text, onChange: (e) => { setText(e.target.value); setParseError(""); }, placeholder: "Hier den kopierten Boxscore-Text einf\u00FCgen\u2026" }),
