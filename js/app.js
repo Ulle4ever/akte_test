@@ -1271,7 +1271,7 @@ function SpielerAkte() {
         }
     }
     function dossierProps(p) {
-        return { teams, statCategories, privateData: privateData[p.id], wellnessEntries: sortByDateDesc(wellnessData[p.id]?.entries || []), events: calendarEvents, allPlayers: players, eventAttendance, dbbData };
+        return { teams, statCategories: visibleStatCategories(statCategories), privateData: privateData[p.id], wellnessEntries: sortByDateDesc(wellnessData[p.id]?.entries || []), events: calendarEvents, allPlayers: players, eventAttendance, dbbData };
     }
     // Zusaetzlich zu den automatischen Firestore-Backups: alle Daten als Datei
     // auf den eigenen Rechner (z. B. vor groesseren Aenderungen)
@@ -1409,7 +1409,7 @@ function SpielerAkte() {
         const next = [...(stats || [])];
         const matchId = game?.matchId || null;
         const idx = next.findIndex((s) => matchId ? (s.dbbMatchId === matchId || (!s.dbbMatchId && s.date === date)) : s.date === date);
-        const link = matchId ? { dbbMatchId: matchId, statTeamId: game.teamId || null } : {};
+        const link = { ...(matchId ? { dbbMatchId: matchId } : {}), ...(game?.teamId ? { statTeamId: game.teamId } : {}) };
         if (idx !== -1)
             next[idx] = { ...next[idx], ...link, ...fieldValues };
         else
@@ -1581,6 +1581,10 @@ function SpielerAkte() {
         }
     }
     const statCategories = meta.statCategories || DEFAULT_STAT_CATEGORIES;
+    // Fuer die Anzeige (Advanced vorerst ausgeblendet), gespeichert wird immer die volle Liste
+    const shownStatCategories = visibleStatCategories(statCategories);
+    // Liga-Auswahl beim Eintragen: Stammteam und Doppellizenz-Teams des Spielers
+    const statTeamOptions = selectedPlayer ? [selectedPlayer.teamId, ...(selectedPlayer.dlTeamIds || [])].map((id) => teams.find((t) => t.id === id)).filter(Boolean) : [];
     // Abgespeckte Akte (U12-U18): nur die Felder zeigen/anbieten, die DBB
     // Scores tatsaechlich liefert - alle anderen (Rebounds, Assists, Hustle-
     // Stats, Advanced usw.) sind fuer diese Altersklassen nicht relevant.
@@ -1591,8 +1595,8 @@ function SpielerAkte() {
     // erscheinen, auch wenn sie club-weit als Statistik-Kategorie existieren.
     const FULL_HIDDEN_STAT_LABELS = ["2-punkte-körbe", "3-punkte-körbe", "fouls", "fouls (pf)", "plus/minus"];
     const displayStatCategories = isAbgespeckteAkte
-        ? statCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => ABGESPECKT_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0)
-        : statCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => !FULL_HIDDEN_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0);
+        ? shownStatCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => ABGESPECKT_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0)
+        : shownStatCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => !FULL_HIDDEN_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0);
     function addStatCategory(label) {
         persistMeta({ statCategories: [...statCategories, { id: uid(), label, fields: [] }] });
     }
@@ -1714,8 +1718,10 @@ function SpielerAkte() {
                         { label: "Kalender aus Screenshot (Beta)", icon: IconUpload, onClick: () => setModal("importScreenshot") },
                         { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
                         { label: "Boxscore / Excel importieren", icon: IconClipboard, onClick: () => { setStatsImportPreset(null); setModal("importBoxscore"); } },
-                        { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
-                        { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
+                        ...(ADVANCED_STATS_ENABLED ? [
+                            { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
+                            { label: "Advanced-Rechner verbinden", icon: IconExternal, onClick: () => setModal("advancedRechnerLive") },
+                        ] : []),
                         ...(dbbEligibleTeams.length > 0 ? [{ label: "DBB Scores importieren", icon: IconUpload, onClick: () => { setStatsImportPreset(null); setModal("importDbbScores"); } }] : []),
                     ] })),
                 // Konto-Menue: ersetzt die fruehere gelbe "Angemeldet als"-Leiste -
@@ -1855,7 +1861,7 @@ function SpielerAkte() {
                             React.createElement(IconCalendar, { size: 14 }),
                             " Team-Kalender")),
                     React.createElement(TeamSchedule, { team: teams.find((t) => t.id === selectedTeamId) || { id: selectedTeamId }, doc: dbbData[selectedTeamId], players: players, onImportStats: openStatsImport }),
-                    React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: playersOfTeam(players, selectedTeamId), privateData: privateData, statCategories: statCategories, onSelectPlayer: selectPlayer }))),
+                    React.createElement(TeamOverviewTable, { team: teams.find((t) => t.id === selectedTeamId), players: playersOfTeam(players, selectedTeamId), privateData: privateData, statCategories: shownStatCategories, onSelectPlayer: selectPlayer }))),
                 !selectedPlayer && showGlobalCalendar && (React.createElement("div", null,
                     React.createElement("div", { className: "flex items-center justify-between mb-3" },
                         React.createElement("h2", { className: "text-lg font-bold text-slate-900" }, "Kalender – alle Teams"),
@@ -1883,7 +1889,7 @@ function SpielerAkte() {
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
                 !selectedPlayer && showPlayers && isTrainer && (React.createElement(PlayersPage, { players: players, teams: visibleTeams, watchlist: isFullTrainer ? watchlist : [], onSelectPlayer: selectPlayer, onOpenTeam: goTeam, onAddPlayer: () => setModal("player"), canAddPlayer: visibleTeams.length > 0 })),
-                !selectedPlayer && showReports && isFullTrainer && React.createElement(ReportsPage, { teams: visibleTeams, players, events: calendarEvents, dbbData, statCategories, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, watchlist, onToggleStar: toggleStar, onSelectPlayer: selectPlayer, dossierProps }),
+                !selectedPlayer && showReports && isFullTrainer && React.createElement(ReportsPage, { teams: visibleTeams, players, events: calendarEvents, dbbData, statCategories: shownStatCategories, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, watchlist, onToggleStar: toggleStar, onSelectPlayer: selectPlayer, dossierProps }),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && !showReports && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onOpenTeam: goTeam, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits, dbbData: dbbData, dbbSyncing: dbbSyncing, onRefreshDbb: runDbbSync, onOpenStatsImport: openStatsImport, onManageTeams: isFullTrainer ? () => setModal("teams") : null })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
@@ -2047,7 +2053,7 @@ function SpielerAkte() {
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
                             !isAbgespeckteAkte && playerStats.length > 0 && React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Details"),
-                                React.createElement("div", { className: "space-y-2 mt-1.5" }, statCategories.filter((cat) => (isTrainer || cat.id !== "advanced") && cat.id !== "dbbScores").map((cat) => {
+                                React.createElement("div", { className: "space-y-2 mt-1.5" }, shownStatCategories.filter((cat) => (isTrainer || cat.id !== "advanced") && cat.id !== "dbbScores").map((cat) => {
                                     if (cat.fields.length === 0)
                                         return null;
                                     const isOpen = expandedCats.has(cat.id);
@@ -2087,6 +2093,7 @@ function SpielerAkte() {
                                         React.createElement("tr", { className: "border-b border-stone-200 text-slate-500 text-xs uppercase tracking-wide" },
                                             React.createElement("th", { className: "text-left px-4 py-3" }, "Datum"),
                                             React.createElement("th", { className: "text-left px-4 py-3" }, "Gegner"),
+                                            React.createElement("th", { className: "text-left px-4 py-3" }, "Liga"),
                                             React.createElement("th", { className: "text-right px-4 py-3" }, "Min"),
                                             displayStatCategories.map((cat) => cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement(React.Fragment, { key: f.id },
                                                 React.createElement("th", { className: "text-right px-4 py-3", title: f.label }, f.label),
@@ -2097,6 +2104,7 @@ function SpielerAkte() {
                                     React.createElement("tbody", null, playerStats.map((s) => (React.createElement("tr", { key: s.id, className: "border-b border-stone-100 last:border-0 hover:bg-stone-50" },
                                         React.createElement("td", { className: "px-4 py-3 whitespace-nowrap" }, fmtDate(s.date)),
                                         React.createElement("td", { className: "px-4 py-3" }, s.gegner || "–"),
+                                        React.createElement("td", { className: "px-4 py-3 whitespace-nowrap text-slate-500" }, statEntryTeam(s, selectedPlayer, teams)?.name || "–"),
                                         React.createElement("td", { className: "px-4 py-3 text-right" }, s.minuten || 0),
                                         displayStatCategories.map((cat) => cat.fields.map((f) => (f.kind === "shooting" ? (React.createElement(React.Fragment, { key: f.id },
                                             React.createElement("td", { className: "px-4 py-3 text-right whitespace-nowrap" },
@@ -2327,11 +2335,11 @@ function SpielerAkte() {
         modal === "selfProfile" && selectedPlayer && (React.createElement(Modal, { title: "Meine Daten bearbeiten", onClose: () => setModal(null) },
             React.createElement(PlayerSelfProfileForm, { initial: selectedPlayer, mandatory: false, onSubmit: async (changes) => { await persistPlayerFields(selectedPlayer.id, changes); setModal(null); }, onClose: () => setModal(null) }))),
         modal === "stat" && (React.createElement(Modal, { title: "Spielstatistik hinzuf\u00FCgen", onClose: () => setModal(null), wide: true },
-            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statCategories: displayStatCategories }))),
+            React.createElement(StatForm, { onSubmit: handleAddStat, onClose: () => setModal(null), statCategories: displayStatCategories, teamOptions: statTeamOptions }))),
         modal === "editStat" && editingStat && (React.createElement(Modal, { title: "Spielstatistik bearbeiten", onClose: () => { setModal(null); setEditingStat(null); }, wide: true },
-            React.createElement(StatForm, { onSubmit: handleEditStat, onClose: () => { setModal(null); setEditingStat(null); }, statCategories: displayStatCategories, initialEntry: editingStat }))),
+            React.createElement(StatForm, { onSubmit: handleEditStat, onClose: () => { setModal(null); setEditingStat(null); }, statCategories: displayStatCategories, initialEntry: editingStat, teamOptions: statTeamOptions }))),
         modal === "statFields" && (React.createElement(Modal, { title: "Statistik-Kategorien verwalten", onClose: () => setModal(null), wide: true },
-            React.createElement(StatCategoriesManager, { categories: statCategories, onAddCat: addStatCategory, onRenameCat: renameStatCategory, onDeleteCat: deleteStatCategory, onMoveCat: moveStatCategory, onAddField: addStatFieldToCategory, onRenameField: renameStatFieldInCategory, onDeleteField: deleteStatFieldFromCategory, onMoveField: moveStatFieldInCategory, onClose: () => setModal(null) }))),
+            React.createElement(StatCategoriesManager, { categories: shownStatCategories, onAddCat: addStatCategory, onRenameCat: renameStatCategory, onDeleteCat: deleteStatCategory, onMoveCat: moveStatCategory, onAddField: addStatFieldToCategory, onRenameField: renameStatFieldInCategory, onDeleteField: deleteStatFieldFromCategory, onMoveField: moveStatFieldInCategory, onClose: () => setModal(null) }))),
         modal === "testTypes" && (React.createElement(Modal, { title: "Test-Arten verwalten", onClose: () => setModal(null) },
             React.createElement(SimpleListManager, { items: testTypes, onAdd: addTestType, onRename: renameTestType, onDelete: deleteTestType, onMove: moveTestType, onClose: () => setModal(null), addPlaceholder: "Neue Testart, z. B. T-Test", description: "Diese Liste erscheint als Auswahl im Athletik-Test-Formular. \u00C4nderungen wirken nur auf Anzeige/neue Eintr\u00E4ge." }))),
         modal === "test" && (React.createElement(Modal, { title: "Athletik-Test hinzuf\u00FCgen", onClose: () => setModal(null) },

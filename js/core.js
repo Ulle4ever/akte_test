@@ -174,6 +174,12 @@ const DEFAULT_STAT_CATEGORIES = [
         ],
     },
 ];
+// Advanced Stats (ORtg, TS%, USG% ...) sind vorerst ausgeblendet. Kategorie,
+// Werte und Import-Code bleiben erhalten - zum Wiedereinschalten auf true setzen.
+const ADVANCED_STATS_ENABLED = false;
+function visibleStatCategories(cats) {
+    return ADVANCED_STATS_ENABLED ? cats : cats.filter((c) => c.id !== "advanced");
+}
 const DEFAULT_TEST_TYPES = [
     { id: "sprint20", label: "Sprint 20m" },
     { id: "cmj", label: "Vertikalsprung (CMJ)" },

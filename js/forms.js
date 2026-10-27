@@ -78,6 +78,11 @@ function accountTeamFields(teamIds) {
 function playersOfTeam(players, teamId) {
     return players.filter((p) => p.teamId === teamId || (p.dlTeamIds || []).includes(teamId));
 }
+// Team/Liga eines Statistik-Eintrags: beim Import bzw. Eintragen gespeichert
+// (statTeamId), bei alten Eintraegen das Stammteam des Spielers
+function statEntryTeam(st, player, teams) {
+    return teams.find((t) => t.id === (st.statTeamId || player?.teamId)) || null;
+}
 // Cloudinary liefert sonst das Original (Handyfotos ~4000x6000 px), das der
 // Browser auf 100 px herunterrechnet - das sieht pixelig/zackig aus und laedt
 // langsam. Stattdessen passend skaliert + aufs Gesicht zugeschnitten abrufen.
@@ -552,9 +557,9 @@ function StatCategoriesManager({ categories, onAddCat, onRenameCat, onDeleteCat,
             React.createElement("button", { type: "submit", className: "shrink-0 bg-slate-900 text-white rounded-lg px-4 text-sm font-semibold hover:bg-slate-800" }, "Kategorie")),
         React.createElement("button", { onClick: onClose, className: "w-full bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Fertig")));
 }
-function StatForm({ onSubmit, onClose, statCategories, initialEntry }) {
+function StatForm({ onSubmit, onClose, statCategories, initialEntry, teamOptions = [] }) {
     const [form, setForm] = useState(() => {
-        const base = { date: initialEntry?.date || today(), gegner: initialEntry?.gegner || "", minuten: initialEntry?.minuten ?? "" };
+        const base = { date: initialEntry?.date || today(), gegner: initialEntry?.gegner || "", minuten: initialEntry?.minuten ?? "", statTeamId: initialEntry?.statTeamId || teamOptions[0]?.id || "" };
         statCategories.forEach((cat) => {
             cat.fields.forEach((f) => {
                 if (f.kind === "shooting") {
@@ -578,6 +583,8 @@ function StatForm({ onSubmit, onClose, statCategories, initialEntry }) {
             return;
         }
         const entry = { date: form.date, gegner: form.gegner.trim(), minuten: n("minuten") };
+        if (form.statTeamId)
+            entry.statTeamId = form.statTeamId;
         if (initialEntry?.id)
             entry.id = initialEntry.id;
         statCategories.forEach((cat) => {
@@ -602,6 +609,8 @@ function StatForm({ onSubmit, onClose, statCategories, initialEntry }) {
                 React.createElement("input", { className: inputClass, value: form.gegner, onChange: set("gegner"), placeholder: "z. B. TSV Nord" })),
             React.createElement(Field, { label: "Minuten" },
                 React.createElement("input", { type: "number", className: inputClass, value: form.minuten, onChange: set("minuten") }))),
+        teamOptions.length > 1 && React.createElement(Field, { label: "Liga / Team" },
+            React.createElement("select", { className: inputClass, value: form.statTeamId, onChange: set("statTeamId") }, teamOptions.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
         statCategories.map((cat) => (cat.fields.length > 0 && (React.createElement("div", { key: cat.id },
             React.createElement(SectionLabel, null, cat.label),
             React.createElement("div", { className: "space-y-2 mt-1" },

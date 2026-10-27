@@ -317,10 +317,11 @@ function PlayerDossier({ player, teams, statCategories, privateData, wellnessEnt
                 fact("Assists Ø", avgOf("assists")), fact("Effizienz Ø", ids.eff ? avgOf(ids.eff) : "–"), fact("Plus/Minus Ø", ids.pm ? avgOf(ids.pm) : "–")),
             React.createElement("div", { className: "grid grid-cols-3 gap-3 mb-3" }, fact("Feldwürfe", shot("fg_m", "fg_a")), fact("Dreier", shot("tp_m", "tp_a")), fact("Freiwürfe", shot("ft_m", "ft_a"))),
             React.createElement("table", { className: "w-full text-xs tabular-nums" },
-                React.createElement("thead", null, React.createElement("tr", { className: "text-slate-400" }, ["DATUM", "GEGNER", "MIN", "PKT", "REB", "AST", "EFF"].map((h, i) => React.createElement("th", { key: h, className: `py-1 ${i < 2 ? "text-left" : "text-right"}` }, h)))),
+                React.createElement("thead", null, React.createElement("tr", { className: "text-slate-400" }, ["DATUM", "GEGNER", "LIGA", "MIN", "PKT", "REB", "AST", "EFF"].map((h, i) => React.createElement("th", { key: h, className: `py-1 ${i < 3 ? "text-left" : "text-right"}` }, h)))),
                 React.createElement("tbody", null, stats.slice(0, 8).map((st) => React.createElement("tr", { key: st.id, className: "border-t border-stone-100" },
                     React.createElement("td", { className: "py-1" }, fmtDate(st.date)),
                     React.createElement("td", { className: "py-1" }, st.gegner || "–"),
+                    React.createElement("td", { className: "py-1 text-slate-500" }, statEntryTeam(st, player, teams)?.name || "–"),
                     ["minuten", "punkte", "rebounds", "assists", ids.eff].map((k, i) => React.createElement("td", { key: i, className: "py-1 text-right" }, k && numOrNull(st[k]) !== null ? fmtNum(st[k], 0) : "–")))))))),
         block("Athletik-Tests (jeweils letzter Wert)", latestTests.length === 0 ? reportEmpty("Keine Tests erfasst.")
             : React.createElement("div", { className: "grid grid-cols-2 sm:grid-cols-4 gap-3" }, latestTests.map((t) => fact(t.testType, `${fmtNum(t.result, 2)} ${t.unit || ""} · ${fmtDate(t.date)}`)))),
