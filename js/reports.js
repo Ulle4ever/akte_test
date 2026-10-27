@@ -15,46 +15,55 @@ async function exportElementToPdf(el, filename) {
     const prevWidth = el.style.width;
     el.style.width = PDF_RENDER_WIDTH + "px";
     try {
-        const scale = 2;
-        const base = el.getBoundingClientRect().top;
-        const blocks = [...el.querySelectorAll("[data-pdf-block]")].map((b) => {
-            const r = b.getBoundingClientRect();
-            return { top: (r.top - base) * scale, bottom: (r.bottom - base) * scale, newPage: b.hasAttribute("data-pdf-newpage") };
-        });
-        const canvas = await window.html2canvas(el, { scale, backgroundColor: "#ffffff", useCORS: true, windowWidth: PDF_RENDER_WIDTH + 40 });
         const pdf = new window.jspdf.jsPDF({ orientation: "portrait", unit: "mm", format: "a4" });
-        const margin = 10, pageW = 210 - 2 * margin, pageH = 297 - 2 * margin;
-        const pagePx = Math.floor(pageH * (canvas.width / pageW));
-        let start = 0, first = true;
-        while (start < canvas.height - 2) {
-            let end = Math.min(start + pagePx, canvas.height);
-            if (end < canvas.height) {
-                // letzte Blockgrenze, die noch auf die Seite passt
-                const fits = blocks.filter((b) => b.bottom <= end && b.bottom > start + 40).map((b) => b.bottom);
-                if (fits.length)
-                    end = Math.max(...fits) + 8;
-            }
-            const forced = blocks.find((b) => b.newPage && b.top > start + 40 && b.top < end);
-            if (forced)
-                end = forced.top - 1;
-            const slice = document.createElement("canvas");
-            slice.width = canvas.width;
-            slice.height = end - start;
-            const ctx = slice.getContext("2d");
-            ctx.fillStyle = "#ffffff";
-            ctx.fillRect(0, 0, slice.width, slice.height);
-            ctx.drawImage(canvas, 0, start, canvas.width, end - start, 0, 0, canvas.width, end - start);
-            if (!first)
-                pdf.addPage();
-            pdf.addImage(slice.toDataURL("image/jpeg", 0.9), "JPEG", margin, margin, pageW, (end - start) * (pageW / canvas.width));
-            first = false;
-            start = end;
-        }
+        // Mehrere Dossiers (data-pdf-doc) einzeln rendern: ein einziges riesiges
+        // Bild ueberschreitet sonst die Canvas-Grenze der Browser (v. a. iPhone)
+        const docs = [...el.querySelectorAll("[data-pdf-doc]")];
+        let first = true;
+        for (const part of docs.length ? docs : [el])
+            first = await renderPdfPart(pdf, part, first);
         pdf.save(filename);
     }
     finally {
         el.style.width = prevWidth;
     }
+}
+async function renderPdfPart(pdf, el, first) {
+    const scale = 2;
+    const base = el.getBoundingClientRect().top;
+    const blocks = [...el.querySelectorAll("[data-pdf-block]")].map((b) => {
+        const r = b.getBoundingClientRect();
+        return { top: (r.top - base) * scale, bottom: (r.bottom - base) * scale, newPage: b.hasAttribute("data-pdf-newpage") };
+    });
+    const canvas = await window.html2canvas(el, { scale, backgroundColor: "#ffffff", useCORS: true, windowWidth: PDF_RENDER_WIDTH + 40 });
+    const margin = 10, pageW = 210 - 2 * margin, pageH = 297 - 2 * margin;
+    const pagePx = Math.floor(pageH * (canvas.width / pageW));
+    let start = 0;
+    while (start < canvas.height - 2) {
+        let end = Math.min(start + pagePx, canvas.height);
+        if (end < canvas.height) {
+            // letzte Blockgrenze, die noch auf die Seite passt
+            const fits = blocks.filter((b) => b.bottom <= end && b.bottom > start + 40).map((b) => b.bottom);
+            if (fits.length)
+                end = Math.max(...fits) + 8;
+        }
+        const forced = blocks.find((b) => b.newPage && b.top > start + 40 && b.top < end);
+        if (forced)
+            end = forced.top - 1;
+        const slice = document.createElement("canvas");
+        slice.width = canvas.width;
+        slice.height = end - start;
+        const ctx = slice.getContext("2d");
+        ctx.fillStyle = "#ffffff";
+        ctx.fillRect(0, 0, slice.width, slice.height);
+        ctx.drawImage(canvas, 0, start, canvas.width, end - start, 0, 0, canvas.width, end - start);
+        if (!first)
+            pdf.addPage();
+        pdf.addImage(slice.toDataURL("image/jpeg", 0.9), "JPEG", margin, margin, pageW, (end - start) * (pageW / canvas.width));
+        first = false;
+        start = end;
+    }
+    return first;
 }
 function safeFileName(s) {
     return String(s || "Export").normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/gi, "_").replace(/^_|_$/g, "");
@@ -285,7 +294,7 @@ function PlayerDossier({ player, teams, statCategories, privateData, wellnessEnt
         React.createElement("p", { className: "text-sm font-semibold text-slate-900" }, value || "–"));
     const block = (title, children) => React.createElement("section", { "data-pdf-block": "", className: "py-3 border-t border-stone-200" },
         React.createElement("h4", { className: "text-xs font-black tracking-wider text-slate-900 mb-2" }, title.toUpperCase()), children);
-    return React.createElement("div", { className: "bg-white" },
+    return React.createElement("div", { "data-pdf-doc": "", className: "bg-white px-5 py-4" },
         React.createElement("header", { "data-pdf-block": "", ...(newPage ? { "data-pdf-newpage": "" } : {}), className: "flex items-center gap-4 pb-4" },
             player.photoUrl
                 ? React.createElement("img", { src: cloudinaryImage(player.photoUrl, 96, 112), crossOrigin: "anonymous", alt: "", className: "w-20 h-24 rounded-xl object-cover" })

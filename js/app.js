@@ -153,6 +153,7 @@ function SpielerAkte() {
                 setWellnessData({});
                 setTrainingLoadData({});
                 setGradesData({});
+                setWatchlist([]);
                 setLoading(false);
                 return;
             }
@@ -1903,7 +1904,7 @@ function SpielerAkte() {
                                             STATUS_STYLES[selectedPlayer.status] && (React.createElement("span", { className: `text-[10px] font-bold uppercase tracking-wide px-2 py-0.5 rounded-full border ${STATUS_STYLES[selectedPlayer.status].badge}` }, STATUS_OPTIONS.find((s) => s.value === selectedPlayer.status)?.label)),
                                             isInjured(selectedPlayer) && React.createElement("span", { className: `text-[11px] font-bold px-2 py-0.5 rounded-full ${injuryCountdown(selectedPlayer).overdue ? "bg-amber-400 text-slate-900" : "bg-rose-500 text-white"}`, title: selectedPlayer.injuryUntil ? "Zurück voraussichtlich am " + fmtDate(selectedPlayer.injuryUntil) : "" }, injuryCountdown(selectedPlayer).label)),
                                         isInjured(selectedPlayer) && selectedPlayer.injuryReason && React.createElement("p", { className: "text-xs text-white/60 mt-1.5" }, selectedPlayer.injuryReason, selectedPlayer.injuryUntil ? ` · zurück am ${fmtDate(selectedPlayer.injuryUntil)}` : "")),
-                                    React.createElement("div", { className: "flex gap-2 shrink-0" },
+                                    React.createElement("div", { className: `${isFullTrainer ? "grid grid-cols-2 sm:flex" : "flex"} gap-1.5 sm:gap-2 shrink-0` },
                                         isFullTrainer && React.createElement("button", { onClick: () => toggleStar(selectedPlayer.id), className: `p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-black/35 ${watchlist.includes(selectedPlayer.id) ? "text-amber-400" : "text-white/80"}`, "aria-label": watchlist.includes(selectedPlayer.id) ? "Von der Merkliste nehmen" : "Auf die Merkliste", title: watchlist.includes(selectedPlayer.id) ? "Von der Merkliste nehmen" : "Auf die Merkliste (★)" },
                                             React.createElement(IconStar, { size: 16, filled: watchlist.includes(selectedPlayer.id) })),
                                         isFullTrainer && React.createElement(DossierExportButton, { player: selectedPlayer, dossierProps: dossierProps(selectedPlayer) }),
