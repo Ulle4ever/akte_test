@@ -1854,15 +1854,16 @@ function BoxscoreImportModal({ players, teams, dbbData, onConfirm, onConfirmGame
     const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
     const playerOptionLabel = (p) => `${p.name}${p.number !== "" && p.number !== undefined ? " #" + p.number : ""}${p.teamId ? " (" + teamName(p.teamId) + ")" : ""}`;
     const orderedPlayers = playersForGame(players, game.teamId);
-    function handleParse() {
-        const { players: fp, error } = parseBoxscoreText(text);
-        if (error) {
-            setParseError(error);
-            return;
-        }
-        setFilePlayers(fp);
+    // Ganze ProA-Seite eingefuegt: beide Teams stehen drin, nur eines wird importiert
+    const [allRows, setAllRows] = useState([]);
+    const [boxTeam, setBoxTeam] = useState(null);
+    const boxTeams = [...new Set(allRows.map((r) => r.team).filter(Boolean))];
+    function showRows(rows, label) {
+        const list = label ? rows.filter((r) => r.team === label) : rows;
         const pool = game.teamId ? playersOfTeam(players, game.teamId) : players;
-        setMatches(fp.map((row) => {
+        setBoxTeam(label);
+        setFilePlayers(list);
+        setMatches(list.map((row) => {
             const byNumber = pool.filter((p) => Number(p.number) === row.number);
             if (byNumber.length === 1)
                 return byNumber[0].id;
@@ -1870,6 +1871,30 @@ function BoxscoreImportModal({ players, teams, dbbData, onConfirm, onConfirmGame
             const byName = players.find((p) => normalizeName(p.name) === norm);
             return byName ? byName.id : "";
         }));
+    }
+    // Eigenes Team: Name aus dem gewaehlten DBB-Spiel, sonst das Team mit den
+    // meisten bekannten Spielernamen
+    function ownBoxTeam(rows, labels) {
+        if (labels.length < 2)
+            return labels[0] || null;
+        const m = ((dbbData || {})[game.teamId]?.matches || []).find((x) => x.matchId === game.matchId);
+        const own = m ? (m.isHome ? m.home : m.guest)?.name : null;
+        const hit = own && (labels.find((l) => teamNameKey(l) === teamNameKey(own)) || labels.find((l) => sameTeamName(l, own)));
+        if (hit)
+            return hit;
+        const pool = game.teamId ? playersOfTeam(players, game.teamId) : players;
+        const known = (l) => rows.filter((r) => r.team === l && pool.some((p) => normalizeName(p.name) === normalizeName(r.name))).length;
+        return [...labels].sort((a, b) => known(b) - known(a))[0];
+    }
+    function handleParse() {
+        const { players: fp, error } = parseBoxscoreText(text);
+        if (error) {
+            setParseError(error);
+            return;
+        }
+        const labels = [...new Set(fp.map((r) => r.team).filter(Boolean))];
+        setAllRows(fp);
+        showRows(fp, ownBoxTeam(fp, labels));
         setParseError("");
         setStage("review");
     }
@@ -1894,13 +1919,15 @@ function BoxscoreImportModal({ players, teams, dbbData, onConfirm, onConfirmGame
         return (React.createElement("div", { className: "space-y-4" },
             modeSwitch,
             React.createElement(GameSelectFields, { teams: statTeams, dbbData, players, game, onChange: setGame }),
-            React.createElement("p", { className: "text-xs text-slate-500" }, "Die Boxscore-Tabelle von der Statistik-Seite (z. B. NBBL) markieren, kopieren und hier einf\u00FCgen. \u00DCberschriften/Team-Zeile k\u00F6nnen mit drin sein, die App findet die richtige Stelle selbst."),
+            React.createElement("p", { className: "text-xs text-slate-500" }, "Die Boxscore-Tabelle von der Statistik-Seite (z. B. NBBL) markieren, kopieren und hier einf\u00FCgen. \u00DCberschriften/Team-Zeile k\u00F6nnen mit drin sein, die App findet die richtige Stelle selbst. ProA: im Liveticker den Reiter \u201EBoxscore\u201C \u00F6ffnen, Strg+A und Strg+C dr\u00FCcken und hier einf\u00FCgen \u2013 euer Team wird automatisch herausgesucht."),
             React.createElement("textarea", { className: inputClass + " font-mono text-xs", rows: 10, value: text, onChange: (e) => { setText(e.target.value); setParseError(""); }, placeholder: "Hier den kopierten Boxscore-Text einf\u00FCgen\u2026" }),
             parseError && React.createElement("p", { className: "text-xs text-red-600" }, parseError),
             React.createElement("button", { onClick: handleParse, disabled: !text.trim() || !gameChosen(game, statTeams, dbbData), className: "w-full bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, "Text auswerten")));
     }
     return (React.createElement("div", { className: "space-y-4" },
         React.createElement(GameSelectFields, { teams: statTeams, dbbData, players, game, onChange: setGame }),
+        boxTeams.length > 1 && React.createElement(Field, { label: "Team im Boxscore" },
+            React.createElement("select", { className: inputClass, value: boxTeam || "", onChange: (e) => showRows(allRows, e.target.value) }, boxTeams.map((l) => React.createElement("option", { key: l, value: l }, l)))),
         React.createElement("p", { className: "text-xs text-slate-500" },
             filePlayers.length,
             " Spielerzeilen erkannt. Werte flie\u00DFen in einen bestehenden Statistik-Eintrag vom selben Datum ein, oder es wird ein neuer angelegt. \"Fouls\", \"Rebounds Offensiv/Defensiv\" und \"Effizienz\" werden bei Bedarf automatisch als neue Felder angelegt."),

@@ -402,22 +402,36 @@ const NUM_HEADER_RE = /^(nr\.?|nummer|#|number|no\.?)$/i;
 // ProA-Liveticker (2. Basketball-Bundesliga), Boxscore ohne Kopfzeile kopiert:
 // "#10 Name", dann je Spieler 23 Zahlen in fester Reihenfolge:
 // Min | 2P m-a-% | 3P m-a-% | FG m-a-% | FW m-a-% | Pkt Ass | OR-DR-REB | PF BS ST TO EFF
+// Auch die ganze Seite (Strg+A) geht: Play-by-Play-Zeilen fallen raus, beide
+// Teams werden erkannt (Team-Name steht vor den Spielerkarten "#0 Name / P F",
+// "Gesamt" schliesst die Tabelle eines Teams ab).
 const PROA_PLAYER_LINE_RE = /^#(\d+)\s+(\S.*)$/;
 const PROA_VALUES_PER_PLAYER = 23;
 function parseProaBoxscoreLines(lines) {
     const players = [];
+    const teamLabels = [];
+    let section = 0;
+    let lastPlain = null;
     let i = 0;
     while (i < lines.length) {
         const head = lines[i].match(PROA_PLAYER_LINE_RE);
         if (!head) {
+            if (/^gesamt\b/i.test(lines[i]))
+                section++;
+            else if (/[a-zäöü]/i.test(lines[i]) && !/[:\t]/.test(lines[i]))
+                lastPlain = lines[i];
             i++;
             continue;
         }
+        if (/^P\s+F$/.test(lines[i + 1] || "") && teamLabels[section] === undefined)
+            teamLabels[section] = lastPlain;
         const tokens = [];
         let j = i + 1;
         while (j < lines.length && !PROA_PLAYER_LINE_RE.test(lines[j]) && !/^(teamaktionen|gesamt)/i.test(lines[j])) {
             // "3 - 6 - 50%" / "3-6-50%": Bindestriche zwischen Zahlen sind Trenner, kein Minus
             tokens.push(...(lines[j].replace(/(\d)\s*-\s*(?=\d)/g, "$1 ").match(/\d{1,3}:\d{2}|-?\d+/g) || []));
+            if (/[a-zäöü]/i.test(lines[j]) && !/[:\t]/.test(lines[j]))
+                lastPlain = lines[j];
             j++;
         }
         i = j;
@@ -427,7 +441,7 @@ function parseProaBoxscoreLines(lines) {
         const v = tokens.slice(1).map((t) => parseInt(t, 10));
         // v: 0-2 2P, 3-5 3P, 6-8 FG, 9-11 FW, 12 Pkt, 13 Ass, 14 OR, 15 DR, 16 REB, 17 PF, 18 BS, 19 ST, 20 TO, 21 EFF
         players.push({
-            number: parseInt(head[1], 10), name: head[2].trim(),
+            number: parseInt(head[1], 10), name: head[2].trim(), team: teamLabels[section] || null,
             minuten: Math.round((mm + ss / 60) * 10) / 10,
             punkte: v[12], assists: v[13], rebOff: v[14], rebDef: v[15], rebounds: v[16],
             fouls: v[17], blocks: v[18], steals: v[19], turnovers: v[20], eff: v[21],
