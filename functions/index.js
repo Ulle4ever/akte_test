@@ -589,4 +589,6 @@ exports.calendarFeed = onRequest({ region: "europe-west1" }, async (req, res) =>
 /* ---------------- Backup ----------------
    Laeuft ueber die eingebauten Firestore-Backups (kein Code noetig):
    taeglich (7 Tage aufbewahrt) + sonntags (14 Wochen aufbewahrt), eingerichtet mit
-   firebase firestore:backups:schedules:create. Wiederherstellen siehe README. */
+   firebase firestore:backups:schedules:create. Wiederherstellen: Backups mit
+   firebase firestore:backups:list anzeigen, dann in eine neue Datenbank
+   firebase firestore:databases:restore -d <neue-db> -b <backup-name>. */
