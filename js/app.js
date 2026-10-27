@@ -1404,11 +1404,13 @@ function SpielerAkte() {
         });
     }
     // Statistik-Eintrag eines Spiels: mit DBB-Spiel (matchId) wird genau dieses
-    // Spiel getroffen, sonst wie bisher ueber das Datum.
+    // Spiel getroffen, sonst wie bisher ueber das Datum (bei Doppellizenz nur
+    // im selben Team - zwei Spiele am selben Tag bleiben getrennt).
     function mergeGameStats(stats, date, gegner, game, fieldValues, newDefaults) {
         const next = [...(stats || [])];
         const matchId = game?.matchId || null;
-        const idx = next.findIndex((s) => matchId ? (s.dbbMatchId === matchId || (!s.dbbMatchId && s.date === date)) : s.date === date);
+        const sameDay = (s) => s.date === date && (!game?.teamId || !s.statTeamId || s.statTeamId === game.teamId);
+        const idx = next.findIndex((s) => matchId ? (s.dbbMatchId === matchId || (!s.dbbMatchId && sameDay(s))) : sameDay(s));
         const link = { ...(matchId ? { dbbMatchId: matchId } : {}), ...(game?.teamId ? { statTeamId: game.teamId } : {}) };
         if (idx !== -1)
             next[idx] = { ...next[idx], ...link, ...fieldValues };
