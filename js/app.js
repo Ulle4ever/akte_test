@@ -49,6 +49,9 @@ function SpielerAkte() {
     const [showVerwaltung, setShowVerwaltung] = useState(false);
     const [showAllUnits, setShowAllUnits] = useState(false);
     const [showAttendance, setShowAttendance] = useState(false);
+    const [showReports, setShowReports] = useState(false); // Berichte (nur Main Accounts)
+    const [watchlist, setWatchlist] = useState([]); // Merkliste der Main Accounts (scouting/watchlist)
+    const [backupState, setBackupState] = useState(null); // null | "busy" | { ok, text }
     const [selectedPlayerId, setSelectedPlayerId] = useState(null);
     const [activeTab, setActiveTab] = useState("uebersicht");
     const [expandedCats, setExpandedCats] = useState(() => new Set());
@@ -233,17 +236,32 @@ function SpielerAkte() {
                     const loadedPlayers = [...playerById.values()].map((d) => ({ id: d.id, ...d.data() }));
                     if (!cancelled)
                         setPlayers(loadedPlayers);
+                    // Main Accounts: je Sammlung EINE Abfrage statt einer pro Spieler
+                    // (gleich viele Lesezugriffe, aber ein Bruchteil der Wartezeit)
+                    async function perPlayerDocs(coll) {
+                        if (!scopeTeamIds) {
+                            const snap = await db.collection(coll).get();
+                            const byId = new Map(snap.docs.map((d) => [d.id, d]));
+                            return loadedPlayers.map((p) => [p.id, byId.get(p.id) || null]);
+                        }
+                        return Promise.all(loadedPlayers.map(async (p) => {
+                            const d = await db.collection(coll).doc(p.id).get();
+                            return [p.id, d.exists ? d : null];
+                        }));
+                    }
+                    if (!scopeTeamIds) {
+                        try {
+                            const w = await db.collection("scouting").doc("watchlist").get();
+                            if (!cancelled)
+                                setWatchlist(w.exists ? (w.data().playerIds || []) : []);
+                        }
+                        catch (e) { }
+                    }
                     const privDefaults = { notes: [], tests: [], attendance: [], grades: [] };
-                    const privEntries = await Promise.all(loadedPlayers.map(async (p) => {
-                        const s = await db.collection("playerPrivate").doc(p.id).get();
-                        return [p.id, s.exists ? { ...privDefaults, ...s.data() } : privDefaults];
-                    }));
+                    const privEntries = (await perPlayerDocs("playerPrivate")).map(([id, d]) => [id, d ? { ...privDefaults, ...d.data() } : privDefaults]);
                     if (!cancelled)
                         setPrivateData(Object.fromEntries(privEntries));
-                    const wellEntries = await Promise.all(loadedPlayers.map(async (p) => {
-                        const s = await db.collection("playerWellness").doc(p.id).get();
-                        return [p.id, s.exists ? { entries: s.data().entries || [] } : { entries: [] }];
-                    }));
+                    const wellEntries = (await perPlayerDocs("playerWellness")).map(([id, d]) => [id, { entries: d ? (d.data().entries || []) : [] }]);
                     if (!cancelled)
                         setWellnessData(Object.fromEntries(wellEntries));
                     // In try/catch: neue Collection, deren Firestore-Regel der Nutzer erst
@@ -251,10 +269,7 @@ function SpielerAkte() {
                     // bis dahin soll ein permission-denied hier nicht den kompletten Login
                     // abbrechen, sondern die Trainingsbelastung einfach leer bleiben.
                     try {
-                        const loadEntries = await Promise.all(loadedPlayers.map(async (p) => {
-                            const s = await db.collection("playerTrainingLoad").doc(p.id).get();
-                            return [p.id, s.exists ? { entries: s.data().entries || [] } : { entries: [] }];
-                        }));
+                        const loadEntries = (await perPlayerDocs("playerTrainingLoad")).map(([id, d]) => [id, { entries: d ? (d.data().entries || []) : [] }]);
                         if (!cancelled)
                             setTrainingLoadData(Object.fromEntries(loadEntries));
                     }
@@ -263,10 +278,7 @@ function SpielerAkte() {
                             setTrainingLoadData({});
                     }
                     try {
-                        const gradeEntries = await Promise.all(loadedPlayers.map(async (p) => {
-                            const s = await db.collection("playerGrades").doc(p.id).get();
-                            return [p.id, { subjects: s.exists ? (s.data().subjects || []) : [] }];
-                        }));
+                        const gradeEntries = (await perPlayerDocs("playerGrades")).map(([id, d]) => [id, { subjects: d ? (d.data().subjects || []) : [] }]);
                         if (!cancelled)
                             setGradesData(Object.fromEntries(gradeEntries));
                     }
@@ -276,7 +288,10 @@ function SpielerAkte() {
                     }
                     // Termine des eigenen Teams PLUS Termine anderer Teams, bei denen ein
                     // eigener Spieler einzeln eingeladen ist (involvedTeamIds deckt beides ab).
-                    const loadedEvents = (await queryPerTeam("calendarEvents", "involvedTeamIds", "array-contains")).map((d) => ({ id: d.id, ...d.data() }));
+                    // Main Accounts: nur Termine der laufenden Saison (ab 1. August)
+                    const loadedEvents = (scopeTeamIds
+                        ? await queryPerTeam("calendarEvents", "involvedTeamIds", "array-contains")
+                        : (await db.collection("calendarEvents").where("date", ">=", seasonStartIso()).get()).docs).map((d) => ({ id: d.id, ...d.data() }));
                     if (!cancelled)
                         setCalendarEvents(loadedEvents);
                     const tnDocs = await queryPerTeam("teamNotes", "teamId", "==");
@@ -421,7 +436,7 @@ function SpielerAkte() {
             const scopeTeamIds = accountTeamIds(account);
             const snaps = await Promise.all(scopeTeamIds
                 ? scopeTeamIds.map((t) => db.collection("calendarEvents").where("involvedTeamIds", "array-contains", t).get())
-                : [db.collection("calendarEvents").get()]);
+                : [db.collection("calendarEvents").where("date", ">=", seasonStartIso()).get()]);
             const byId = new Map();
             snaps.forEach((sn) => sn.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() })));
             setCalendarEvents([...byId.values()]);
@@ -446,7 +461,7 @@ function SpielerAkte() {
     // Browser-Zurueck/-Vor: jeder Seitenwechsel (Dashboard, Team, Spieler, Reiter,
     // Kalender ...) landet als Eintrag in der Browser-Historie, die Pfeile im Tab
     // (und die Wisch-Geste am Handy) springen so zur vorherigen Seite zurueck.
-    const navState = { p: selectedPlayerId, t: selectedTeamId, tc: showTeamCalendar, gc: showGlobalCalendar, v: showVerwaltung, au: showAllUnits, at: showAttendance, pl: showPlayers, tab: activeTab };
+    const navState = { p: selectedPlayerId, t: selectedTeamId, tc: showTeamCalendar, gc: showGlobalCalendar, v: showVerwaltung, au: showAllUnits, at: showAttendance, pl: showPlayers, rp: showReports, tab: activeTab };
     const navKey = JSON.stringify(navState);
     const restoringNavRef = useRef(false);
     const navInitRef = useRef(false);
@@ -490,7 +505,7 @@ function SpielerAkte() {
             setNavMax(depth);
             // Neue Seite beginnt oben (nicht beim Reiterwechsel in der Akte)
             const prev = JSON.parse(cur.rskNav);
-            if (prev.p !== navState.p || prev.t !== navState.t || prev.pl !== navState.pl || prev.gc !== navState.gc || prev.v !== navState.v || prev.au !== navState.au || prev.at !== navState.at)
+            if (prev.p !== navState.p || prev.t !== navState.t || prev.pl !== navState.pl || prev.gc !== navState.gc || prev.v !== navState.v || prev.au !== navState.au || prev.at !== navState.at || prev.rp !== navState.rp)
                 window.scrollTo(0, 0);
         }
     }, [navKey, account]);
@@ -519,6 +534,7 @@ function SpielerAkte() {
             setShowAllUnits(n.au);
             setShowAttendance(n.at);
             setShowPlayers(n.pl);
+            setShowReports(!!n.rp);
             setActiveTab(n.tab);
             setModal(null);
             setOpenHeaderMenu(null);
@@ -1104,6 +1120,9 @@ function SpielerAkte() {
         else if (showPlayers) {
             breadcrumbItems.push({ label: "Spieler", onClick: null });
         }
+        else if (showReports) {
+            breadcrumbItems.push({ label: "Berichte", onClick: null });
+        }
         else if (selectedPlayer) {
             if (selectedTeam)
                 breadcrumbItems.push({ label: selectedTeam.name, onClick: () => { setSelectedPlayerId(null); setSelectedTeamId(selectedTeam.id); setShowTeamCalendar(false); setShowGlobalCalendar(false); } });
@@ -1165,6 +1184,7 @@ function SpielerAkte() {
         setShowAttendance(false);
         setShowPlayers(false);
         setMobileSidebarOpen(false);
+        setShowReports(false);
     }
     function goHome() {
         setSelectedPlayerId(null);
@@ -1177,6 +1197,7 @@ function SpielerAkte() {
         setShowPlayers(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
+        setShowReports(false);
     }
     function goPlayers() {
         goHome();
@@ -1196,6 +1217,7 @@ function SpielerAkte() {
         setShowAttendance(false);
         setShowPlayers(false);
         setMobileSidebarOpen(false);
+        setShowReports(false);
     }
     function goVerwaltung() {
         setSelectedPlayerId(null);
@@ -1208,6 +1230,7 @@ function SpielerAkte() {
         setShowPlayers(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
+        setShowReports(false);
     }
     function goGlobalCalendar() {
         setSelectedPlayerId(null);
@@ -1220,6 +1243,7 @@ function SpielerAkte() {
         setShowPlayers(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
+        setShowReports(false);
     }
     function goAllUnits() {
         setSelectedPlayerId(null);
@@ -1232,6 +1256,52 @@ function SpielerAkte() {
         setShowPlayers(false);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
+        setShowReports(false);
+    }
+    async function toggleStar(playerId) {
+        const next = watchlist.includes(playerId) ? watchlist.filter((id) => id !== playerId) : [...watchlist, playerId];
+        setWatchlist(next);
+        try {
+            await db.collection("scouting").doc("watchlist").set({ playerIds: next }, { merge: true });
+            setSaveError(false);
+        }
+        catch (e) {
+            setSaveError(true);
+        }
+    }
+    function dossierProps(p) {
+        return { teams, statCategories, privateData: privateData[p.id], wellnessEntries: sortByDateDesc(wellnessData[p.id]?.entries || []), events: calendarEvents, allPlayers: players, eventAttendance, dbbData };
+    }
+    // Zusaetzlich zu den automatischen Firestore-Backups: alle Daten als Datei
+    // auf den eigenen Rechner (z. B. vor groesseren Aenderungen)
+    const BACKUP_COLLECTIONS = ["club", "accounts", "players", "playerPrivate", "playerWellness", "playerTrainingLoad", "playerGrades", "calendarEvents", "eventAttendance", "teamNotes", "devPlanPlayer", "devPlanTrainer", "devPlanCombined", "feedbackTrainerToPlayer", "feedbackPlayerToTrainer", "scouting", "dbbTeams"];
+    async function runBackupNow() {
+        setBackupState("busy");
+        try {
+            const out = { createdAt: new Date().toISOString(), collections: {} };
+            let count = 0;
+            for (const c of BACKUP_COLLECTIONS) {
+                const snap = await db.collection(c).get().catch(() => null);
+                if (!snap)
+                    continue;
+                out.collections[c] = Object.fromEntries(snap.docs.map((d) => [d.id, d.data()]));
+                count += snap.size;
+            }
+            const blob = new Blob([JSON.stringify(out, null, 1)], { type: "application/json" });
+            const a = document.createElement("a");
+            a.href = URL.createObjectURL(blob);
+            a.download = `Spieler-Akte_Sicherung_${today()}.json`;
+            a.click();
+            setTimeout(() => URL.revokeObjectURL(a.href), 5000);
+            setBackupState({ ok: true, text: `Gespeichert: ${count} Einträge (${Math.round(blob.size / 1024)} KB)` });
+        }
+        catch (e) {
+            setBackupState({ ok: false, text: "Sicherung fehlgeschlagen: " + (e.message || e) });
+        }
+    }
+    function goReports() {
+        goHome();
+        setShowReports(true);
     }
     function goAttendance() {
         setSelectedPlayerId(null);
@@ -1243,6 +1313,7 @@ function SpielerAkte() {
         setShowAttendance(true);
         setConfirmDeletePlayer(false);
         setMobileSidebarOpen(false);
+        setShowReports(false);
     }
     function handleAddTeam(team) {
         const newTeam = { id: uid(), ...team };
@@ -1658,6 +1729,7 @@ function SpielerAkte() {
                             dividerBefore: isFullTrainer,
                             onClick: () => (notifPermission === "granted" ? disableNotifications() : enableNotifications()),
                         }] : []),
+                        { label: "Kalender abonnieren", icon: IconCalendar, onClick: () => setModal("calendarFeed"), dividerBefore: !messaging && isFullTrainer },
                         { label: "Abmelden", icon: IconExternal, onClick: handleLogout, danger: true, dividerBefore: isFullTrainer && !messaging },
                     ] }))),
         notifError && (React.createElement("div", { className: "bg-red-50 border-b border-red-200 px-4 sm:px-6 py-1.5 text-xs text-red-700" }, notifError)),
@@ -1669,13 +1741,14 @@ function SpielerAkte() {
                     React.createElement("button", { onClick: () => setMobileSidebarOpen(false), className: "p-1.5 rounded-lg hover:bg-stone-100 text-slate-500", "aria-label": "Schließen" },
                         React.createElement(IconX, { size: 18 }))),
                 React.createElement("div", { className: "flex flex-col gap-1" }, [
-                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && !selectedPlayerId && selectedTeamId === "all" },
+                    { key: "dashboard", label: "Dashboard", icon: IconHome, onClick: goHome, active: !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && !showReports && !selectedPlayerId && selectedTeamId === "all" },
                     { key: "players", label: "Spieler", icon: IconUsers, onClick: goPlayers, active: showPlayers, count: players.length },
                     { key: "calendar", label: "Kalender", icon: IconCalendar, onClick: goGlobalCalendar, active: showGlobalCalendar },
                     { key: "allunits", label: "Alle Einheiten", icon: IconClipboard, onClick: goAllUnits, active: showAllUnits },
                     { key: "attendance", label: "Anwesenheit", icon: IconCheck, onClick: goAttendance, active: showAttendance },
+                    { key: "berichte", label: "Berichte", icon: IconFile, onClick: goReports, active: showReports, count: watchlist.length ? "★ " + watchlist.length : undefined },
                     { key: "verwaltung", label: "Verwaltung", icon: IconSettings, onClick: goVerwaltung, active: showVerwaltung },
-                ].filter((item) => item.key !== "verwaltung" || isFullTrainer).map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#C43E0E]/10 to-[#C43E0E]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
+                ].filter((item) => (item.key !== "verwaltung" && item.key !== "berichte") || isFullTrainer).map((item) => React.createElement("button", { key: item.key, onClick: item.onClick, className: `flex items-center gap-2.5 px-3 py-2 rounded-xl text-sm font-semibold transition ${item.active ? "bg-gradient-to-r from-[#C43E0E]/10 to-[#C43E0E]/10 text-slate-900" : "text-slate-600 hover:bg-stone-100"}` },
                     React.createElement(item.icon, { size: 16, className: item.active ? "text-[#C43E0E]" : "text-slate-400" }),
                     React.createElement("span", { className: "flex-1 text-left" }, item.label),
                     item.count !== undefined && React.createElement("span", { className: "text-xs font-medium text-slate-400 tabular-nums" }, item.count)))),
@@ -1791,14 +1864,16 @@ function SpielerAkte() {
                         { key: "statFields", label: "Statistik-Kategorien", desc: "Felder für Spielstatistiken bearbeiten.", icon: IconSettings, grad: "from-slate-700 to-slate-900", onClick: () => setModal("statFields") },
                         { key: "testTypes", label: "Test-Arten", desc: "Auswahlliste für Athletik-Tests pflegen.", icon: IconClipboard, grad: "from-[#FF6A2B] to-[#C43E0E]", onClick: () => setModal("testTypes") },
                         { key: "devPlanTemplates", label: "Development-Plan-Fragen", desc: "Fragebögen für Spieler/Trainer-Bogen anpassen.", icon: IconClipboard, grad: "from-slate-900 to-[#A8350C]", onClick: () => setModal("devPlanTemplates") },
+                        { key: "backup", label: backupState === "busy" ? "Sicherung läuft…" : "Datensicherung herunterladen", desc: backupState && backupState !== "busy" ? backupState.text : "Automatisch: täglich (7 Tage) und sonntags (14 Wochen). Hier zusätzlich als Datei.", icon: IconDownload, grad: "from-emerald-600 to-slate-900", onClick: () => backupState !== "busy" && runBackupNow() },
                         { key: "feedbackTemplates", label: "Feedback-Fragen", desc: "Fragen und Bewertungs-Kategorien für den Feedback-Loop anpassen.", icon: IconMessage, grad: "from-[#C43E0E] to-slate-900", onClick: () => setModal("feedbackTemplates") },
                     ].map((x) => React.createElement("button", { key: x.key, onClick: x.onClick, className: `${cardClass} p-5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all` },
                         React.createElement("span", { className: `w-10 h-10 rounded-xl bg-gradient-to-br ${x.grad} text-white flex items-center justify-center mb-3` },
                             React.createElement(x.icon, { size: 17 })),
                         React.createElement("p", { className: "text-sm font-semibold text-slate-800" }, x.label),
                         React.createElement("p", { className: "text-xs text-slate-400 mt-1" }, x.desc)))))),
-                !selectedPlayer && showPlayers && isTrainer && (React.createElement(PlayersPage, { players: players, teams: visibleTeams, onSelectPlayer: selectPlayer, onOpenTeam: goTeam, onAddPlayer: () => setModal("player"), canAddPlayer: visibleTeams.length > 0 })),
-                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onOpenTeam: goTeam, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits, dbbData: dbbData, dbbSyncing: dbbSyncing, onRefreshDbb: runDbbSync, onOpenStatsImport: openStatsImport, onManageTeams: isFullTrainer ? () => setModal("teams") : null })),
+                !selectedPlayer && showPlayers && isTrainer && (React.createElement(PlayersPage, { players: players, teams: visibleTeams, watchlist: isFullTrainer ? watchlist : [], onSelectPlayer: selectPlayer, onOpenTeam: goTeam, onAddPlayer: () => setModal("player"), canAddPlayer: visibleTeams.length > 0 })),
+                !selectedPlayer && showReports && isFullTrainer && React.createElement(ReportsPage, { teams: visibleTeams, players, events: calendarEvents, dbbData, statCategories, wellnessData, trainingLoadData, eventAttendance, devPlanWaiting, feedbackWaiting, watchlist, onToggleStar: toggleStar, onSelectPlayer: selectPlayer, dossierProps }),
+                !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && !showReports && selectedTeamId === "all" && isTrainer && (React.createElement(TrainerDashboard, { events: calendarEvents, teams: visibleTeams, players: players, wellnessData: wellnessData, trainingLoadData: trainingLoadData, eventAttendance: eventAttendance, devPlanWaiting: devPlanWaiting, feedbackWaiting: feedbackWaiting, onSelectTeam: goToTeamCalendar, onOpenTeam: goTeam, onSelectPlayer: selectPlayer, onAddEvent: addCalendarEvent, onEditEvent: editCalendarEvent, onDeleteEvent: deleteCalendarEvent, onOpenNoteForm: () => setModal("teamNoteDashboard"), onGoToAllUnits: goAllUnits, dbbData: dbbData, dbbSyncing: dbbSyncing, onRefreshDbb: runDbbSync, onOpenStatsImport: openStatsImport, onManageTeams: isFullTrainer ? () => setModal("teams") : null })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && showAttendance && isTrainer && (React.createElement(AttendanceView, { events: calendarEvents, teams: visibleTeams, allPlayers: players, eventAttendance: eventAttendance, onSetAttendance: setPlayerAttendance, onSelectPlayer: selectPlayer })),
                 !selectedPlayer && !showGlobalCalendar && !showVerwaltung && !showAllUnits && selectedTeamId === "all" && !isTrainer && (React.createElement("div", { className: "h-full min-h-[400px] flex flex-col items-center justify-center text-center text-slate-400 gap-2" },
                     React.createElement(IconUsers, { size: 36 }),
@@ -1829,6 +1904,9 @@ function SpielerAkte() {
                                             isInjured(selectedPlayer) && React.createElement("span", { className: `text-[11px] font-bold px-2 py-0.5 rounded-full ${injuryCountdown(selectedPlayer).overdue ? "bg-amber-400 text-slate-900" : "bg-rose-500 text-white"}`, title: selectedPlayer.injuryUntil ? "Zurück voraussichtlich am " + fmtDate(selectedPlayer.injuryUntil) : "" }, injuryCountdown(selectedPlayer).label)),
                                         isInjured(selectedPlayer) && selectedPlayer.injuryReason && React.createElement("p", { className: "text-xs text-white/60 mt-1.5" }, selectedPlayer.injuryReason, selectedPlayer.injuryUntil ? ` · zurück am ${fmtDate(selectedPlayer.injuryUntil)}` : "")),
                                     React.createElement("div", { className: "flex gap-2 shrink-0" },
+                                        isFullTrainer && React.createElement("button", { onClick: () => toggleStar(selectedPlayer.id), className: `p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-black/35 ${watchlist.includes(selectedPlayer.id) ? "text-amber-400" : "text-white/80"}`, "aria-label": watchlist.includes(selectedPlayer.id) ? "Von der Merkliste nehmen" : "Auf die Merkliste", title: watchlist.includes(selectedPlayer.id) ? "Von der Merkliste nehmen" : "Auf die Merkliste (★)" },
+                                            React.createElement(IconStar, { size: 16, filled: watchlist.includes(selectedPlayer.id) })),
+                                        isFullTrainer && React.createElement(DossierExportButton, { player: selectedPlayer, dossierProps: dossierProps(selectedPlayer) }),
                                         isTrainer && (isFullTrainer || (trainerTeamIds || []).includes(selectedPlayer.teamId)) && (React.createElement(React.Fragment, null,
                                             React.createElement("button", { onClick: () => setModal("editPlayer"), className: "p-1.5 sm:p-2 rounded-lg bg-black/20 hover:bg-black/35 text-white/80", "aria-label": "Bearbeiten" },
                                                 React.createElement(IconEdit, { size: 16 })),
@@ -1901,6 +1979,7 @@ function SpielerAkte() {
                     })(),
                     React.createElement("div", { className: "mt-5 min-w-0" },
                         activeTab === "uebersicht" && (React.createElement("div", { className: "space-y-5" },
+                            (isInjured(selectedPlayer) || (selectedPlayer.injuryHistory || []).length > 0 || (isTrainer && (isFullTrainer || (trainerTeamIds || []).includes(selectedPlayer.teamId)))) && React.createElement(InjuryHistoryCard, { player: selectedPlayer, canEdit: isTrainer && (isFullTrainer || (trainerTeamIds || []).includes(selectedPlayer.teamId)), onSave: (injuryHistory) => persistPlayerFields(selectedPlayer.id, { injuryHistory }) }),
                             React.createElement(TeamGameCard, { doc: dbbData[selectedPlayer.teamId], teamName: selectedTeam?.name }),
                             (selectedPlayer.dlTeamIds || []).map((id) => React.createElement(TeamGameCard, { key: id, doc: dbbData[id], teamName: (teams.find((t) => t.id === id)?.name || "") + " · Doppellizenz" })),
                             // Spieler-Zugang: offene Aufgaben (Belastung/Check-in) direkt auf der
@@ -2252,6 +2331,8 @@ function SpielerAkte() {
             React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null), defaultType: videoDefaultType }))),
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(NoteForm, { onSubmit: handleAddNote, onClose: () => setModal(null) }))),
+        modal === "calendarFeed" && (React.createElement(Modal, { title: "Kalender abonnieren", onClose: () => setModal(null) },
+            React.createElement(CalendarSubscribe, null))),
         modal === "accounts" && (React.createElement(Modal, { title: "Zug\u00E4nge verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, teams: teams, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onUpdateTeams: updateAccountTeams, onDelete: deleteAccount, onClose: () => setModal(null) }))),
         modal === "devPlanTemplates" && (React.createElement(Modal, { title: "Development-Plan-Fragen verwalten", onClose: () => setModal(null), wide: true },

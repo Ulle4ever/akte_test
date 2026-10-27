@@ -89,10 +89,13 @@ service cloud.firestore {
     match /accounts/{uid} {
       // Zugaenge verwalten (anlegen/loeschen/einsehen) bleibt dem Vollzugriff-
       // Trainer vorbehalten - ein team-beschraenkter Trainer darf sich so nicht
-      // selbst mehr Rechte geben. Den eigenen Account-Eintrag (z.B. Push-Token)
-      // darf trotzdem jeder selbst lesen/schreiben.
+      // selbst mehr Rechte geben. Am eigenen Account-Eintrag darf jeder nur die
+      // Push-Tokens aendern - sonst koennte sich ein Spieler-Zugang selbst
+      // role: 'trainer' geben. (Kalender-Abo-Link setzt die Cloud Function.)
       allow read: if isSignedIn() && (request.auth.uid == uid || isFullTrainer());
-      allow write: if isFullTrainer() || request.auth.uid == uid;
+      allow write: if isFullTrainer()
+        || (request.auth.uid == uid && resource != null
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notificationTokens']));
     }
 
     // Öffentlichere Spieler-Daten: Stammdaten, Statistiken, Videos.
@@ -190,6 +193,11 @@ service cloud.firestore {
         || trainerHasTeam(request.resource.data.teamId);
       allow update, delete: if isFullTrainer()
         || trainerHasTeam(resource.data.teamId);
+    }
+
+    // Merkliste (Stern-Spieler) der sportlichen Leitung: nur Main Accounts.
+    match /scouting/{docId} {
+      allow read, write: if isFullTrainer();
     }
 
     // Rotationspläne: reines (aktuell ungenutztes) Vorbereitungs-Werkzeug, bleibt

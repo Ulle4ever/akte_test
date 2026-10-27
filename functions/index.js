@@ -17,7 +17,8 @@
    ============================================================ */
 const { onDocumentCreated } = require("firebase-functions/v2/firestore");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
-const { onCall, HttpsError } = require("firebase-functions/v2/https");
+const { onCall, onRequest, HttpsError } = require("firebase-functions/v2/https");
+const crypto = require("crypto");
 const { initializeApp } = require("firebase-admin/app");
 const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getMessaging } = require("firebase-admin/messaging");
@@ -43,9 +44,22 @@ function formatDateDE(dateStr) {
     return `${d}.${m}.${y}`;
 }
 
+// Heutiges Datum in deutscher Zeit (die Functions laufen in UTC)
 function todayIso() {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+    const p = new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Berlin", year: "numeric", month: "2-digit", day: "2-digit" }).formatToParts(new Date());
+    const g = (t) => p.find((x) => x.type === t).value;
+    return `${g("year")}-${g("month")}-${g("day")}`;
+}
+function addDaysIsoFn(iso, days) {
+    const d = new Date(iso + "T00:00:00Z");
+    d.setUTCDate(d.getUTCDate() + days);
+    return d.toISOString().slice(0, 10);
+}
+// Team-Zugriff eines Trainer-Zugangs: Liste oder null (= Main Account)
+function accountTeamIdsFn(acc) {
+    if (Array.isArray(acc.teamIds) && acc.teamIds.length)
+        return acc.teamIds;
+    return acc.teamId ? [acc.teamId] : null;
 }
 
 // Exakt dieselbe Logik wie getEventAttendees() in index.html - welche
@@ -74,16 +88,23 @@ async function loadAllPlayers() {
 async function sendToPlayerIds(playerIds, title, body, data) {
     if (playerIds.length === 0)
         return;
-    const tokenToUid = new Map();
+    const accountDocs = [];
     for (let i = 0; i < playerIds.length; i += 30) {
         // Firestore "in" erlaubt max. 30 Werte pro Abfrage
         const chunk = playerIds.slice(i, i + 30);
         const snap = await db.collection("accounts").where("playerId", "in", chunk).get();
-        snap.forEach((doc) => {
-            const acc = doc.data();
-            (acc.notificationTokens || []).forEach((t) => tokenToUid.set(t, doc.id));
-        });
+        accountDocs.push(...snap.docs);
     }
+    await sendToAccountDocs(accountDocs, title, body, data);
+}
+// Trainer-Zugaenge, die filter(account) erfuellen (z. B. nur Main Accounts)
+async function sendToTrainers(filter, title, body, data) {
+    const snap = await db.collection("accounts").where("role", "==", "trainer").get();
+    await sendToAccountDocs(snap.docs.filter((d) => filter(d.data())), title, body, data);
+}
+async function sendToAccountDocs(accountDocs, title, body, data) {
+    const tokenToUid = new Map();
+    accountDocs.forEach((doc) => (doc.data().notificationTokens || []).forEach((t) => tokenToUid.set(t, doc.id)));
     if (tokenToUid.size === 0)
         return;
     const tokens = Array.from(tokenToUid.keys());
@@ -145,7 +166,7 @@ exports.deleteAccountAuth = onCall({ region: "europe-west1" }, async (request) =
         throw new HttpsError("unauthenticated", "Bitte eingeloggt sein.");
     const callerSnap = await db.collection("accounts").doc(request.auth.uid).get();
     const caller = callerSnap.exists ? callerSnap.data() : null;
-    const isFullTrainer = caller && caller.role === "trainer" && !caller.teamId;
+    const isFullTrainer = caller && caller.role === "trainer" && !accountTeamIdsFn(caller);
     if (!isFullTrainer)
         throw new HttpsError("permission-denied", "Nur Vollzugriff-Trainer duerfen Zugaenge entfernen.");
     const uid = request.data?.uid;
@@ -427,3 +448,145 @@ exports.syncDbbNow = onCall({ region: "europe-west1", timeoutSeconds: 300 }, asy
     const ownTeamIds = Array.isArray(acc.teamIds) && acc.teamIds.length ? acc.teamIds : (acc.teamId ? [acc.teamId] : null);
     return { results: await syncAllDbbTeams(ownTeamIds) };
 });
+
+/* ---------------- Wochenbericht (nur Main Accounts) ----------------
+   Der Bericht selbst wird in der App aus den aktuellen Daten erstellt (und dort
+   als PDF exportiert). Montags 7 Uhr bekommen die Main Accounts nur den Hinweis. */
+exports.weeklyReportReminder = onSchedule({ schedule: "0 7 * * 1", timeZone: "Europe/Berlin", region: "europe-west1" }, async () => {
+    const lastWeek = isoWeekKey(addDaysIsoFn(todayIso(), -3)).split("-W")[1];
+    await sendToTrainers((acc) => !accountTeamIdsFn(acc), `Wochenbericht KW ${Number(lastWeek)}`, "Ergebnisse, Top-Spieler, Verletzungen und offene Punkte der letzten Woche sind fertig.", { type: "weeklyReport" });
+});
+
+/* ---------------- Verletzung: Rueckkehr faellig ----------------
+   Taeglich 8 Uhr: Spieler, deren voraussichtliche Rueckkehr heute ist, an die
+   Trainer seines Teams und die Main Accounts melden. */
+exports.injuryReturnReminder = onSchedule({ schedule: "0 8 * * *", timeZone: "Europe/Berlin", region: "europe-west1" }, async () => {
+    const t = todayIso();
+    const due = (await loadAllPlayers()).filter((p) => ["verletzt", "reha"].includes(p.status) && p.injuryUntil === t);
+    for (const p of due) {
+        const body = `${p.name}${p.injuryReason ? " (" + p.injuryReason + ")" : ""} ist laut Plan ab heute wieder fit - bitte Status prüfen.`;
+        await sendToTrainers((acc) => { const ids = accountTeamIdsFn(acc); return !ids || ids.includes(p.teamId); }, "Rückkehr fällig", body, { type: "injuryReturn", playerId: p.id });
+    }
+});
+
+/* ---------------- Kalender-Abo (ICS) ----------------
+   Jeder Zugang kann sich einen geheimen Abo-Link erzeugen (icsToken im
+   Account). Handy-/Outlook-Kalender holen darueber regelmaessig die Termine:
+   Spieler: eigenes Team (+ Doppellizenz-Teams) und Einladungen,
+   Team-Trainer: ihre Teams, Main Accounts: alle Teams. */
+const CALENDAR_FEED_BASE = "https://rsk-test-dev.web.app/kalender/";
+exports.getCalendarFeedUrl = onCall({ region: "europe-west1" }, async (request) => {
+    if (!request.auth)
+        throw new HttpsError("unauthenticated", "Bitte eingeloggt sein.");
+    const ref = db.collection("accounts").doc(request.auth.uid);
+    const snap = await ref.get();
+    if (!snap.exists)
+        throw new HttpsError("permission-denied", "Kein Zugang hinterlegt.");
+    let token = snap.data().icsToken;
+    if (!token || request.data?.reset) {
+        token = crypto.randomBytes(18).toString("hex");
+        await ref.update({ icsToken: token });
+    }
+    return { url: CALENDAR_FEED_BASE + token + ".ics" };
+});
+function icsEscape(s) {
+    return String(s || "").replace(/\\/g, "\\\\").replace(/;/g, "\\;").replace(/,/g, "\\,").replace(/\r?\n/g, "\\n");
+}
+function icsFold(line) {
+    const out = [];
+    let rest = line;
+    while (rest.length > 74) {
+        out.push(rest.slice(0, 74));
+        rest = " " + rest.slice(74);
+    }
+    out.push(rest);
+    return out.join("\r\n");
+}
+const ICS_DEFAULT_MINUTES = { spiel: 120, training: 90 };
+function eventToIcs(e, stamp, prefix) {
+    const d = (e.date || "").replace(/-/g, "");
+    const lines = ["BEGIN:VEVENT", `UID:${e.id}@rsk-spieler-akte`, `DTSTAMP:${stamp}`];
+    if (/^\d{1,2}:\d{2}$/.test(e.time || "")) {
+        const [h, m] = e.time.split(":").map(Number);
+        let end = e.endTime && /^\d{1,2}:\d{2}$/.test(e.endTime) ? e.endTime.split(":").map(Number) : null;
+        if (!end) {
+            const total = h * 60 + m + (ICS_DEFAULT_MINUTES[e.type] || 90);
+            end = [Math.min(23, Math.floor(total / 60)), total >= 24 * 60 ? 59 : total % 60];
+        }
+        const hhmm = (x, y) => `${String(x).padStart(2, "0")}${String(y).padStart(2, "0")}00`;
+        lines.push(`DTSTART;TZID=Europe/Berlin:${d}T${hhmm(h, m)}`, `DTEND;TZID=Europe/Berlin:${d}T${hhmm(end[0], end[1])}`);
+    }
+    else {
+        lines.push(`DTSTART;VALUE=DATE:${d}`, `DTEND;VALUE=DATE:${addDaysIsoFn(e.date, 1).replace(/-/g, "")}`);
+    }
+    const title = (prefix ? prefix + " · " : "") + (e.dbbResult ? `${e.title} (${e.dbbResult})` : e.title);
+    lines.push(`SUMMARY:${icsEscape(title)}`);
+    if (e.location)
+        lines.push(`LOCATION:${icsEscape(e.location)}`);
+    if (e.notes)
+        lines.push(`DESCRIPTION:${icsEscape(e.notes)}`);
+    lines.push("END:VEVENT");
+    return lines.map(icsFold).join("\r\n");
+}
+exports.calendarFeed = onRequest({ region: "europe-west1" }, async (req, res) => {
+    const token = (req.path.match(/([a-f0-9]{24,64})(\.ics)?$/) || [])[1];
+    if (!token) {
+        res.status(404).send("Kalender nicht gefunden.");
+        return;
+    }
+    const accSnap = await db.collection("accounts").where("icsToken", "==", token).limit(1).get();
+    if (accSnap.empty) {
+        res.status(404).send("Kalender nicht gefunden.");
+        return;
+    }
+    const acc = accSnap.docs[0].data();
+    const since = addDaysIsoFn(todayIso(), -60);
+    let events = [];
+    const meta = await db.collection("club").doc("meta").get();
+    const teams = (meta.exists ? meta.data().teams : null) || [];
+    let calName = "RheinStars";
+    let multiTeam = true, ownTeamId = null;
+    const teamNameOf = (id) => (teams.find((t) => t.id === id) || {}).name || "";
+    if (acc.role === "player" && acc.playerId) {
+        const pSnap = await db.collection("players").doc(acc.playerId).get();
+        const p = pSnap.exists ? pSnap.data() : {};
+        const teamIds = [p.teamId, ...(p.dlTeamIds || [])].filter(Boolean);
+        const snaps = await Promise.all([
+            ...teamIds.map((t) => db.collection("calendarEvents").where("teamId", "==", t).get()),
+            db.collection("calendarEvents").where("includedPlayerIds", "array-contains", acc.playerId).get(),
+        ]);
+        const byId = new Map();
+        snaps.forEach((sn) => sn.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() })));
+        events = [...byId.values()].filter((e) => !(e.teamId === p.teamId && (e.excludedPlayerIds || []).includes(acc.playerId)));
+        calName = `RheinStars · ${p.name || "Spieler"}`;
+        multiTeam = false;
+        ownTeamId = p.teamId;
+    }
+    else if (acc.role === "trainer") {
+        const ids = accountTeamIdsFn(acc);
+        const snaps = ids
+            ? await Promise.all(ids.map((t) => db.collection("calendarEvents").where("involvedTeamIds", "array-contains", t).get()))
+            : [await db.collection("calendarEvents").where("date", ">=", since).get()];
+        const byId = new Map();
+        snaps.forEach((sn) => sn.docs.forEach((d) => byId.set(d.id, { id: d.id, ...d.data() })));
+        events = [...byId.values()];
+        calName = ids ? `RheinStars · ${ids.map(teamNameOf).filter(Boolean).join(", ")}` : "RheinStars · alle Teams";
+        multiTeam = !ids || ids.length > 1;
+    }
+    events = events.filter((e) => e.date && e.date >= since);
+    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+/, "");
+    const body = [
+        "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//RheinStars//Spieler-Akte//DE", "CALSCALE:GREGORIAN", "METHOD:PUBLISH",
+        icsFold(`X-WR-CALNAME:${icsEscape(calName)}`), "X-WR-TIMEZONE:Europe/Berlin", "REFRESH-INTERVAL;VALUE=DURATION:PT6H",
+        ...events.map((e) => eventToIcs(e, stamp, e.teamId && (multiTeam || e.teamId !== ownTeamId) ? teamNameOf(e.teamId) : "")),
+        "END:VCALENDAR",
+    ].join("\r\n");
+    res.set("Content-Type", "text/calendar; charset=utf-8");
+    res.set("Cache-Control", "private, max-age=900");
+    res.status(200).send(body);
+});
+
+/* ---------------- Backup ----------------
+   Laeuft ueber die eingebauten Firestore-Backups (kein Code noetig):
+   taeglich (7 Tage aufbewahrt) + sonntags (14 Wochen aufbewahrt), eingerichtet mit
+   firebase firestore:backups:schedules:create. Wiederherstellen siehe README. */

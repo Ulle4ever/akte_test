@@ -1162,7 +1162,7 @@ function FeedbackTemplatesEditor({ questions, categories, onSaveQuestions, onAdd
 // Eigene Spieler-Seite (ersetzt die lange Spielerliste in der Seitenleiste):
 // Karten-Raster nach Team gruppiert, mit Filtern nach Team, Status und Name.
 const PLAYERS_COLLAPSED_KEY = "rsk.playersCollapsed";
-function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, canAddPlayer }) {
+function PlayersPage({ players, teams, watchlist, onSelectPlayer, onOpenTeam, onAddPlayer, canAddPlayer }) {
     const [teamFilter, setTeamFilter] = useState("all");
     const [statusFilter, setStatusFilter] = useState("all");
     const [query, setQuery] = useState("");
@@ -1240,7 +1240,7 @@ function PlayersPage({ players, teams, onSelectPlayer, onOpenTeam, onAddPlayer, 
                         ? React.createElement("img", { src: cloudinaryImage(p.photoUrl, 44, 44), alt: "", loading: "lazy", className: "w-9 h-9 sm:w-11 sm:h-11 rounded-xl object-cover shrink-0" })
                         : React.createElement("span", { className: "w-9 h-9 sm:w-11 sm:h-11 rounded-xl bg-gradient-to-br from-slate-800 to-slate-900 text-white flex items-center justify-center text-sm font-black shrink-0" }, hasNumber ? p.number : (splitName(p.name).first || p.name).charAt(0).toUpperCase()),
                     React.createElement("span", { className: "min-w-0 flex-1" },
-                        React.createElement("span", { className: "block text-sm font-semibold text-slate-900 leading-snug line-clamp-2 [hyphens:auto] break-words group-hover:text-[#C43E0E] transition-colors", title: p.name }, p.name),
+                        React.createElement("span", { className: "block text-sm font-semibold text-slate-900 leading-snug line-clamp-2 [hyphens:auto] break-words group-hover:text-[#C43E0E] transition-colors", title: p.name }, (watchlist || []).includes(p.id) && React.createElement("span", { className: "text-amber-500 mr-1", "aria-label": "Merkliste" }, "★"), p.name),
                         React.createElement("span", { className: "flex items-center gap-1.5 text-xs text-slate-500 mt-0.5 min-w-0" },
                             React.createElement("span", { className: `w-1.5 h-1.5 rounded-full shrink-0 ${st?.dot || "bg-slate-300"}` }),
                             isInjured(p)

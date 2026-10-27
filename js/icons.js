@@ -137,3 +137,8 @@ const IconUpload = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
     React.createElement("polyline", { points: "17 8 12 3 7 8" }),
     React.createElement("line", { x1: "12", y1: "3", x2: "12", y2: "15" }));
+const IconStar = ({ filled, ...p }) => React.createElement(Icon, { ...p },
+    React.createElement("polygon", { points: "12 2 15.09 8.26 22 9.27 17 14.14 18.18 21.02 12 17.77 5.82 21.02 7 14.14 2 9.27 8.91 8.26 12 2", fill: filled ? "currentColor" : "none" }));
+const IconLink = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71" }),
+    React.createElement("path", { d: "M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71" }));

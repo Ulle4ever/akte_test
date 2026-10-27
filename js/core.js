@@ -182,7 +182,16 @@ const DEFAULT_TEST_TYPES = [
     { id: "bench1rm", label: "Bankdrücken 1RM" },
 ];
 const uid = () => Date.now().toString(36) + Math.random().toString(36).slice(2, 8);
-const today = () => new Date().toISOString().slice(0, 10);
+// Lokales Datum (nicht UTC - sonst waere es zwischen 0 und 2 Uhr noch "gestern")
+const today = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+};
+// Saisonbeginn (1. August) der laufenden Saison
+function seasonStartIso() {
+    const d = new Date();
+    return `${d.getMonth() >= 7 ? d.getFullYear() : d.getFullYear() - 1}-08-01`;
+}
 function isoWeekKey(dateStr) {
     // Datum bewusst direkt als UTC-Mitternacht des Y-M-D bauen statt per
     // "new Date(str + 'T00:00:00')" lokal zu parsen - sonst verschieben
