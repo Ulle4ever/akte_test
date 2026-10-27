@@ -1251,15 +1251,17 @@ function PlayersPage({ players, teams, watchlist, onSelectPlayer, onOpenTeam, on
 function TeamOverviewTable({ team, players, privateData, statCategories, onSelectPlayer }) {
     const normalCat = statCategories.find((c) => c.id === "normal") || statCategories[0];
     const normalFields = normalCat ? normalCat.fields.filter((f) => f.kind !== "shooting") : [];
+    // Nur die Spiele fuer dieses Team (Doppellizenz: die andere Liga zaehlt hier nicht)
+    function teamEntries(playerId) {
+        const p = players.find((x) => x.id === playerId);
+        return p ? (team ? statsForTeam(p, team.id) : p.stats || []) : [];
+    }
     function avgFor(playerId, fieldId) {
-        const entries = (players.find((p) => p.id === playerId)?.stats) || [];
-        if (entries.length === 0)
-            return "–";
-        const sum = entries.reduce((acc, s) => acc + (Number(s[fieldId]) || 0), 0);
-        return fmtNum(sum / entries.length, 1);
+        const vals = teamEntries(playerId).map((s) => s[fieldId]).filter((v) => v !== null && v !== undefined && v !== "" && !isNaN(Number(v))).map(Number);
+        return vals.length ? fmtNum(vals.reduce((a, b) => a + b, 0) / vals.length, 1) : "–";
     }
     function fgPctFor(playerId) {
-        const entries = (players.find((p) => p.id === playerId)?.stats) || [];
+        const entries = teamEntries(playerId);
         const made = entries.reduce((acc, s) => acc + (Number(s.fg_m) || 0), 0);
         const att = entries.reduce((acc, s) => acc + (Number(s.fg_a) || 0), 0);
         return att ? `${Math.round((made / att) * 1000) / 10}%` : "–";

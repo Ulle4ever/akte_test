@@ -1168,7 +1168,11 @@ function SpielerAkte() {
     const playerWellnessEntries = selectedPlayer ? sortByDateDesc(wellnessData[selectedPlayer.id]?.entries || []) : [];
     const playerTrainingLoadEntries = selectedPlayer ? (trainingLoadData[selectedPlayer.id]?.entries || []) : [];
     const playerTrainingLoadEvents = selectedPlayer ? getPlayerVisibleEvents(calendarEvents, selectedPlayer) : [];
-    const avg = (key) => (playerStats.length ? fmtNum(playerStats.reduce((sum, s) => sum + (Number(s[key]) || 0), 0) / playerStats.length, 1) : "–");
+    // Schnitt nur ueber Spiele, in denen der Wert erfasst ist (Plus/Minus, EFF usw. fehlen je nach Quelle)
+    const avg = (key) => {
+        const vals = playerStats.map((s) => s[key]).filter((v) => v !== null && v !== undefined && v !== "" && !isNaN(Number(v))).map(Number);
+        return vals.length ? fmtNum(vals.reduce((a, b) => a + b, 0) / vals.length, 1) : "–";
+    };
     const totalPct = (madeKey, attKey) => {
         const made = playerStats.reduce((sum, s) => sum + (Number(s[madeKey]) || 0), 0);
         const att = playerStats.reduce((sum, s) => sum + (Number(s[attKey]) || 0), 0);

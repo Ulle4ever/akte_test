@@ -594,7 +594,8 @@ function StatForm({ onSubmit, onClose, statCategories, initialEntry, teamOptions
                     entry[`${f.id}_a`] = n(`${f.id}_a`);
                 }
                 else {
-                    entry[f.id] = n(f.id);
+                    // Leer gelassen = nicht erfasst (sonst zieht eine 0 den Schnitt runter)
+                    entry[f.id] = String(form[f.id] ?? "").trim() === "" ? null : n(f.id);
                 }
             });
         });
