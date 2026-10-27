@@ -825,7 +825,7 @@ function TrainingLoadPanel({ isTrainer, isOwnAccount, events, entries, onAddEntr
             React.createElement("span", { className: `text-xs font-semibold rounded-full px-2.5 py-1 ${zone.cls}` }, zone.label)),
         form,
         React.createElement("div", null,
-            weekGroups.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
+            weekGroups.length > 0 && React.createElement("div", { className: "flex items-baseline justify-between gap-2" }, React.createElement(SectionLabel, null, "Verlauf"), React.createElement("span", { className: "text-[11px] text-slate-400" }, "Einträge älter als 6 Wochen werden automatisch gelöscht")),
             React.createElement("div", { className: "space-y-2 mt-2" }, weekGroups.length === 0
                 ? React.createElement("p", { className: "text-sm text-slate-400 text-center py-8" }, "Noch keine Belastungsdaten vorhanden.")
                 : weekGroups.map((g, i) => {
@@ -894,7 +894,7 @@ function WellnessPanel({ isTrainer, isOwnAccount, entries, onAddEntry, onDeleteE
     return React.createElement("div", { className: "space-y-4" },
         form,
         React.createElement("div", null,
-            weekGroups.length > 0 && React.createElement(SectionLabel, null, "Verlauf"),
+            weekGroups.length > 0 && React.createElement("div", { className: "flex items-baseline justify-between gap-2" }, React.createElement(SectionLabel, null, "Verlauf"), React.createElement("span", { className: "text-[11px] text-slate-400" }, "Einträge älter als 6 Wochen werden automatisch gelöscht")),
             React.createElement("div", { className: "space-y-2 mt-2" }, historyBody)));
 }
 function GradeChips({ grades, onRemove }) {

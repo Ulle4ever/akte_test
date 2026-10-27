@@ -592,3 +592,21 @@ exports.calendarFeed = onRequest({ region: "europe-west1" }, async (req, res) =>
    firebase firestore:backups:schedules:create. Wiederherstellen: Backups mit
    firebase firestore:backups:list anzeigen, dann in eine neue Datenbank
    firebase firestore:databases:restore -d <neue-db> -b <backup-name>. */
+
+/* ---------------- Monitoring aufraeumen ----------------
+   Jede Nacht 3:30 Uhr: Wellness-Check-ins und Trainingsbelastungen, die aelter
+   als 6 Wochen sind, endgueltig loeschen (die Belastungsberechnung ACWR braucht
+   4 Wochen Vorlauf, deshalb nicht schon nach einem Monat). */
+const MONITORING_KEEP_DAYS = 42;
+exports.cleanupOldMonitoring = onSchedule({ schedule: "30 3 * * *", timeZone: "Europe/Berlin", region: "europe-west1", timeoutSeconds: 300 }, async () => {
+    const cutoff = addDaysIsoFn(todayIso(), -MONITORING_KEEP_DAYS);
+    for (const coll of ["playerWellness", "playerTrainingLoad"]) {
+        const snap = await db.collection(coll).get();
+        for (const doc of snap.docs) {
+            const entries = doc.data().entries || [];
+            const kept = entries.filter((e) => !e.date || e.date >= cutoff);
+            if (kept.length !== entries.length)
+                await doc.ref.update({ entries: kept });
+        }
+    }
+});
