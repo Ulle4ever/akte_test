@@ -1944,20 +1944,26 @@ function SpielerAkte() {
                                         { label: "Größe", value: selectedPlayer.height ? `${selectedPlayer.height} cm` : "" },
                                         { label: "Position", value: selectedPlayer.position || "" },
                                         { label: "Gewicht", value: selectedPlayer.weight ? `${selectedPlayer.weight} kg` : "" },
-                                        { label: "Anwesenheit", value: playerLiveAttendanceQuote === null ? "" : `${playerLiveAttendanceQuote}%` },
                                         { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
+                                        // Kurzbilanz in einer Zeile rechts neben "Starke Hand": nur Werte, die in den Spielen auch erfasst sind
+                                        (() => {
+                                            const avgs = [["punkte", "PPG", "P"], ["rebounds", "RPG", "R"], ["assists", "APG", "A"]].map(([k, unit, short]) => {
+                                                const vals = playerStats.map((s) => s[k]).filter((v) => typeof v === "number");
+                                                return vals.length ? { n: fmtNum(vals.reduce((a, b) => a + b, 0) / vals.length, 1), unit, short } : null;
+                                            }).filter(Boolean);
+                                            // Am Handy ist die Spalte schmal: dort "11,0 P · 9,4 R" statt "PPG/RPG"
+                                            return { label: `Ø pro Spiel · ${playerStats.length} ${playerStats.length === 1 ? "Spiel" : "Spiele"}`, nowrap: true, value: avgs.map((a) => `${a.n} ${a.unit}`).join(" · "), shortValue: avgs.map((a) => `${a.n} ${a.short}`).join(" · ") };
+                                        })(),
+                                        { label: "Anwesenheit", value: playerLiveAttendanceQuote === null ? "" : `${playerLiveAttendanceQuote}%` },
                                         { label: "Nächster Termin", value: nextEvent ? `${new Date(nextEvent.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" })}${nextEvent.time ? ", " + nextEvent.time : ""}` : "", forceCol2: true },
-                                        // Kurzbilanz in einer Zeile: nur Werte, die in den Spielen auch erfasst sind
-                                        { label: `Ø pro Spiel · ${playerStats.length} ${playerStats.length === 1 ? "Spiel" : "Spiele"}`, wide: true, value: [["punkte", "PPG"], ["rebounds", "RPG"], ["assists", "APG"]].map(([k, unit]) => {
-                                            const vals = playerStats.map((s) => s[k]).filter((v) => typeof v === "number");
-                                            return vals.length ? `${fmtNum(vals.reduce((a, b) => a + b, 0) / vals.length, 1)} ${unit}` : null;
-                                        }).filter(Boolean).join(" · ") },
                                     ].filter((b) => b.value);
                                     if (bioItems.length === 0)
                                         return null;
                                     return React.createElement("div", { className: "grid grid-cols-2 gap-x-6 border-t border-white/10 pt-3" }, bioItems.map((b) => React.createElement("div", { key: b.label, className: `py-1.5 border-b border-white/10 ${b.wide ? "col-span-2" : b.forceCol2 ? "col-start-2" : ""}` },
                                         React.createElement("p", { className: "text-[10px] text-white/40 uppercase tracking-wide" }, b.label),
-                                        React.createElement("p", { className: "text-sm font-semibold text-white" }, b.value))));
+                                        React.createElement("p", { className: `${b.nowrap ? "text-[11px] sm:text-sm whitespace-nowrap" : "text-sm"} font-semibold text-white` }, b.shortValue
+                                            ? [React.createElement("span", { key: "s", className: "sm:hidden" }, b.shortValue), React.createElement("span", { key: "l", className: "hidden sm:inline" }, b.value)]
+                                            : b.value))));
                                 })()))),
                         (() => {
                             const todayEvents = getPlayerVisibleEvents(calendarEvents, selectedPlayer).filter((e) => e.date === isoDate(new Date()));
