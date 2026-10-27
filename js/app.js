@@ -1946,8 +1946,12 @@ function SpielerAkte() {
                                         { label: "Gewicht", value: selectedPlayer.weight ? `${selectedPlayer.weight} kg` : "" },
                                         { label: "Anwesenheit", value: playerLiveAttendanceQuote === null ? "" : `${playerLiveAttendanceQuote}%` },
                                         { label: "Starke Hand", value: HANDEDNESS_LABELS[selectedPlayer.handedness] || "" },
-                                        { label: "Spiele erfasst", value: String(playerStats.length) },
                                         { label: "Nächster Termin", value: nextEvent ? `${new Date(nextEvent.date + "T00:00:00").toLocaleDateString("de-DE", { weekday: "short", day: "2-digit", month: "2-digit" })}${nextEvent.time ? ", " + nextEvent.time : ""}` : "", forceCol2: true },
+                                        // Kurzbilanz in einer Zeile: nur Werte, die in den Spielen auch erfasst sind
+                                        { label: `Ø pro Spiel · ${playerStats.length} ${playerStats.length === 1 ? "Spiel" : "Spiele"}`, wide: true, value: [["punkte", "PPG"], ["rebounds", "RPG"], ["assists", "APG"]].map(([k, unit]) => {
+                                            const vals = playerStats.map((s) => s[k]).filter((v) => typeof v === "number");
+                                            return vals.length ? `${fmtNum(vals.reduce((a, b) => a + b, 0) / vals.length, 1)} ${unit}` : null;
+                                        }).filter(Boolean).join(" · ") },
                                     ].filter((b) => b.value);
                                     if (bioItems.length === 0)
                                         return null;
