@@ -1300,3 +1300,86 @@ function TeamOverviewTable({ team, players, privateData, statCategories, onSelec
                     React.createElement("td", { className: "px-4 py-3 text-right" }, fgPctFor(p.id)),
                     React.createElement("td", { className: "px-4 py-3 text-right" }, latestAttendance(p.id)))))))))));
 }
+
+/* ---------------- Als App installieren ---------------- */
+// Android/Chrome liefert ein beforeinstallprompt-Ereignis (frueh abfangen, es
+// kommt nur einmal). Am iPhone geht es nur ueber Teilen -> "Zum Home-Bildschirm"
+// - erst dann gibt es dort auch Push-Nachrichten.
+let deferredInstallPrompt = null;
+window.addEventListener("beforeinstallprompt", (e) => {
+    e.preventDefault();
+    deferredInstallPrompt = e;
+    window.dispatchEvent(new Event("rsk-installable"));
+});
+const INSTALL_HINT_KEY = "rsk.installHintDismissed";
+const INSTALL_HINT_PAUSE_DAYS = 14; // nach "Schliessen" so lange nicht mehr zeigen
+function isStandaloneApp() {
+    return window.matchMedia("(display-mode: standalone)").matches || window.navigator.standalone === true;
+}
+function isIosDevice() {
+    return /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === "MacIntel" && navigator.maxTouchPoints > 1);
+}
+function InstallHint() {
+    const [canPrompt, setCanPrompt] = useState(!!deferredInstallPrompt);
+    const [hidden, setHidden] = useState(() => {
+        try {
+            const t = Number(localStorage.getItem(INSTALL_HINT_KEY));
+            return !!t && Date.now() - t < INSTALL_HINT_PAUSE_DAYS * 864e5;
+        }
+        catch (e) {
+            return false;
+        }
+    });
+    const [showSteps, setShowSteps] = useState(false);
+    useEffect(() => {
+        const onInstallable = () => setCanPrompt(true);
+        const onInstalled = () => setHidden(true);
+        window.addEventListener("rsk-installable", onInstallable);
+        window.addEventListener("appinstalled", onInstalled);
+        return () => {
+            window.removeEventListener("rsk-installable", onInstallable);
+            window.removeEventListener("appinstalled", onInstalled);
+        };
+    }, []);
+    const ios = isIosDevice();
+    const phone = /android|iphone|ipad|ipod/i.test(navigator.userAgent) || ios;
+    if (hidden || isStandaloneApp() || !phone || (!ios && !canPrompt))
+        return null;
+    function dismiss() {
+        try {
+            localStorage.setItem(INSTALL_HINT_KEY, String(Date.now()));
+        }
+        catch (e) { }
+        setHidden(true);
+    }
+    async function install() {
+        if (ios) {
+            setShowSteps((v) => !v);
+            return;
+        }
+        const ev = deferredInstallPrompt;
+        if (!ev)
+            return;
+        deferredInstallPrompt = null;
+        setCanPrompt(false);
+        ev.prompt();
+        const choice = await ev.userChoice.catch(() => null);
+        if (choice?.outcome === "accepted")
+            setHidden(true);
+    }
+    return React.createElement("div", { className: "fixed left-3 right-3 z-20 md:hidden rsk-fade-in", style: { bottom: "calc(4.25rem + env(safe-area-inset-bottom, 0px))" } },
+        React.createElement("div", { className: `${cardClass} p-3.5 border border-stone-200` },
+            React.createElement("div", { className: "flex items-start gap-3" },
+                React.createElement("div", { className: "w-9 h-9 rounded-xl bg-[#C43E0E]/10 text-[#C43E0E] flex items-center justify-center shrink-0" },
+                    React.createElement(IconSmartphone, { size: 18 })),
+                React.createElement("div", { className: "flex-1 min-w-0" },
+                    React.createElement("p", { className: "text-sm font-semibold text-slate-900" }, "Als App installieren"),
+                    React.createElement("p", { className: "text-xs text-slate-500 mt-0.5" }, ios ? "Dann öffnet sich die Akte wie eine App und kann dir Push-Nachrichten schicken." : "Dann öffnet sich die Akte direkt vom Startbildschirm, ohne Browser.")),
+                React.createElement("button", { onClick: dismiss, className: "p-1 -m-1 text-slate-400 hover:text-slate-600", "aria-label": "Hinweis schließen" },
+                    React.createElement(IconX, { size: 16 }))),
+            showSteps && React.createElement("ol", { className: "mt-3 space-y-1.5 text-xs text-slate-600 list-decimal pl-5" },
+                React.createElement("li", null, "Unten in Safari auf ", React.createElement(IconShare, { size: 13, className: "inline -mt-0.5 text-[#0A84FF]" }), " Teilen tippen"),
+                React.createElement("li", null, "\u201EZum Home-Bildschirm\u201C wählen (evtl. etwas nach unten scrollen)"),
+                React.createElement("li", null, "Oben rechts auf \u201EHinzufügen\u201C tippen und die Akte ab jetzt über das neue Symbol öffnen")),
+            React.createElement("button", { onClick: install, className: "mt-3 w-full bg-slate-900 hover:bg-slate-800 text-white rounded-lg py-2 text-sm font-semibold" }, ios ? (showSteps ? "Verstanden" : "So geht's") : "Installieren")));
+}

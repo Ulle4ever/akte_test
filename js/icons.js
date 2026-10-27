@@ -70,6 +70,13 @@ const IconDownload = (p) => React.createElement(Icon, { ...p },
     React.createElement("path", { d: "M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" }),
     React.createElement("path", { d: "M7 10l5 5 5-5" }),
     React.createElement("path", { d: "M12 15V3" }));
+const IconShare = (p) => React.createElement(Icon, { ...p },
+    React.createElement("path", { d: "M4 12v7a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-7" }),
+    React.createElement("polyline", { points: "16 6 12 2 8 6" }),
+    React.createElement("line", { x1: "12", y1: "2", x2: "12", y2: "15" }));
+const IconSmartphone = (p) => React.createElement(Icon, { ...p },
+    React.createElement("rect", { x: "5", y: "2", width: "14", height: "20", rx: "2" }),
+    React.createElement("line", { x1: "12", y1: "18", x2: "12.01", y2: "18" }));
 const IconUsers = (p) => React.createElement(Icon, { ...p },
     React.createElement("circle", { cx: "9", cy: "8", r: "3.5" }),
     React.createElement("path", { d: "M3.5 20a5.5 5.5 0 0 1 11 0" }),

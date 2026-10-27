@@ -58,6 +58,7 @@ function SpielerAkte() {
     const [expandedVideos, setExpandedVideos] = useState(() => new Set());
     const [openHeaderMenu, setOpenHeaderMenu] = useState(null);
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+    const sidebarSearchRef = useRef(null);
     const [editingStat, setEditingStat] = useState(null);
     const [editingTeam, setEditingTeam] = useState(null);
     const [editingTest, setEditingTest] = useState(null);
@@ -1810,7 +1811,7 @@ function SpielerAkte() {
                 React.createElement("div", { className: "pt-3 border-t border-stone-200" },
                     React.createElement("div", { className: "relative" },
                         React.createElement(IconSearch, { size: 15, className: "absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" }),
-                        React.createElement("input", { className: inputClass + " pl-8", placeholder: "Spieler suchen…", value: search, onChange: (e) => setSearch(e.target.value), onKeyDown: (e) => {
+                        React.createElement("input", { ref: sidebarSearchRef, className: inputClass + " pl-8", placeholder: "Spieler suchen…", value: search, onChange: (e) => setSearch(e.target.value), onKeyDown: (e) => {
                                 if (e.key === "Enter" && searchResults.length > 0) {
                                     selectPlayer(searchResults[0].id);
                                     setSearch("");
@@ -1839,7 +1840,7 @@ function SpielerAkte() {
                             React.createElement("span", { className: "flex-1 text-left truncate" }, t.name),
                             React.createElement("span", { className: "text-xs text-slate-400 tabular-nums" }, playersOfTeam(players, t.id).length));
                     }))))),
-            React.createElement("main", { className: "flex-1 min-w-0 p-4 sm:p-6 lg:p-8 max-w-[1440px] mx-auto w-full" },
+            React.createElement("main", { className: "flex-1 min-w-0 p-4 sm:p-6 lg:p-8 pb-24 sm:pb-24 md:pb-6 max-w-[1440px] mx-auto w-full" },
                 (breadcrumbItems.length > 1 || navDepth > 0 || navDepth < navMax) && (React.createElement("div", { className: "flex items-center gap-1.5 text-xs text-slate-500 mb-4 flex-wrap" },
                     (navDepth > 0 || navDepth < navMax) && React.createElement("div", { className: "flex items-center mr-1.5 bg-white border border-stone-200 rounded-full overflow-hidden" },
                         React.createElement("button", { onClick: () => window.history.back(), disabled: navDepth === 0, className: "flex items-center gap-1 font-semibold text-slate-600 hover:text-[#C43E0E] hover:bg-stone-50 disabled:text-slate-300 disabled:hover:bg-transparent pl-1.5 pr-2.5 py-1 transition", "aria-label": "Zurück zur vorherigen Seite" },
@@ -2369,6 +2370,27 @@ function SpielerAkte() {
                             " Wurftechnik-Video")),
                     React.createElement(RadarEditor, { values: manualRatings, onChange: setRadarValue, modes: radarModes, onModeChange: setRadarMode, autoValues: autoValues })));
         })()))))),
+        // Handy: Navigationsleiste unten (Daumen-Reichweite) statt nur Menue oben links
+        (() => {
+            const items = isTrainer ? [
+                { key: "home", label: "Start", icon: IconHome, onClick: goHome, active: !mobileSidebarOpen && !showGlobalCalendar && !showVerwaltung && !showAllUnits && !showAttendance && !showPlayers && !showReports && !selectedPlayerId && selectedTeamId === "all" },
+                { key: "players", label: "Spieler", icon: IconUsers, onClick: goPlayers, active: !mobileSidebarOpen && showPlayers },
+                { key: "calendar", label: "Kalender", icon: IconCalendar, onClick: goGlobalCalendar, active: !mobileSidebarOpen && showGlobalCalendar },
+                // Fokus direkt im Tipp setzen, sonst oeffnet iOS die Tastatur nicht
+                { key: "search", label: "Suche", icon: IconSearch, onClick: () => { sidebarSearchRef.current?.focus({ preventScroll: true }); setMobileSidebarOpen(true); }, active: false },
+                { key: "menu", label: "Menü", icon: IconMenu, onClick: () => setMobileSidebarOpen(true), active: mobileSidebarOpen },
+            ] : selectedPlayer ? [
+                ["uebersicht", "Start", IconHome], ["kalender", "Kalender", IconCalendar], ["wellness", "Check-in", IconHeart],
+                ["entwicklung", "Entwicklung", IconTrendUp], ["feedback", "Feedback", IconMessage],
+            ].map(([key, label, icon]) => ({ key, label, icon, onClick: () => { setActiveTab(key); window.scrollTo({ top: 0 }); }, active: activeTab === key })) : [];
+            if (items.length === 0)
+                return null;
+            return React.createElement("nav", { className: "fixed bottom-0 inset-x-0 z-20 md:hidden bg-white/95 backdrop-blur border-t border-stone-200 pb-safe", "aria-label": "Navigation" },
+                React.createElement("div", { className: "grid grid-cols-5" }, items.map((it) => React.createElement("button", { key: it.key, onClick: it.onClick, "aria-current": it.active ? "page" : undefined, className: `flex flex-col items-center justify-center gap-0.5 pt-2 pb-1.5 text-[10px] font-semibold transition-colors ${it.active ? "text-[#C43E0E]" : "text-slate-500 active:text-slate-800"}` },
+                    React.createElement("span", { className: `flex items-center justify-center w-10 h-7 rounded-full ${it.active ? "bg-[#C43E0E]/10" : ""}` }, React.createElement(it.icon, { size: 18 })),
+                    it.label))));
+        })(),
+        React.createElement(InstallHint, null),
         modal === "team" && (React.createElement(Modal, { title: "Team anlegen", onClose: () => setModal(null) },
             React.createElement(TeamForm, { onSubmit: handleAddTeam, onClose: () => setModal(null) }))),
         modal === "teams" && (React.createElement(Modal, { title: "Teams verwalten", onClose: () => setModal(null) },
