@@ -1038,8 +1038,9 @@ function TrainerTeamPicker({ teams, value, onChange }) {
             })),
         React.createElement("p", { className: "text-[11px] text-slate-400" }, full ? "Sieht und verwaltet alles, inkl. Zugänge und Teams." : `Sieht nur ${value.length === 1 ? "dieses Team" : "diese Teams"} (max. ${MAX_TRAINER_TEAMS}).`));
 }
-function AccountManagerModal({ accounts, accountsLoaded, players, teams, currentUid, onLoad, onCreate, onUpdateTeams, onDelete, onClose }) {
+function AccountManagerModal({ accounts, accountsLoaded, players, teams, currentUid, privacy, onLoad, onCreate, onUpdateTeams, onDelete, onClose }) {
     const [showForm, setShowForm] = useState(false);
+    const [showBulk, setShowBulk] = useState(false);
     const [label, setLabel] = useState("");
     const [code, setCode] = useState(() => generateCode());
     const [role, setRole] = useState("player");
@@ -1104,9 +1105,14 @@ function AccountManagerModal({ accounts, accountsLoaded, players, teams, current
     });
     return (React.createElement("div", { className: "space-y-4" },
         React.createElement("p", { className: "text-xs text-slate-500" }, "Main Accounts (Trainer ohne Team-Auswahl) sehen und bearbeiten alles - gedacht für die Verantwortlichen der Entwicklung. Team-Trainer bekommen ein oder mehrere Teams und sehen dann nur Spieler, Termine, Statistiken etc. dieser Teams, ohne Zugänge oder club-weite Vorlagen verwalten zu können. Spieler/Eltern-Zugänge sehen nur Kalender, Videos und Basic-Stats des verknüpften Spielers. Jeder Zugang bekommt einen eigenen Code zum Anmelden – kein Passwort, keine E-Mail nötig."),
-        !showForm ? (React.createElement("button", { onClick: () => setShowForm(true), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800" },
-            React.createElement(IconPlus, { size: 15 }),
-            " Neuen Zugang anlegen")) : (React.createElement("form", { onSubmit: handleCreate, className: "space-y-3 bg-stone-50 rounded-xl p-4" },
+        showBulk && React.createElement(TeamAccessBulk, { teams, players, accounts, onCreate, onClose: () => setShowBulk(false) }),
+        !showBulk && !showForm ? React.createElement("div", { className: "flex flex-wrap gap-2" },
+            React.createElement("button", { onClick: () => setShowForm(true), className: "flex items-center gap-1.5 bg-slate-900 text-white rounded-lg px-3 py-2 text-sm font-medium hover:bg-slate-800" },
+                React.createElement(IconPlus, { size: 15 }),
+                " Neuen Zugang anlegen"),
+            React.createElement("button", { onClick: () => setShowBulk(true), disabled: !accountsLoaded, className: "flex items-center gap-1.5 bg-stone-100 text-slate-700 rounded-lg px-3 py-2 text-sm font-medium hover:bg-stone-200 disabled:opacity-50" },
+                React.createElement(IconUsers, { size: 15 }),
+                " Zugänge für ein Team")) : showBulk ? null : (React.createElement("form", { onSubmit: handleCreate, className: "space-y-3 bg-stone-50 rounded-xl p-4" },
             React.createElement("div", { className: "grid grid-cols-2 gap-3" },
                 React.createElement(Field, { label: "Rolle" },
                     React.createElement("select", { className: inputClass, value: role, onChange: (e) => { setRole(e.target.value); setPlayerId(""); setTrainerTeamIds([]); } },
@@ -1138,7 +1144,8 @@ function AccountManagerModal({ accounts, accountsLoaded, players, teams, current
                         React.createElement("p", { className: "text-xs text-slate-400" },
                             a.role === "trainer" ? (ids ? `Trainer · ${ids.map(teamName).join(", ")}` : "Main Account · alle Teams") : `Spieler-Zugang · ${playerName(a.playerId)}`,
                             " · Code: ",
-                            React.createElement("span", { className: "font-mono" }, a.code))),
+                            React.createElement("span", { className: "font-mono" }, a.code),
+                            a.role === "player" && privacy?.active && React.createElement("span", { className: a.consent?.version === privacy.version ? "text-emerald-600" : "text-amber-600" }, a.consent?.version === privacy.version ? " · ✓ Datenschutz" : " · Datenschutz offen"))),
                     React.createElement("div", { className: "flex items-center gap-2 shrink-0" },
                         a.role === "trainer" && a.uid !== currentUid && onUpdateTeams && !editing && React.createElement("button", { onClick: () => { setEditingUid(a.uid); setEditTeamIds(ids || []); }, className: "text-slate-300 hover:text-[#C43E0E]", "aria-label": "Teams ändern" },
                             React.createElement(IconEdit, { size: 15 })),
@@ -1150,6 +1157,104 @@ function AccountManagerModal({ accounts, accountsLoaded, players, teams, current
                         React.createElement("button", { type: "button", onClick: () => setEditingUid(null), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-1.5 text-sm font-semibold" }, "Abbrechen"),
                         React.createElement("button", { type: "button", onClick: () => saveEditTeams(a.uid), className: "flex-1 bg-slate-900 hover:bg-slate-800 text-white rounded-lg py-1.5 text-sm font-semibold" }, "Speichern"))));
         })))));
+}
+// Spieler-Zugaenge fuer ein ganzes Team auf einmal, dazu die Code-Liste als PDF
+// zum Ausdrucken und Austeilen (Kaertchen zum Ausschneiden)
+function TeamAccessBulk({ teams, players, accounts, onCreate, onClose }) {
+    const sorted = sortTeams(teams);
+    const [teamId, setTeamId] = useState(sorted[0]?.id || "");
+    const [picked, setPicked] = useState(null); // null = alle ohne Zugang
+    const [progress, setProgress] = useState(null);
+    const [error, setError] = useState("");
+    const [pdfBusy, setPdfBusy] = useState(false);
+    const sheetRef = useRef(null);
+    const team = teams.find((t) => t.id === teamId) || null;
+    const teamPlayers = players.filter((p) => p.teamId === teamId).sort((a, b) => a.name.localeCompare(b.name, "de"));
+    const accountOf = (pid) => accounts.find((a) => a.role === "player" && a.playerId === pid);
+    const missing = teamPlayers.filter((p) => !accountOf(p.id));
+    const selected = picked || missing.map((p) => p.id);
+    const withCode = teamPlayers.map((p) => ({ player: p, account: accountOf(p.id) })).filter((x) => x.account);
+    const running = progress && progress.done < progress.total;
+    async function createAll() {
+        const todo = missing.filter((p) => selected.includes(p.id));
+        setProgress({ done: 0, total: todo.length });
+        setError("");
+        const failed = [];
+        for (const p of todo) {
+            // Code schon vergeben (sehr selten): mit neuem Code nochmal
+            for (let attempt = 0; attempt < 3; attempt++) {
+                try {
+                    await onCreate({ label: p.name, code: generateCode(), role: "player", playerId: p.id, teamIds: null });
+                    break;
+                }
+                catch (e) {
+                    if (e?.code === "auth/email-already-in-use" && attempt < 2)
+                        continue;
+                    failed.push(`${p.name}: ${e?.code === "auth/too-many-requests" ? "zu viele Anmeldungen auf einmal – bitte in einer Stunde nochmal" : e?.message || e}`);
+                    break;
+                }
+            }
+            setProgress((pr) => ({ ...pr, done: pr.done + 1 }));
+        }
+        if (failed.length)
+            setError("Nicht angelegt: " + failed.join(" · "));
+        setPicked(null);
+    }
+    useEffect(() => {
+        if (!pdfBusy)
+            return;
+        const timer = setTimeout(async () => {
+            try {
+                await exportElementToPdf(sheetRef.current, `Zugaenge_${safeFileName(team?.name || "Team")}.pdf`);
+            }
+            catch (e) {
+                window.alert("PDF konnte nicht erstellt werden: " + (e.message || e));
+            }
+            setPdfBusy(false);
+        }, 600);
+        return () => clearTimeout(timer);
+    }, [pdfBusy]);
+    const togglePick = (id) => setPicked(selected.includes(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+    return React.createElement("div", { className: "space-y-3 bg-stone-50 rounded-xl p-4" },
+        React.createElement(Field, { label: "Team" },
+            React.createElement("select", { className: inputClass, value: teamId, disabled: running, onChange: (e) => { setTeamId(e.target.value); setPicked(null); setError(""); setProgress(null); } },
+                sorted.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
+        teamPlayers.length === 0
+            ? React.createElement("p", { className: "text-xs text-slate-400" }, "In diesem Team sind noch keine Spieler angelegt.")
+            : React.createElement("div", { className: "max-h-[35vh] overflow-y-auto bg-white border border-stone-200 rounded-lg divide-y divide-stone-100" }, teamPlayers.map((p) => {
+                const acc = accountOf(p.id);
+                return React.createElement("label", { key: p.id, className: `flex items-center gap-2.5 px-2.5 py-2 text-xs ${acc ? "" : "cursor-pointer hover:bg-stone-50"}` },
+                    React.createElement("input", { type: "checkbox", checked: acc ? true : selected.includes(p.id), disabled: !!acc || running, onChange: () => togglePick(p.id), className: "accent-[#C43E0E]" }),
+                    React.createElement("span", { className: "flex-1 min-w-0 text-slate-700" }, p.number !== "" && p.number !== undefined ? `#${p.number} ` : "", p.name),
+                    acc ? React.createElement("span", { className: "font-mono text-slate-500" }, acc.code) : React.createElement("span", { className: "text-slate-400" }, "noch kein Zugang"));
+            })),
+        progress && React.createElement("p", { className: "text-xs text-slate-500" }, running ? `Lege Zugänge an … ${progress.done} von ${progress.total}` : `${progress.total} ${progress.total === 1 ? "Zugang" : "Zugänge"} bearbeitet.`),
+        error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+        React.createElement("div", { className: "flex flex-wrap gap-2" },
+            React.createElement("button", { type: "button", onClick: onClose, disabled: running, className: "flex-1 bg-stone-100 hover:bg-stone-200 disabled:opacity-40 text-slate-700 rounded-lg py-2 text-sm font-semibold" }, "Schließen"),
+            missing.length > 0 && React.createElement("button", { type: "button", onClick: createAll, disabled: running || selected.length === 0, className: "flex-1 bg-[#C43E0E] hover:bg-[#A8350C] disabled:opacity-50 text-white rounded-lg py-2 text-sm font-semibold whitespace-nowrap" },
+                running ? "Wird angelegt…" : `${selected.length} ${selected.length === 1 ? "Zugang" : "Zugänge"} anlegen`),
+            withCode.length > 0 && React.createElement("button", { type: "button", onClick: () => setPdfBusy(true), disabled: running || pdfBusy, className: "flex-1 flex items-center justify-center gap-1.5 bg-slate-900 hover:bg-slate-800 disabled:opacity-50 text-white rounded-lg py-2 text-sm font-semibold whitespace-nowrap" },
+                pdfBusy ? React.createElement(IconLoader, { size: 15 }) : React.createElement(IconDownload, { size: 15 }), "Code-Liste (PDF)")),
+        pdfBusy && React.createElement("div", { style: { position: "fixed", left: "-10000px", top: 0, width: PDF_RENDER_WIDTH + "px" }, "aria-hidden": "true" },
+            React.createElement("div", { ref: sheetRef, className: "bg-white p-6" }, React.createElement(AccessCodeSheet, { team, entries: withCode }))));
+}
+function AccessCodeSheet({ team, entries }) {
+    const url = window.location.origin;
+    const rows = [];
+    for (let i = 0; i < entries.length; i += 2)
+        rows.push(entries.slice(i, i + 2));
+    return React.createElement("div", { className: "text-slate-900" },
+        React.createElement("div", { "data-pdf-block": "", className: "mb-4" },
+            React.createElement("p", { className: "text-[11px] font-bold tracking-[0.18em] text-[#C43E0E]" }, "RHEINSTARS · SPIELER-AKTE"),
+            React.createElement("h2", { className: "font-display italic font-black text-2xl" }, `ZUGÄNGE ${(team?.name || "").toUpperCase()}`),
+            React.createElement("p", { className: "text-sm text-slate-600 mt-1" }, `Anmelden unter ${url} mit dem persönlichen Code. Beim ersten Anmelden kurz die eigenen Angaben ausfüllen. Den Code bitte nicht weitergeben.`)),
+        rows.map((pair, i) => React.createElement("div", { key: i, "data-pdf-block": "", className: "grid grid-cols-2 gap-3 mb-3" }, pair.map(({ player, account }) => React.createElement("div", { key: player.id, className: "border-2 border-dashed border-stone-300 rounded-xl px-4 py-3" },
+            React.createElement("p", { className: "text-[10px] font-bold tracking-[0.16em] text-[#C43E0E]" }, `SPIELER-AKTE · ${(team?.name || "").toUpperCase()}`),
+            React.createElement("p", { className: "text-base font-bold mt-1" }, player.name, player.number !== "" && player.number !== undefined ? `  #${player.number}` : ""),
+            React.createElement("p", { className: "text-xs text-slate-500 mt-2" }, "Dein Code"),
+            React.createElement("p", { className: "font-mono text-2xl font-bold tracking-wider" }, account.code),
+            React.createElement("p", { className: "text-[11px] text-slate-500 mt-2" }, url))))));
 }
 function AdvancedRechnerLiveModal({ players, teams, onConfirm, onClose }) {
     const [stage, setStage] = useState("open");

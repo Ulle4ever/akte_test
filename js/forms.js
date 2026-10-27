@@ -1841,6 +1841,247 @@ function ExcelStatsImport({ players, teams, dbbData, preset, onConfirmGames, onC
             React.createElement("button", { onClick: handleConfirm, disabled: chosenGames.length === 0 || matchedCount === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
                 chosenGames.length === 1 ? "1 Spiel importieren" : `${chosenGames.length} Spiele importieren`)));
 }
+/* ---------------- Kader-Import (Excel/CSV) ---------------- */
+// Spaltennamen, wie sie in Kaderlisten typischerweise vorkommen
+const ROSTER_HEADERS = {
+    name: ["name", "spieler", "spielername", "spieler/in", "vollständiger name"],
+    first: ["vorname", "first name", "firstname"],
+    last: ["nachname", "familienname", "surname", "last name", "lastname"],
+    number: ["#", "nr", "nr.", "nummer", "trikot", "trikotnummer", "trikot-nr.", "trikot-nr", "rückennummer"],
+    birthdate: ["geburtsdatum", "geb.", "geb", "geb.-datum", "geburtstag", "birthdate", "date of birth"],
+    position: ["position", "pos", "pos."],
+    team: ["team", "mannschaft"],
+    height: ["größe", "groesse", "grösse", "größe (cm)", "height"],
+    weight: ["gewicht", "gewicht (kg)", "weight"],
+    handedness: ["starke hand", "wurfhand", "hand"],
+    previousClub: ["letzter verein", "vorheriger verein", "alter verein", "vorverein"],
+    nationality: ["nationalität", "nation", "staatsangehörigkeit"],
+    school: ["schule"],
+    city: ["wohnort", "ort", "stadt"],
+};
+const ROSTER_POSITIONS = [
+    [/^(pg|1|point ?guard|aufbau)/, "Point Guard"], [/^(sg|2|shooting ?guard)/, "Shooting Guard"],
+    [/^(sf|3|small ?forward|flügel|fluegel)/, "Small Forward"], [/^(pf|4|power ?forward)/, "Power Forward"],
+    [/^(c|5|center|centre)$/, "Center"],
+];
+function rosterPosition(v) {
+    const s = String(v || "").trim().toLowerCase();
+    return (ROSTER_POSITIONS.find(([re]) => re.test(s)) || [])[1] || "";
+}
+function rosterHandedness(v) {
+    const s = String(v || "").trim().toLowerCase();
+    return s.startsWith("r") ? "rechts" : s.startsWith("l") ? "links" : s.startsWith("b") ? "beidhaendig" : "";
+}
+function rosterNumber(v) {
+    const n = parseFloat(String(v ?? "").replace(",", "."));
+    return isNaN(n) ? "" : n;
+}
+// Tabelle (Zeilen als Arrays) -> Spielerzeilen; Kopfzeile wird in den ersten 10 Zeilen gesucht
+function parseRosterGrid(grid) {
+    const norm = (c) => String(c ?? "").trim().toLowerCase().replace(/\*/g, "").replace(/\s+/g, " ");
+    for (let h = 0; h < Math.min(grid.length, 10); h++) {
+        const head = (grid[h] || []).map(norm);
+        const col = {};
+        Object.entries(ROSTER_HEADERS).forEach(([k, names]) => { col[k] = head.findIndex((x) => names.includes(x)); });
+        // "Name" + "Vorname": dann ist "Name" der Nachname
+        if (col.first !== -1 && col.last === -1 && col.name !== -1) {
+            col.last = col.name;
+            col.name = -1;
+        }
+        if (col.name === -1 && (col.first === -1 || col.last === -1))
+            continue;
+        const rows = [];
+        for (const r of grid.slice(h + 1)) {
+            const g = (k) => (col[k] === -1 ? "" : r[col[k]] ?? "");
+            const name = col.name !== -1 ? String(g("name")).trim().replace(/\s+/g, " ") : `${String(g("first")).trim()} ${String(g("last")).trim()}`.trim();
+            if (!name)
+                continue;
+            rows.push({
+                name, teamLabel: String(g("team")).trim(), number: rosterNumber(g("number")),
+                birthdate: excelDateIso(g("birthdate")) || "", position: rosterPosition(g("position")),
+                height: rosterNumber(g("height")), weight: rosterNumber(g("weight")), handedness: rosterHandedness(g("handedness")),
+                previousClub: String(g("previousClub")).trim(), nationality: String(g("nationality")).trim(),
+                school: String(g("school")).trim(), city: String(g("city")).trim(),
+            });
+        }
+        return { rows, error: rows.length === 0 ? "Unter der Kopfzeile stehen keine Spieler." : null };
+    }
+    return { rows: [], error: "Keine Spalte \"Name\" (oder \"Vorname\" und \"Nachname\") gefunden. Die erste Zeile der Tabelle sollte die Spaltennamen enthalten." };
+}
+async function readRosterFile(file) {
+    const buf = await file.arrayBuffer();
+    if (/\.(csv|txt)$/i.test(file.name)) {
+        // Excel speichert CSV oft als Windows-1252 - erst UTF-8 versuchen
+        let text;
+        try {
+            text = new TextDecoder("utf-8", { fatal: true }).decode(buf);
+        }
+        catch (e) {
+            text = new TextDecoder("windows-1252").decode(buf);
+        }
+        const lines = text.replace(/^﻿/, "").split(/\r\n|\n|\r/).filter((l) => l.trim());
+        const first = lines[0] || "";
+        const delimiter = [";", "\t", ","].sort((a, b) => first.split(b).length - first.split(a).length)[0];
+        return parseRosterGrid(lines.map((l) => splitCsvLine(l, delimiter)));
+    }
+    const XLSX = await loadXlsxLib();
+    const wb = XLSX.read(buf, { type: "array" });
+    let last = { rows: [], error: "Die Datei enthält keine Tabelle." };
+    for (const name of wb.SheetNames) {
+        last = parseRosterGrid(XLSX.utils.sheet_to_json(wb.Sheets[name], { header: 1, raw: true, defval: "" }));
+        if (!last.error)
+            return last;
+    }
+    return last;
+}
+function RosterImportModal({ teams, players, onConfirm, onClose }) {
+    const rosterTeams = sortTeams(teams);
+    const [rows, setRows] = useState([]);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    const [fileName, setFileName] = useState("");
+    const [defaultTeamId, setDefaultTeamId] = useState(rosterTeams[0]?.id || "");
+    const teamName = (id) => teams.find((t) => t.id === id)?.name || "";
+    const existing = (name) => players.find((p) => normalizeName(p.name) === normalizeName(name));
+    function teamForLabel(label) {
+        if (!label)
+            return null;
+        const k = teamNameKey(label);
+        return (rosterTeams.find((t) => teamNameKey(t.name) === k) || rosterTeams.find((t) => teamNameKey(t.altersklasse) === k && rosterTeams.filter((x) => x.altersklasse === t.altersklasse).length === 1))?.id || null;
+    }
+    async function handleFile(e) {
+        const file = e.target.files[0];
+        e.target.value = "";
+        if (!file)
+            return;
+        setFileName(file.name);
+        setError("");
+        setBusy(true);
+        try {
+            const { rows: parsed, error: err } = await readRosterFile(file);
+            if (err) {
+                setError(err);
+                return;
+            }
+            setRows(parsed.map((r) => ({ ...r, teamId: teamForLabel(r.teamLabel), take: !existing(r.name) })));
+        }
+        catch (err) {
+            setError("Die Datei konnte nicht gelesen werden: " + (err.message || "unbekannter Fehler"));
+        }
+        finally {
+            setBusy(false);
+        }
+    }
+    const setRow = (i, changes) => setRows((rs) => rs.map((r, idx) => (idx === i ? { ...r, ...changes } : r)));
+    const chosen = rows.filter((r) => r.take && (r.teamId || defaultTeamId));
+    function handleConfirm() {
+        onConfirm(chosen.map(({ take, teamLabel, ...r }) => ({ ...r, teamId: r.teamId || defaultTeamId })));
+        onClose();
+    }
+    if (rows.length === 0) {
+        return React.createElement("div", { className: "space-y-4" },
+            React.createElement("p", { className: "text-xs text-slate-500" }, "Kaderliste als Excel- oder CSV-Datei auswählen. Erkannt werden die Spalten Name (oder Vorname + Nachname), Nummer, Geburtsdatum, Position, Team, Größe, Gewicht, Starke Hand, Letzter Verein, Nationalität, Schule und Wohnort – nur der Name ist Pflicht."),
+            React.createElement("label", { className: `flex flex-col items-center justify-center gap-2 border-2 border-dashed border-stone-300 rounded-lg py-8 transition ${busy ? "opacity-60" : "cursor-pointer hover:border-[#C43E0E] hover:bg-red-50/30"}` },
+                React.createElement(IconUpload, { size: 24, className: "text-slate-400" }),
+                React.createElement("span", { className: "text-sm text-slate-600 font-medium" }, busy ? "Datei wird gelesen…" : "Excel- oder CSV-Datei auswählen"),
+                React.createElement("input", { type: "file", accept: ".xlsx,.xls,.csv,.txt", className: "hidden", disabled: busy, onChange: handleFile })),
+            fileName && !error && !busy && React.createElement("p", { className: "text-xs text-slate-400" }, "Zuletzt gewählt: ", fileName),
+            error && React.createElement("p", { className: "text-xs text-red-600" }, error));
+    }
+    const dupes = rows.filter((r) => existing(r.name)).length;
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement(Field, { label: rows.some((r) => !r.teamId) ? "Team für Zeilen ohne Team" : "Team (falls nicht in der Datei)" },
+            React.createElement("select", { className: inputClass, value: defaultTeamId, onChange: (e) => setDefaultTeamId(e.target.value) },
+                rosterTeams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))),
+        React.createElement("p", { className: "text-xs text-slate-500" }, rows.length, " Spieler in der Datei",
+            dupes > 0 ? ` · ${dupes} gibt es schon in der Akte (nicht angehakt)` : "", ". Alle weiteren Angaben lassen sich danach in der Akte ergänzen."),
+        React.createElement("div", { className: "max-h-[45vh] overflow-auto border border-stone-200 rounded-lg" },
+            React.createElement("table", { className: "w-full text-xs" },
+                React.createElement("thead", { className: "sticky top-0 bg-stone-100" },
+                    React.createElement("tr", { className: "text-slate-500 uppercase tracking-wide" },
+                        React.createElement("th", { className: "px-2.5 py-2" }),
+                        React.createElement("th", { className: "text-left px-2.5 py-2" }, "Spieler"),
+                        React.createElement("th", { className: "text-left px-2.5 py-2" }, "Geb."),
+                        React.createElement("th", { className: "text-left px-2.5 py-2 w-2/5" }, "Team"))),
+                React.createElement("tbody", null, rows.map((r, i) => {
+                    const dup = existing(r.name);
+                    return React.createElement("tr", { key: i, className: `border-t border-stone-100 ${r.take ? "" : "opacity-50"}` },
+                        React.createElement("td", { className: "px-2.5 py-1.5" },
+                            React.createElement("input", { type: "checkbox", checked: r.take, onChange: () => setRow(i, { take: !r.take }), className: "accent-[#C43E0E]" })),
+                        React.createElement("td", { className: "px-2.5 py-1.5" },
+                            React.createElement("div", { className: "font-medium text-slate-700" }, r.number !== "" ? `#${r.number} ` : "", r.name),
+                            React.createElement("div", { className: dup ? "text-amber-600" : "text-slate-400" }, dup ? `gibt es schon (${teamName(dup.teamId) || "ohne Team"})` : [r.position, r.height ? r.height + " cm" : null].filter(Boolean).join(" · "))),
+                        React.createElement("td", { className: "px-2.5 py-1.5 text-slate-500 whitespace-nowrap" }, r.birthdate ? fmtDate(r.birthdate) : "–"),
+                        React.createElement("td", { className: "px-2.5 py-1.5" },
+                            React.createElement("select", { className: "w-full rounded border border-stone-200 px-1.5 py-1 text-xs", value: r.teamId || "", onChange: (e) => setRow(i, { teamId: e.target.value || null }) },
+                                React.createElement("option", { value: "" }, `wie oben (${teamName(defaultTeamId)})`),
+                                rosterTeams.map((t) => React.createElement("option", { key: t.id, value: t.id }, t.name)))));
+                })))),
+        React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { onClick: () => setRows([]), className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Andere Datei"),
+            React.createElement("button", { onClick: handleConfirm, disabled: chosen.length === 0, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" },
+                chosen.length === 1 ? "1 Spieler anlegen" : `${chosen.length} Spieler anlegen`)));
+}
+
+/* ---------------- Datenschutzhinweis ---------------- */
+function PrivacyNoticeEditor({ privacy, consentStats, onSave, onClose }) {
+    const [text, setText] = useState(privacy?.text || DEFAULT_PRIVACY_TEXT);
+    const [active, setActive] = useState(!!privacy?.active);
+    const [saving, setSaving] = useState(false);
+    const placeholders = (text.match(/\[[^\]]+\]/g) || []).length;
+    const textChanged = text.trim() !== (privacy?.text || "").trim();
+    async function save() {
+        setSaving(true);
+        await onSave({ text: text.trim(), active, version: (privacy?.version || 0) + (textChanged ? 1 : 0), updatedAt: new Date().toISOString() });
+        setSaving(false);
+        onClose();
+    }
+    return React.createElement("div", { className: "space-y-4" },
+        React.createElement("p", { className: "text-xs text-slate-500" }, "Spieler-Zugänge müssen diesen Hinweis beim nächsten Anmelden bestätigen, bevor sie die App nutzen können. Wird der Text später geändert, bestätigen alle neu. Der Entwurf ist keine Rechtsberatung – bitte vom Verein prüfen lassen und die Platzhalter in [eckigen Klammern] ausfüllen."),
+        consentStats && React.createElement("p", { className: "text-xs font-semibold text-slate-600" }, `Bestätigt: ${consentStats.done} von ${consentStats.total} Spieler-Zugängen`),
+        React.createElement("textarea", { className: inputClass + " text-xs leading-relaxed", rows: 16, value: text, onChange: (e) => setText(e.target.value) }),
+        placeholders > 0 && React.createElement("p", { className: "text-xs text-amber-600" }, `Noch ${placeholders} Platzhalter in [eckigen Klammern] offen.`),
+        React.createElement("label", { className: "flex items-center gap-2 text-sm text-slate-700" },
+            React.createElement("input", { type: "checkbox", checked: active, onChange: (e) => setActive(e.target.checked), className: "accent-[#C43E0E]" }),
+            "Abfrage für Spieler-Zugänge einschalten"),
+        privacy?.active && textChanged && React.createElement("p", { className: "text-xs text-amber-600" }, "Der Text wurde geändert – alle Spieler-Zugänge müssen nach dem Speichern neu bestätigen."),
+        React.createElement("div", { className: "flex gap-2" },
+            React.createElement("button", { onClick: onClose, className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Abbrechen"),
+            React.createElement("button", { onClick: save, disabled: saving || !text.trim() || (active && placeholders > 0), className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, saving ? "Wird gespeichert…" : "Speichern")),
+        active && placeholders > 0 && React.createElement("p", { className: "text-xs text-slate-400 text-center" }, "Einschalten geht erst, wenn alle Platzhalter ausgefüllt sind."));
+}
+// Vollbild vor der App: Spieler-Zugang bestaetigt den aktuellen Hinweis
+function PrivacyConsentGate({ privacy, playerName, onAccept, onLogout }) {
+    const [checked, setChecked] = useState(false);
+    const [busy, setBusy] = useState(false);
+    const [error, setError] = useState("");
+    async function accept() {
+        setBusy(true);
+        setError("");
+        try {
+            await onAccept();
+        }
+        catch (e) {
+            setError("Speichern hat nicht geklappt. Bitte nochmal versuchen oder einem Trainer Bescheid geben.");
+            setBusy(false);
+        }
+    }
+    return React.createElement("div", { className: "min-h-[100dvh] bg-stone-50 flex items-center justify-center p-4 sm:p-6" },
+        React.createElement("div", { className: "w-full max-w-lg rsk-fade-in" },
+            React.createElement("div", { className: "flex flex-col items-center text-center mb-5" },
+                React.createElement("img", { src: LOGO_DATA_URI, alt: "BB-Player File", className: "h-14 w-14 object-contain mb-3" }),
+                React.createElement("h1", { className: "font-display text-xl text-slate-900" }, "Datenschutz"),
+                React.createElement("p", { className: "text-sm text-slate-500 mt-1" }, playerName ? `Bevor es losgeht: Bitte lies dir durch, was mit den Daten von ${playerName} passiert.` : "Bevor es losgeht: Bitte lies dir durch, was mit deinen Daten passiert.")),
+            React.createElement("div", { className: `${cardClass} p-5 sm:p-6 space-y-4` },
+                React.createElement("div", { className: "max-h-[50vh] overflow-y-auto whitespace-pre-line text-sm text-slate-700 leading-relaxed pr-1" }, privacy.text),
+                React.createElement("label", { className: "flex items-start gap-2.5 text-sm text-slate-700 border-t border-stone-100 pt-4" },
+                    React.createElement("input", { type: "checkbox", checked, onChange: (e) => setChecked(e.target.checked), className: "accent-[#C43E0E] mt-1" }),
+                    React.createElement("span", null, "Ich habe den Hinweis gelesen und bin einverstanden. Bei Spielerinnen und Spielern unter 16 Jahren bestätige ich das als Erziehungsberechtigte/r.")),
+                error && React.createElement("p", { className: "text-xs text-red-600" }, error),
+                React.createElement("div", { className: "flex gap-2" },
+                    React.createElement("button", { onClick: onLogout, className: "flex-1 bg-stone-100 hover:bg-stone-200 text-slate-700 rounded-lg py-2.5 text-sm font-semibold transition" }, "Abmelden"),
+                    React.createElement("button", { onClick: accept, disabled: !checked || busy, className: "flex-1 bg-slate-900 hover:bg-slate-800 disabled:opacity-40 text-white rounded-lg py-2.5 text-sm font-semibold transition" }, busy ? "Wird gespeichert…" : "Zustimmen")))));
+}
 function BoxscoreImportModal({ players, teams, dbbData, onConfirm, onConfirmGames, onClose, preset }) {
     const [stage, setStage] = useState("paste");
     const [text, setText] = useState("");

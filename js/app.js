@@ -754,6 +754,21 @@ function SpielerAkte() {
         await secondaryAuth.signOut();
         setAccounts((prev) => [...prev, { uid: newUid, ...accountDoc }]);
     }
+    async function acceptPrivacy() {
+        const consent = { version: meta.privacy.version, at: new Date().toISOString() };
+        await db.collection("accounts").doc(firebaseUser.uid).update({ consent });
+        setAccount((prev) => ({ ...prev, consent }));
+    }
+    // Kader-Import: nacheinander anlegen (die Regeln fuer playerPrivate pruefen den Spieler)
+    async function handleImportRoster(rows) {
+        for (const r of rows) {
+            await createPlayerDoc(uid(), {
+                name: r.name, teamId: r.teamId, position: r.position, number: r.number, birthdate: r.birthdate, status: "aktiv",
+                handedness: r.handedness, previousClub: r.previousClub, nationality: r.nationality, height: r.height, weight: r.weight,
+                school: r.school, city: r.city, district: "", dlTeamIds: [], stats: [], videos: [], onboardingCompleted: false,
+            });
+        }
+    }
     async function updateAccountTeams(uid, teamIds) {
         const fields = accountTeamFields(teamIds);
         await db.collection("accounts").doc(uid).update(fields);
@@ -1086,6 +1101,11 @@ function SpielerAkte() {
         .filter((p) => p.name.toLowerCase().includes(search.trim().toLowerCase()))
         .sort((a, b) => a.name.localeCompare(b.name));
     const selectedPlayer = players.find((p) => p.id === selectedPlayerId) || null;
+    // Datenschutzhinweis (in der Verwaltung eingeschaltet): Spieler-Zugaenge
+    // bestaetigen die aktuelle Version, bevor sie die App sehen
+    if (!isTrainer && meta.privacy?.active && meta.privacy.text && account.consent?.version !== meta.privacy.version) {
+        return React.createElement(PrivacyConsentGate, { privacy: meta.privacy, playerName: players.find((p) => p.id === account.playerId)?.name || "", onAccept: acceptPrivacy, onLogout: handleLogout });
+    }
     /* Erstes Login eines Spieler-Zugangs: Profil-Pflichtfenster, solange die
        eigenen Daten (Kontakt/Notfallkontakt/Wohnort etc.) noch nicht einmal
        ausgefüllt wurden. Trainer sind davon nie betroffen. */
@@ -1731,6 +1751,7 @@ function SpielerAkte() {
                         { label: "Kalender importieren (.ics)", icon: IconCalendar, onClick: () => setModal("importCalendar") },
                         { label: "Kalender aus Screenshot (Beta)", icon: IconUpload, onClick: () => setModal("importScreenshot") },
                         { label: "Anwesenheit importieren", icon: IconCalendar, onClick: () => setModal("importAttendance") },
+                        { label: "Kader importieren", icon: IconUsers, onClick: () => setModal("importRoster") },
                         { label: "Boxscore / Excel importieren", icon: IconClipboard, onClick: () => { setStatsImportPreset(null); setModal("importBoxscore"); } },
                         ...(ADVANCED_STATS_ENABLED ? [
                             { label: "Advanced Stats importieren", icon: IconUpload, onClick: () => setModal("importAdvanced") },
@@ -1761,6 +1782,7 @@ function SpielerAkte() {
                             onClick: () => (notifPermission === "granted" ? disableNotifications() : enableNotifications()),
                         }] : []),
                         { label: "Kalender abonnieren", icon: IconCalendar, onClick: () => setModal("calendarFeed"), dividerBefore: !messaging && isFullTrainer },
+                        ...(!isTrainer && meta.privacy?.active ? [{ label: "Datenschutz", icon: IconLock, onClick: () => setModal("privacyView") }] : []),
                         { label: "Abmelden", icon: IconExternal, onClick: handleLogout, danger: true, dividerBefore: isFullTrainer && !messaging },
                     ] }))),
         notifError && (React.createElement("div", { className: "bg-red-50 border-b border-red-200 px-4 sm:px-6 py-1.5 text-xs text-red-700" }, notifError)),
@@ -1895,6 +1917,7 @@ function SpielerAkte() {
                         { key: "statFields", label: "Statistik-Kategorien", desc: "Felder für Spielstatistiken bearbeiten.", icon: IconSettings, grad: "from-slate-700 to-slate-900", onClick: () => setModal("statFields") },
                         { key: "testTypes", label: "Test-Arten", desc: "Auswahlliste für Athletik-Tests pflegen.", icon: IconClipboard, grad: "from-[#FF6A2B] to-[#C43E0E]", onClick: () => setModal("testTypes") },
                         { key: "devPlanTemplates", label: "Development-Plan-Fragen", desc: "Fragebögen für Spieler/Trainer-Bogen anpassen.", icon: IconClipboard, grad: "from-slate-900 to-[#A8350C]", onClick: () => setModal("devPlanTemplates") },
+                        { key: "privacy", label: "Datenschutzhinweis", desc: meta.privacy?.active ? `Abfrage für Spieler-Zugänge ist aktiv (Version ${meta.privacy.version}).` : "Text anpassen und Einwilligung für Spieler-Zugänge einschalten.", icon: IconLock, grad: "from-slate-700 to-[#8A2C0A]", onClick: () => { if (!accountsLoaded) loadAccounts(); setModal("privacy"); } },
                         { key: "backup", label: backupState === "busy" ? "Sicherung läuft…" : "Datensicherung herunterladen", desc: backupState && backupState !== "busy" ? backupState.text : "Automatisch: täglich (7 Tage) und sonntags (14 Wochen). Hier zusätzlich als Datei.", icon: IconDownload, grad: "from-emerald-600 to-slate-900", onClick: () => backupState !== "busy" && runBackupNow() },
                         { key: "feedbackTemplates", label: "Feedback-Fragen", desc: "Fragen und Bewertungs-Kategorien für den Feedback-Loop anpassen.", icon: IconMessage, grad: "from-[#C43E0E] to-slate-900", onClick: () => setModal("feedbackTemplates") },
                     ].map((x) => React.createElement("button", { key: x.key, onClick: x.onClick, className: `${cardClass} p-5 text-left hover:shadow-md hover:-translate-y-0.5 transition-all` },
@@ -2374,10 +2397,18 @@ function SpielerAkte() {
             React.createElement(VideoForm, { onSubmit: handleAddVideo, onClose: () => setModal(null), defaultType: videoDefaultType }))),
         modal === "note" && (React.createElement(Modal, { title: "Notiz hinzuf\u00FCgen", onClose: () => setModal(null) },
             React.createElement(NoteForm, { onSubmit: handleAddNote, onClose: () => setModal(null) }))),
+        modal === "importRoster" && (React.createElement(Modal, { title: "Kader importieren", onClose: () => setModal(null), wide: true },
+            React.createElement(RosterImportModal, { teams: visibleTeams, players: players, onConfirm: handleImportRoster, onClose: () => setModal(null) }))),
+        modal === "privacy" && isFullTrainer && (React.createElement(Modal, { title: "Datenschutzhinweis", onClose: () => setModal(null), wide: true },
+            React.createElement(PrivacyNoticeEditor, { privacy: meta.privacy, consentStats: accountsLoaded ? { done: accounts.filter((a) => a.role === "player" && meta.privacy?.version && a.consent?.version === meta.privacy.version).length, total: accounts.filter((a) => a.role === "player").length } : null, onSave: (privacy) => persistMeta({ privacy }), onClose: () => setModal(null) }))),
+        modal === "privacyView" && meta.privacy && (React.createElement(Modal, { title: "Datenschutz", onClose: () => setModal(null), wide: true },
+            React.createElement("div", { className: "space-y-3" },
+                React.createElement("div", { className: "whitespace-pre-line text-sm text-slate-700 leading-relaxed" }, meta.privacy.text),
+                account.consent?.at && React.createElement("p", { className: "text-xs text-slate-400 border-t border-stone-100 pt-3" }, `Zugestimmt am ${fmtDate(account.consent.at.slice(0, 10))}.`)))),
         modal === "calendarFeed" && (React.createElement(Modal, { title: "Kalender abonnieren", onClose: () => setModal(null) },
             React.createElement(CalendarSubscribe, null))),
         modal === "accounts" && (React.createElement(Modal, { title: "Zug\u00E4nge verwalten", onClose: () => setModal(null), wide: true },
-            React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, teams: teams, currentUid: firebaseUser?.uid, onLoad: loadAccounts, onCreate: createAccount, onUpdateTeams: updateAccountTeams, onDelete: deleteAccount, onClose: () => setModal(null) }))),
+            React.createElement(AccountManagerModal, { accounts: accounts, accountsLoaded: accountsLoaded, players: players, teams: teams, currentUid: firebaseUser?.uid, privacy: meta.privacy, onLoad: loadAccounts, onCreate: createAccount, onUpdateTeams: updateAccountTeams, onDelete: deleteAccount, onClose: () => setModal(null) }))),
         modal === "devPlanTemplates" && (React.createElement(Modal, { title: "Development-Plan-Fragen verwalten", onClose: () => setModal(null), wide: true },
             React.createElement(DevPlanTemplateEditor, { templates: devPlanTemplates, onSave: saveDevPlanTemplates, onClose: () => setModal(null) }))),
         modal === "feedbackTemplates" && (React.createElement(Modal, { title: "Feedback-Fragen verwalten", onClose: () => setModal(null), wide: true },

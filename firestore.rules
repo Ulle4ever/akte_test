@@ -90,12 +90,13 @@ service cloud.firestore {
       // Zugaenge verwalten (anlegen/loeschen/einsehen) bleibt dem Vollzugriff-
       // Trainer vorbehalten - ein team-beschraenkter Trainer darf sich so nicht
       // selbst mehr Rechte geben. Am eigenen Account-Eintrag darf jeder nur die
-      // Push-Tokens aendern - sonst koennte sich ein Spieler-Zugang selbst
-      // role: 'trainer' geben. (Kalender-Abo-Link setzt die Cloud Function.)
+      // Push-Tokens und die Datenschutz-Einwilligung aendern - sonst koennte sich
+      // ein Spieler-Zugang selbst role: 'trainer' geben. (Kalender-Abo-Link setzt
+      // die Cloud Function.)
       allow read: if isSignedIn() && (request.auth.uid == uid || isFullTrainer());
       allow write: if isFullTrainer()
         || (request.auth.uid == uid && resource != null
-            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notificationTokens']));
+            && request.resource.data.diff(resource.data).affectedKeys().hasOnly(['notificationTokens', 'consent']));
     }
 
     // Öffentlichere Spieler-Daten: Stammdaten, Statistiken, Videos.

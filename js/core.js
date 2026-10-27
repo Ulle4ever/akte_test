@@ -180,6 +180,39 @@ const ADVANCED_STATS_ENABLED = false;
 function visibleStatCategories(cats) {
     return ADVANCED_STATS_ENABLED ? cats : cats.filter((c) => c.id !== "advanced");
 }
+// Datenschutzhinweis: nur ein Entwurf - der Verein passt ihn in der Verwaltung
+// an (Platzhalter in [eckigen Klammern]) und schaltet die Abfrage erst dann ein.
+// Jede Textaenderung erhoeht die Version, Spieler-Zugaenge bestaetigen neu.
+const DEFAULT_PRIVACY_TEXT = `Datenschutzhinweis zur Spieler-Akte
+
+Verantwortlich
+[Name des Vereins], [Anschrift], [E-Mail-Adresse]
+Ansprechpartner für Datenschutz: [Name, E-Mail]
+
+Wofür wir die Spieler-Akte nutzen
+Die Spieler-Akte dient der sportlichen Betreuung und Entwicklung unserer Spielerinnen und Spieler: Planung von Training und Spielen, Auswertung von Spielstatistiken, Steuerung der Trainingsbelastung und Rücksicht auf Verletzungen.
+
+Welche Daten gespeichert werden
+- Stammdaten: Name, Geburtsdatum, Trikotnummer, Position, Größe, Gewicht, Schule, Wohnort, Porträtfoto
+- Kontaktdaten und Notfallkontakt
+- Spielstatistiken, Trainingsanwesenheit und Athletik-Tests
+- Angaben zu Belastung und Befinden (Wellness-Abfrage) sowie Verletzungen mit Grund und voraussichtlicher Ausfallzeit – das sind Gesundheitsdaten
+- Notizen, Feedback und Entwicklungspläne der Trainer
+
+Wer die Daten sieht
+Die Trainer des eigenen Teams und die sportliche Leitung des Vereins. Spielerinnen und Spieler sehen nur ihre eigenen Daten. Eine Weitergabe an Dritte findet nicht statt.
+
+Wo die Daten liegen
+Die Daten werden bei Google Firebase auf Servern in der EU gespeichert. Porträtfotos liegen beim Bilddienst Cloudinary. [Bitte prüfen: Serverstandort und Auftragsverarbeitungsvertrag]
+
+Wie lange die Daten gespeichert werden
+Bis zum Ende der Mitgliedschaft im Verein bzw. bis zum Ausscheiden aus dem Team, danach werden sie innerhalb von [Frist] gelöscht. Einträge zu Belastung und Befinden werden automatisch nach 6 Wochen gelöscht.
+
+Deine Rechte
+Du kannst jederzeit Auskunft über deine Daten verlangen, sie berichtigen oder löschen lassen und deine Einwilligung für die Zukunft widerrufen. Eine Nachricht an [E-Mail-Adresse] genügt.
+
+Minderjährige
+Bei Spielerinnen und Spielern unter 16 Jahren müssen die Erziehungsberechtigten zustimmen.`;
 const DEFAULT_TEST_TYPES = [
     { id: "sprint20", label: "Sprint 20m" },
     { id: "cmj", label: "Vertikalsprung (CMJ)" },
