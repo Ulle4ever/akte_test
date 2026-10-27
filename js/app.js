@@ -1595,10 +1595,18 @@ function SpielerAkte() {
     // Wurfstatistiken (fg/tp als Treffer/Versuche) - die reinen DBB-Scores-
     // Trefferzahlen 2-/3-Punkte-Koerbe sind dort redundant und sollen nicht
     // erscheinen, auch wenn sie club-weit als Statistik-Kategorie existieren.
-    const FULL_HIDDEN_STAT_LABELS = ["2-punkte-körbe", "3-punkte-körbe", "fouls", "fouls (pf)", "plus/minus"];
+    // Fouls und Plus/Minus liefern WBV-Excel und ProA-Boxscore mit - die bleiben.
+    const FULL_HIDDEN_STAT_LABELS = ["2-punkte-körbe", "3-punkte-körbe"];
     const displayStatCategories = isAbgespeckteAkte
         ? shownStatCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => ABGESPECKT_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0)
-        : shownStatCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => !FULL_HIDDEN_STAT_LABELS.includes(f.label.toLowerCase())) })).filter((cat) => cat.fields.length > 0);
+        : (() => {
+            const cats = shownStatCategories.map((cat) => ({ ...cat, fields: cat.fields.filter((f) => !FULL_HIDDEN_STAT_LABELS.includes(f.label.toLowerCase())) }));
+            // Plus/Minus liegt in "DBB Scores" - bei vollen Stats unter den normalen Werten zeigen
+            const extra = cats.find((c) => c.id === "dbbScores")?.fields || [];
+            if (!cats.some((c) => c.id === "normal"))
+                return cats.filter((cat) => cat.fields.length > 0);
+            return cats.filter((c) => c.id !== "dbbScores").map((c) => (c.id === "normal" ? { ...c, fields: [...c.fields, ...extra] } : c)).filter((cat) => cat.fields.length > 0);
+        })();
     function addStatCategory(label) {
         persistMeta({ statCategories: [...statCategories, { id: uid(), label, fields: [] }] });
     }
@@ -2065,7 +2073,7 @@ function SpielerAkte() {
                                     React.createElement("p", { className: "text-xs text-slate-400 uppercase tracking-wide mt-0.5" }, x.label)))))),
                             !isAbgespeckteAkte && playerStats.length > 0 && React.createElement("div", null,
                                 React.createElement(SectionLabel, null, "Details"),
-                                React.createElement("div", { className: "space-y-2 mt-1.5" }, shownStatCategories.filter((cat) => (isTrainer || cat.id !== "advanced") && cat.id !== "dbbScores").map((cat) => {
+                                React.createElement("div", { className: "space-y-2 mt-1.5" }, displayStatCategories.filter((cat) => (isTrainer || cat.id !== "advanced") && cat.id !== "dbbScores").map((cat) => {
                                     if (cat.fields.length === 0)
                                         return null;
                                     const isOpen = expandedCats.has(cat.id);
