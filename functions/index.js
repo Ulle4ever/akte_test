@@ -184,7 +184,7 @@ exports.deleteAccountAuth = onCall({ region: "europe-west1" }, async (request) =
     return { ok: true };
 });
 
-exports.dailyMonitoringReminder = onSchedule({ schedule: "0 18 * * *", timeZone: "Europe/Berlin" }, async () => {
+exports.dailyMonitoringReminder = onSchedule({ schedule: "0 18 * * *", timeZone: "Europe/Berlin", region: "europe-west1" }, async () => {
     const allPlayers = await loadAllPlayers();
     const weekKey = isoWeekKey(todayIso());
     const missing = [];

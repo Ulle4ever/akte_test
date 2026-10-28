@@ -203,7 +203,7 @@ Wer die Daten sieht
 Die Trainer des eigenen Teams und die sportliche Leitung des Vereins. Spielerinnen und Spieler sehen nur ihre eigenen Daten. Eine Weitergabe an Dritte findet nicht statt.
 
 Wo die Daten liegen
-Die Daten werden bei Google Firebase auf Servern in der EU gespeichert. Porträtfotos liegen beim Bilddienst Cloudinary. [Bitte prüfen: Serverstandort und Auftragsverarbeitungsvertrag]
+Die Daten der Akte werden bei Google Firebase auf Servern in der EU (Belgien/Niederlande) gespeichert und verarbeitet. Anmeldung und Push-Benachrichtigungen laufen über Google-Dienste, die auch Server in den USA nutzen; Google ist nach dem EU-US Data Privacy Framework zertifiziert. Fotos, Videos und Dateianhänge liegen beim Bilddienst Cloudinary. [Bitte prüfen: Serverstandort bei Cloudinary und Auftragsverarbeitungsverträge mit Google und Cloudinary]
 
 Wie lange die Daten gespeichert werden
 Bis zum Ende der Mitgliedschaft im Verein bzw. bis zum Ausscheiden aus dem Team, danach werden sie innerhalb von [Frist] gelöscht. Einträge zu Belastung und Befinden werden automatisch nach 6 Wochen gelöscht.
