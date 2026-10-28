@@ -1,7 +1,7 @@
 {
   "name": "functions",
   "description": "Push-Benachrichtigungen fuer die Spieler-Akte (neue Termine, Monitoring-Erinnerung)",
-  "engines": { "node": "20" },
+  "engines": { "node": "22" },
   "main": "index.js",
   "dependencies": {
     "firebase-admin": "^12.1.0",
